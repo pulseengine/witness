@@ -26,7 +26,7 @@ bundles, and tractable at AI-velocity authorship scale.
 
 | Version | Capability | Blocking question |
 |---|---|---|
-| v0.1 | Branch-level coverage. Instrument → run → report. Strict per-instruction counting. | Should the counter mechanism use globals + export, or a host-imported counter function? v0.1 default is globals + exported dump function. |
+| v0.1 | Branch-level coverage. Instrument → run → report. Strict per-instruction counting. | **Resolved:** v0.1 ships counters as exported mutable globals (`__witness_counter_<id>`), not a dump function. Any runtime that can read Wasm globals can extract coverage — no cooperation protocol required. |
 | v0.2 | MC/DC condition decomposition when DWARF-in-Wasm is present; strict fallback otherwise. | Decision-granularity formal definition — see below. |
 | v0.3 | rivet integration (coverage → requirement). In-toto predicate emission for sigil bundles. | rivet schema for coverage predicates; sigil predicate format. |
 | v0.4 | Variant-aware scope. Post-cfg, post-meld, post-loom measurement points. | How does witness interact with loom's translation-validation output? |
@@ -57,15 +57,22 @@ Three stages, each independently testable:
 
 Rewrites the Wasm module with `walrus`:
 
-1. Walk every function, enumerate every `br_if` / `br_table` / `if`.
-2. For each branch point, allocate a mutable i32 global initialized to 0.
-3. Insert the counter increment on the taken path. For `br_table`, insert
-   per-target increments (one global per table entry).
-4. Add an exported function `__witness_dump_counters` that serializes all
-   counter values into linear memory at a known offset and returns
-   `(ptr, len)`.
-5. Emit a side-channel manifest (`<input>.witness.json`) mapping each
-   branch ID to `(function_index, instruction_offset, kind)`.
+1. Walk every function, enumerate every `br_if` / `if-else` / `br_table`.
+2. For each branch point, allocate a mutable `i32` global initialised to 0
+   and export it as `__witness_counter_<id>`.
+3. Insert the counter increment on the taken path:
+   - **`br_if L`** → `local.tee $tmp; if (inc counter) end; local.get $tmp; br_if L`
+     — preserves stack shape; counter fires only when the branch is taken.
+   - **`if A else B end`** → prepend counter-increment to each arm sequence
+     (two counters per `IfElse`: then-taken and else-taken).
+   - **`br_table`** → single "executed" counter inserted immediately before
+     the instruction. Per-target counting is v0.2.
+4. Emit a side-channel manifest (`<output>.witness.json`) mapping each
+   branch id to `(function_index, instr_index, kind, seq_debug)`.
+
+Hosts iterate module exports and read every global whose name starts with
+`__witness_counter_`. No module cooperation, no linear-memory serialisation,
+no multi-value return.
 
 **Semantic preservation invariant:** the instrumented module produces the
 same observable output as the original for every input, modulo the dump
@@ -74,16 +81,18 @@ interpreter.
 
 ### run
 
-Spawns the harness command with `WITNESS_MODULE` pointing at the
-instrumented module. The harness is responsible for:
+v0.1 embeds `wasmtime` and runs the module directly. The runner:
 
-- Loading the module.
-- Running the tests (calling exports as the test suite defines).
-- Calling `__witness_dump_counters` after tests complete.
-- Writing the dump to a path the runner can locate.
+1. Loads the instrumented module and its manifest.
+2. Optionally calls `_start` (WASI "command" convention).
+3. Invokes zero or more `--invoke <export>` functions in order (no-argument
+   exports only in v0.1; parameterised invocations are v0.2).
+4. Iterates every export matching `__witness_counter_<id>` and reads each
+   global's final value.
+5. Pairs hit counts with manifest entries and emits the raw run JSON.
 
-The runner reads the dump, joins with the manifest, and emits the raw
-run JSON.
+Subprocess-harness execution (v0.2) will add `--harness <cmd>` as the
+escape hatch for modules that need a richer runtime than witness embeds.
 
 ### report
 

@@ -107,11 +107,15 @@ command; get a coverage report keyed to `(module, function, offset)` out.
 The tool is the empirical backstop for an argument made across three blog
 posts in the PulseEngine arc:
 
-1. **[Spec-driven development is half the loop](https://pulseengine.eu/blog/spec-driven-development-is-half-the-loop/)** — oracle-gated agents downstream of the spec, mechanical instruments at every verification layer, MBSE driving the build.
-2. **MC/DC for AI-authored Rust is tractable — the variant-pruning argument** (pulseengine.eu `content/blog/2026-04-24-variant-pruning-rust-mcdc.md`) — five layers of variant pruning (requirements → cargo features → cfg → type system → match arms) collapse the MC/DC burden to what one shipped variant actually exposes. Wasm extends the five-layer model: once the module exists, pattern matching has already lowered to `br_if` / `br_table`, cfg has elided dead code, and type-state has resolved.
-3. **witness announcement** (pulseengine.eu `content/blog/2026-04-25-witness-wasm-mcdc.md`) — the tool that turns the argument from prose to measurement.
+1. **[Spec-driven development is half the loop](https://pulseengine.eu/blog/spec-driven-development-is-half-the-loop/)** (shipped) — oracle-gated agents downstream of the spec, mechanical instruments at every verification layer, MBSE driving the build.
+2. **MC/DC for AI-authored Rust is tractable — the variant-pruning argument** (planned, pulseengine.eu `content/blog/2026-04-24-variant-pruning-rust-mcdc.md`) — five layers of variant pruning (requirements → cargo features → cfg → type system → match arms) collapse the MC/DC burden to what one shipped variant actually exposes. Wasm extends the five-layer model: once the module exists, pattern matching has already lowered to `br_if` / `br_table`, cfg has elided dead code, and type-state has resolved.
+3. **witness announcement** (planned, pulseengine.eu `content/blog/2026-04-25-witness-wasm-mcdc.md`) — the tool that turns the argument from prose to measurement.
 
 The core tracking issue is [pulseengine.eu #29](https://github.com/pulseengine/pulseengine.eu/issues/29).
+
+The parent post of the blog arc — *[Overdoing the verification chain](https://pulseengine.eu/blog/overdoing-the-verification-chain/)* (draft) — is the
+layering thesis witness must honour. See `docs/research/overdo-alignment.md`
+for the alignment brief (C1–C7 design constraints extracted from that post).
 
 ### The C-macro precedent
 
@@ -136,7 +140,7 @@ The roadmap (`DESIGN.md`) runs v0.1 → v1.0. Do not mix versions:
 
 | Version | Ships |
 |---|---|
-| v0.1 | Strict per-`br_if` / per-`br_table` branch coverage. Instrument, run, report. No MC/DC condition decomposition yet. No rivet integration. No sigil predicate emission. |
+| v0.1 | Strict per-`br_if` / per-`if-else` branch coverage and "executed" counting for `br_table`. Instrument, run, report. Counter values are exposed via exported mutable globals (`__witness_counter_<id>`), not via a dump function — so any runtime that can read Wasm globals can extract coverage without the module-under-test cooperating. Run-phase uses embedded wasmtime (subprocess-harness is v0.2). No MC/DC condition decomposition yet. No rivet integration. No sigil predicate emission. |
 | v0.2 | DWARF-informed condition decomposition. Strict fallback. Short paper documenting the decision-granularity algorithm. |
 | v0.3 | rivet evidence format. in-toto predicate format for sigil bundles. |
 | v0.4 | Post-cfg / post-meld / post-loom measurement points. Consume loom's translation-validation output. |
@@ -207,12 +211,12 @@ See `DESIGN.md` for the full treatment and the references.
 
 Prior posts in the pulseengine.eu arc that set up this work:
 
-- [Formal verification just became practical](https://pulseengine.eu/blog/formal-verification-ai-agents/)
-- [What comes after test suites](https://pulseengine.eu/blog/what-comes-after-test-suites/)
-- *Overdoing the verification chain — and mapping it to six safety domains* (draft)
-- [Spec-driven development is half the loop](https://pulseengine.eu/blog/spec-driven-development-is-half-the-loop/)
-- *MC/DC for AI-authored Rust is tractable — the variant-pruning argument* (draft)
-- *witness — MC/DC for the WebAssembly component model* (draft, will be updated when v0.1 ships)
+- [Formal verification just became practical](https://pulseengine.eu/blog/formal-verification-ai-agents/) (shipped)
+- [What comes after test suites](https://pulseengine.eu/blog/what-comes-after-test-suites/) (shipped)
+- *Overdoing the verification chain — and mapping it to six safety domains* (draft, `draft = true` in the pulseengine.eu repo)
+- [Spec-driven development is half the loop](https://pulseengine.eu/blog/spec-driven-development-is-half-the-loop/) (shipped)
+- *MC/DC for AI-authored Rust is tractable — the variant-pruning argument* (planned, not yet written)
+- *witness — MC/DC for the WebAssembly component model* (planned, will be written when v0.1 ships)
 
 ## Repository conventions
 

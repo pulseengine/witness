@@ -42,6 +42,19 @@ pub enum Error {
         source: serde_json::Error,
     },
 
+    #[error("manifest file malformed at {path}")]
+    Manifest {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error("wasm runtime error: {0}")]
+    Runtime(#[source] anyhow::Error),
+
+    #[error("instrumentation error: {0}")]
+    Instrument(String),
+
     #[error("io error")]
     Io(#[from] std::io::Error),
 

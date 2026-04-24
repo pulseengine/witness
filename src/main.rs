@@ -35,17 +35,24 @@ enum Command {
         output: PathBuf,
     },
 
-    /// Execute an instrumented module against a test harness and collect counters.
+    /// Execute an instrumented module and collect counters via an embedded
+    /// wasmtime runtime.
     Run {
-        /// Shell command that runs the test harness against the instrumented module.
-        #[arg(long)]
-        harness: String,
         /// Path to the instrumented module.
-        #[arg(long)]
         module: PathBuf,
+        /// Path to the branch manifest (defaults to `<module>.witness.json`).
+        #[arg(long)]
+        manifest: Option<PathBuf>,
         /// Path to write the raw counter data (JSON).
         #[arg(short, long, default_value = "witness-run.json")]
         output: PathBuf,
+        /// Export to call (no arguments, any number of return values).
+        /// May be repeated; exports are invoked in the order given.
+        #[arg(long = "invoke")]
+        invoke: Vec<String>,
+        /// Call the `_start` WASI entry-point before `--invoke` targets.
+        #[arg(long)]
+        call_start: bool,
     },
 
     /// Produce a coverage report from collected counter data.
@@ -75,11 +82,29 @@ fn main() -> Result<()> {
         Command::Instrument { input, output } => {
             witness::instrument::instrument_file(&input, &output)?;
         }
-        Command::Run { harness, module, output } => {
-            witness::run::run_harness(&harness, &module, &output)?;
+        Command::Run {
+            module,
+            manifest,
+            output,
+            invoke,
+            call_start,
+        } => {
+            let manifest =
+                manifest.unwrap_or_else(|| witness::instrument::Manifest::path_for(&module));
+            let options = witness::run::RunOptions {
+                module: &module,
+                manifest,
+                output: &output,
+                invoke,
+                call_start,
+            };
+            witness::run::run_module(&options)?;
         }
         Command::Report { input, format } => {
             let report = witness::report::from_run_file(&input)?;
+            // SAFETY-REVIEW: CLI's job is to write the report to stdout;
+            // `println!` is the intended output channel for end users.
+            #[allow(clippy::print_stdout)]
             match format {
                 ReportFormat::Text => println!("{}", report.to_text()),
                 ReportFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
