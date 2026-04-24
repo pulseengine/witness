@@ -103,13 +103,13 @@ pub fn run_module(options: &RunOptions<'_>) -> Result<()> {
         .map_err(|e| Error::Runtime(e.into()))?;
 
     let mut invoked: Vec<String> = Vec::new();
-    if options.call_start {
-        if let Some(start) = instance.get_func(&mut store, "_start") {
-            start
-                .call(&mut store, &[], &mut [])
-                .map_err(|e| Error::Runtime(e.into()))?;
-            invoked.push("_start".to_string());
-        }
+    if options.call_start
+        && let Some(start) = instance.get_func(&mut store, "_start")
+    {
+        start
+            .call(&mut store, &[], &mut [])
+            .map_err(|e| Error::Runtime(e.into()))?;
+        invoked.push("_start".to_string());
     }
 
     for name in &options.invoke {
