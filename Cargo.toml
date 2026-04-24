@@ -1,0 +1,52 @@
+[package]
+name = "witness"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "MC/DC-style branch coverage for WebAssembly components"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/pulseengine/witness"
+homepage = "https://pulseengine.eu"
+readme = "README.md"
+keywords = ["wasm", "webassembly", "coverage", "mcdc", "safety-critical"]
+categories = ["development-tools::testing", "wasm"]
+authors = ["Ralf Anton Beier"]
+
+[dependencies]
+# Wasm AST manipulation — instruments br_if/br_table/if with counters.
+walrus = "0.24"
+
+# CLI.
+clap = { version = "4", features = ["derive"] }
+
+# Error handling.
+anyhow = "1"
+thiserror = "2"
+
+# Serialization for coverage reports + future rivet predicate emission.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging / tracing.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# Parse inline Wasm text for tests.
+wat = "1"
+# Golden-output test assertions.
+insta = { version = "1", features = ["yaml"] }
+
+[[bin]]
+name = "witness"
+path = "src/main.rs"
+
+[lib]
+name = "witness"
+path = "src/lib.rs"
+
+[profile.release]
+# Small binary, no debug symbols in release.
+strip = true
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,87 @@
+artifacts:
+  - id: FEAT-001
+    type: feature
+    title: v0.1 — branch-level coverage on Wasm
+    status: draft
+    description: >
+      CLI with instrument / run / report subcommands. Strict per-instruction
+      counting at br_if, br_table, if. No MC/DC decomposition yet. First
+      empirical deliverable behind the variant-pruning argument.
+    tags: [v0.1]
+    fields:
+      phase: phase-1
+    links:
+      - type: satisfies
+        target: REQ-001
+      - type: satisfies
+        target: REQ-002
+      - type: satisfies
+        target: REQ-003
+      - type: satisfies
+        target: REQ-004
+
+  - id: FEAT-002
+    type: feature
+    title: v0.2 — MC/DC condition decomposition
+    status: draft
+    description: >
+      DWARF-informed reconstruction of source-level decisions from Wasm
+      br_if sequences. Strict-per-br_if fallback when DWARF absent.
+      Deserves an accompanying short paper documenting the decision-
+      granularity algorithm and its soundness.
+    tags: [v0.2]
+    fields:
+      phase: phase-2
+    links:
+      - type: satisfies
+        target: REQ-005
+      - type: satisfies
+        target: REQ-006
+
+  - id: FEAT-003
+    type: feature
+    title: v0.3 — rivet and sigil integration
+    status: draft
+    description: >
+      Coverage reports emitted as rivet evidence (requirement-to-test links)
+      and as in-toto predicates that sigil attestation bundles can carry.
+    tags: [v0.3, rivet, sigil]
+    fields:
+      phase: phase-3
+    links:
+      - type: satisfies
+        target: REQ-007
+      - type: satisfies
+        target: REQ-008
+
+  - id: FEAT-004
+    type: feature
+    title: v0.4 — variant-aware measurement across the pipeline
+    status: draft
+    description: >
+      Support post-cfg, post-meld, post-loom measurement points. Consume
+      loom's translation-validation output to compose coverage across
+      transformation layers.
+    tags: [v0.4, pipeline]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-009
+      - type: satisfies
+        target: REQ-010
+
+  - id: FEAT-005
+    type: feature
+    title: v1.0 — Check-It qualification artifact
+    status: draft
+    description: >
+      Coverage attestation emitted as a checkable artifact. DO-330
+      qualification effort moves from "qualify witness" (infeasible) to
+      "qualify a small independent checker" (tractable).
+    tags: [v1.0, qualification]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-011

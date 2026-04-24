@@ -1,0 +1,19 @@
+rivet-cli: 0.4.3
+template-version: 1
+scaffolded-at: 2026-04-24T05:09:16Z
+files:
+- path: .rivet/context/review-roles.yaml
+  from-template: builtin:review-roles.yaml
+  scaffolded-sha: c8dfad24497d1c183773a9b41c441f58bb1849ea9987301bd8800a6de46fe86f
+- path: .rivet/context/risk-tolerance.yaml
+  from-template: builtin:risk-tolerance.yaml
+  scaffolded-sha: 2553029f6b93046771ae55f5f2954372eeb70ae29d4544c62397e01e3af9164c
+- path: .rivet/context/domain-glossary.md
+  from-template: builtin:domain-glossary.md
+  scaffolded-sha: 7697028833650453a89d705cb559247939429f46f18fb1a4ddec038c866e39b1
+- path: .rivet/agents/rivet-rule.md
+  from-template: builtin:rivet-rule.md
+  scaffolded-sha: c43260afd233e3805f53db3016e21c5a6fd4e9927c65ff28d72f25e19261bcc0
+scaffolded-from:
+  templates-version: 1
+  schemas: {}

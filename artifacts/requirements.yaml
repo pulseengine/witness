@@ -1,0 +1,168 @@
+artifacts:
+  # -------------------------------------------------------------------------
+  # v0.1 — branch-level coverage on WebAssembly
+  # -------------------------------------------------------------------------
+  - id: REQ-001
+    type: requirement
+    title: Instrument Wasm modules with branch counters
+    status: draft
+    description: >
+      The system shall rewrite a .wasm module to count the number of times
+      each br_if, br_table, and if instruction is taken during execution.
+      The instrumented module shall be semantically equivalent to the
+      original module for every well-formed input, modulo the coverage
+      dump export.
+    tags: [v0.1, core, instrumentation]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-002
+    type: requirement
+    title: Execute instrumented module against a test harness
+    status: draft
+    description: >
+      The system shall provide a command-line interface that accepts a shell
+      command as the test harness and spawns it against an instrumented
+      Wasm module, collecting counter data after the harness completes.
+    tags: [v0.1, core, runtime]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-003
+    type: requirement
+    title: Emit branch-coverage report
+    status: draft
+    description: >
+      The system shall produce a coverage report keyed to
+      (module, function, instruction offset) for each branch point, in
+      both human-readable text and machine-readable JSON formats.
+    tags: [v0.1, core, reporting]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-004
+    type: requirement
+    title: Semantic preservation under instrumentation
+    status: draft
+    description: >
+      For any well-formed Wasm module M and any input I, the observable
+      output of the instrumented module M' on input I shall be identical
+      to the observable output of M on input I, with the exception of the
+      __witness_dump_counters export and its side-effectful counter updates.
+    tags: [v0.1, invariant, correctness]
+    fields:
+      priority: must
+      category: non-functional
+
+  # -------------------------------------------------------------------------
+  # v0.2 — MC/DC condition decomposition
+  # -------------------------------------------------------------------------
+  - id: REQ-005
+    type: requirement
+    title: MC/DC condition decomposition when DWARF is present
+    status: draft
+    description: >
+      When DWARF-in-Wasm information is available in the module, the system
+      shall reconstruct source-level decisions from sequences of br_if
+      instructions and report MC/DC satisfaction at the decision level.
+      Falls back to the strict per-br_if interpretation when DWARF is
+      absent.
+    tags: [v0.2, mcdc]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-006
+    type: requirement
+    title: Decision-granularity algorithm shall be documented and sound
+    status: draft
+    description: >
+      The algorithm used for reconstructing source-level decisions from
+      Wasm br_if sequences shall be specified in DESIGN.md and accompanied
+      by a soundness argument relative to source-level MC/DC. See the
+      open-research section of DESIGN.md.
+    tags: [v0.2, mcdc, research]
+    fields:
+      priority: must
+      category: non-functional
+
+  # -------------------------------------------------------------------------
+  # v0.3 — ecosystem integration (rivet, sigil)
+  # -------------------------------------------------------------------------
+  - id: REQ-007
+    type: requirement
+    title: Emit coverage as rivet-compatible evidence
+    status: draft
+    description: >
+      The system shall emit coverage reports in a format that rivet can
+      consume as requirement-to-test evidence, linking coverage data to
+      rivet artifact IDs via source mapping.
+    tags: [v0.3, rivet]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-008
+    type: requirement
+    title: Emit coverage as in-toto predicate for sigil
+    status: draft
+    description: >
+      The system shall emit coverage reports in the in-toto attestation
+      predicate format so sigil can carry them in signed attestation
+      bundles alongside other per-transformation predicates.
+    tags: [v0.3, sigil, attestation]
+    fields:
+      priority: must
+      category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.4 — variant-aware scope and pipeline integration
+  # -------------------------------------------------------------------------
+  - id: REQ-009
+    type: requirement
+    title: Measure coverage at any pipeline stage
+    status: draft
+    description: >
+      The system shall support measuring coverage on Wasm at any stage of
+      the PulseEngine pipeline — post-rustc, post-meld fusion, post-loom
+      optimization — with coverage reports scoped to the measurement point.
+    tags: [v0.4, pipeline, variant]
+    fields:
+      priority: should
+      category: functional
+
+  - id: REQ-010
+    type: requirement
+    title: Interoperate with loom translation-validation output
+    status: draft
+    description: >
+      When loom emits translation-validation evidence for a Wasm
+      transformation, the system shall accept that evidence as a semantic
+      equivalence proof between pre- and post-transformation modules, so
+      coverage measurements across levels compose into a single audit
+      argument.
+    tags: [v0.4, loom, translation-validation]
+    fields:
+      priority: should
+      category: functional
+
+  # -------------------------------------------------------------------------
+  # v1.0 — qualification under DO-330 via the Check-It pattern
+  # -------------------------------------------------------------------------
+  - id: REQ-011
+    type: requirement
+    title: Emit Check-It-pattern qualification artifact
+    status: draft
+    description: >
+      The system shall emit a checkable coverage attestation containing
+      sufficient information for a small, independently qualified checker
+      to validate the coverage claim without re-running the instrumentation.
+      The checker rather than the emitter is what requires DO-330
+      qualification.
+    tags: [v1.0, qualification, do-330]
+    fields:
+      priority: must
+      category: functional

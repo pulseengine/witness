@@ -1,0 +1,144 @@
+artifacts:
+  - id: DEC-001
+    type: design-decision
+    title: Use walrus for Wasm AST rewriting in v0.1
+    status: draft
+    description: >
+      walrus provides an ergonomic mutate-and-serialize API for the Wasm
+      module structure, and is maintained under the Rust-and-WebAssembly
+      Working Group.
+    rationale: >
+      v0.1 needs to move fast; walrus has the cleanest high-level mutation
+      API in the Rust Wasm ecosystem. Qualifying a lower-level alternative
+      now would cost weeks we do not yet need to spend.
+    alternatives: >
+      wasm-tools (lower-level, tracks the current spec more tightly); writing
+      raw bytes against wasmparser. Both were considered; walrus wins on
+      ergonomics for the v0.1 scope. Revisit if walrus falls out of
+      maintenance or wasm-tools gains higher-level mutation ergonomics.
+    tags: [v0.1, architecture]
+    links:
+      - type: satisfies
+        target: REQ-001
+
+  - id: DEC-002
+    type: design-decision
+    title: v0.1 reports strict per-instruction branch coverage, not MC/DC
+    status: draft
+    description: >
+      v0.1 counts each br_if, br_table target, and if instruction as a
+      separate decision. This is NOT MC/DC in the condition-decomposition
+      sense; it is branch coverage.
+    rationale: >
+      The condition-decomposition work depends on DWARF-in-Wasm parsing and
+      is scoped to v0.2. Shipping strict coverage first gets empirical
+      grounding behind the variant-pruning argument without blocking on
+      DWARF tooling maturity. Each layer of ambition ships independently.
+    alternatives: >
+      Block v0.1 on DWARF-informed reconstruction — rejected as too slow.
+      Emit only condition-level coverage without branch-level — rejected
+      because branch-level is useful on its own and simpler to qualify.
+    tags: [v0.1, mcdc, scope]
+    links:
+      - type: satisfies
+        target: REQ-003
+      - type: constrained-by
+        target: REQ-005
+
+  - id: DEC-003
+    type: design-decision
+    title: Counter strategy — mutable globals + exported dump function
+    status: draft
+    description: >
+      Instrumented module uses a mutable i32 global per branch point and
+      exports __witness_dump_counters which serializes counter values into
+      linear memory and returns (ptr, len).
+    rationale: >
+      No host cooperation required during execution — works with any
+      runtime that can call exports. Minimal performance overhead in the
+      hot path (one i32 increment per branch hit). The dump export means
+      the runner can collect counter data after the harness completes,
+      regardless of runtime.
+    alternatives: >
+      Host-imported counter function (Wasm calls into host for each branch)
+      — rejected because it requires every runtime to cooperate. Memory-
+      resident counter table with host-visible offset — possible but more
+      fragile under linear-memory growth.
+    tags: [v0.1, instrumentation]
+    links:
+      - type: satisfies
+        target: REQ-001
+
+  - id: DEC-004
+    type: design-decision
+    title: Runtime choice — target wasmtime for v0.1 harness default
+    status: draft
+    description: >
+      witness does not ship a Wasm runtime. For the test-harness default,
+      v0.1 documents wasmtime as the path of least resistance.
+    rationale: >
+      The Rust ecosystem toolchain (cargo test --target wasm32-wasi)
+      integrates most cleanly with wasmtime. kiln and other runtimes can
+      be substituted by the caller through the --harness argument —
+      witness is runtime-agnostic in principle, runtime-opinionated in
+      its documented defaults.
+    alternatives: >
+      Bundle kiln directly (rejected: couples witness to a specific
+      runtime). Require a specific runtime (rejected: painful for users
+      with existing test setups). Build our own minimal runtime (rejected:
+      out of scope entirely).
+    tags: [v0.1, runtime]
+    links:
+      - type: satisfies
+        target: REQ-002
+
+  - id: DEC-005
+    type: design-decision
+    title: Complementary to Rust-level MC/DC, not a replacement
+    status: draft
+    description: >
+      When Ferrous/DLR Rust-level MC/DC tooling lands under the 2026 Rust
+      Project Goal, witness does not become obsolete.
+    rationale: >
+      Different measurement points have different blind spots; translation
+      validation bridges them; coverage at both levels is additive evidence
+      consistent with DO-178C's dual source/object-code coverage discipline
+      since 1992. The overdo principle — adopt both, do not pick one —
+      applies. Framing witness as competitive would be a category error.
+    alternatives: >
+      Position witness as "the" MC/DC-for-Rust story, waiting for Ferrous/DLR
+      to become irrelevant — rejected because the Rust-level tool catches
+      source-level bugs witness cannot see; they compose rather than
+      compete.
+    tags: [architecture, ecosystem]
+    links:
+      - type: satisfies
+        target: REQ-005
+
+  - id: DEC-006
+    type: design-decision
+    title: Decision-granularity at Wasm level is an open research question
+    status: draft
+    description: >
+      Short-circuit evaluation at Rust source (a && b && c) compiles to
+      a sequence of br_if instructions. MC/DC's condition-independence
+      requirement needs a grouping rule to reconstruct source-level
+      decisions from br_if sequences.
+    rationale: >
+      Two honest interpretations exist. Strict per-br_if is straightforward
+      to implement, easy to qualify, and is what v0.1 uses. DWARF-informed
+      reconstruction preserves the source-level condition concept and
+      maps more cleanly onto pre-Wasm MC/DC practice, but depends on
+      mature DWARF-in-Wasm tooling. v0.2 implements both with strict as
+      the fallback; the reconstruction algorithm and its soundness
+      argument deserve a short paper.
+    alternatives: >
+      Adopt Ferrous/DLR's Rust-source mapping directly — rejected because
+      it requires mapping back through rustc's lowering, which is the hard
+      problem their paper is solving. Mandate an explicit grouping token
+      at the source (compiler attribute or proc-macro) — rejected as too
+      invasive on user code.
+    tags: [research, mcdc]
+    links:
+      - type: satisfies
+        target: REQ-006

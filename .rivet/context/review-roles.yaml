@@ -1,0 +1,26 @@
+# .rivet/context/review-roles.yaml
+#
+# Maps reviewer-group names referenced in your schemas' agent-pipelines
+# blocks (via `{context.review-roles.X}` placeholders) to concrete
+# reviewers in your organisation.
+#
+# This file is PROJECT-OWNED. Rivet scaffolds it once and never rewrites
+# it. Add / remove roles as your pipelines require them.
+#
+# Each role is a list of identifiers — the shape (GitHub handles, teams,
+# emails, Slack group IDs) is a project-level decision. Every downstream
+# closure PR will tag the listed reviewers.
+
+dev-team:
+  # TODO: replace with actual reviewers for this project.
+  # Example formats:
+  #   GitHub handles:   ["@alice", "@bob"]
+  #   GitHub team ref:  ["@yourorg/dev-leads"]
+  #   Email addresses:  ["alice@example.com"]
+  - "{{PLACEHOLDER: list at least one reviewer or mark accepted-empty}}"
+
+qa-lead:
+  - "{{PLACEHOLDER: required for safety-critical schemas (ASPICE, 26262)}}"
+
+safety-officer:
+  - "{{PLACEHOLDER: required for ISO 26262 ASIL decomposition closures}}"

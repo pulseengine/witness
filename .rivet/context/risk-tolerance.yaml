@@ -1,0 +1,15 @@
+# .rivet/context/risk-tolerance.yaml
+#
+# Integrity-level thresholds for coverage/evidence oracles in your
+# project. Schemas reference these via `{context.risk-tolerance.X}`.
+#
+# PROJECT-OWNED. Rivet scaffolds once; edit freely thereafter.
+
+mc-dc-asil-d: 95.0       # ISO 26262-6 Table 12 row MC/DC
+mc-dc-asil-c: 85.0
+branch-asil-b: 70.0
+statement-asil-a: 50.0
+
+# Add / remove keys to match the oracles your schemas actually use.
+# If your schemas don't reference coverage thresholds at all, this file
+# can stay minimal but should still be present.
