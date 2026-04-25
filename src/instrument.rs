@@ -43,19 +43,27 @@
 
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walrus::ir::{
     BinaryOp, Binop, BrIf, Const, GlobalGet, GlobalSet, IfElse, Instr, InstrSeqId, InstrSeqType,
     LocalGet, LocalTee, Value,
 };
-use walrus::{ConstExpr, FunctionId, GlobalId, LocalId, Module, ValType};
+use walrus::{ConstExpr, FunctionBuilder, FunctionId, GlobalId, LocalId, Module, ValType};
 
-/// Manifest schema version. Bump on breaking changes; v0.1 pins to "1".
-pub const MANIFEST_SCHEMA_VERSION: &str = "1";
+/// Manifest schema version. v0.1 pinned to "1"; v0.2 bumps to "2" for
+/// per-target `br_table` entries (`target_index` field). Old v0.1 manifests
+/// are still readable; new v0.2 manifests advertise schema "2".
+pub const MANIFEST_SCHEMA_VERSION: &str = "2";
 
 /// Exported-global name prefix. Hosts discover counters by iterating exports
 /// and matching on this prefix; the suffix is the branch id as decimal.
 pub const COUNTER_EXPORT_PREFIX: &str = "__witness_counter_";
+
+/// Helper-function name prefix for the `br_table` per-target dispatcher
+/// (DEC-008). Each `br_table` site gets one helper, named with the base
+/// branch id of its first target.
+pub const BRTABLE_HELPER_PREFIX: &str = "__witness_brtable_";
 
 /// Kind of branch a counter is counting.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,9 +75,13 @@ pub enum BranchKind {
     IfThen,
     /// The `else` arm of an `if/else` — counter fires when the alternative runs.
     IfElse,
-    /// A `br_table` — counter fires once per execution, regardless of target.
-    /// Per-target counting is v0.2.
-    BrTable,
+    /// A specific `br_table` target arm. The target index is on the
+    /// `BranchEntry`. Counter fires when the table dispatches to that arm.
+    /// Replaces v0.1's single-counter `BrTable` kind.
+    BrTableTarget,
+    /// The default arm of a `br_table` (selector >= number of explicit
+    /// targets). Counter fires when the default branch is taken.
+    BrTableDefault,
 }
 
 /// One branch point in the original module. `instr_index` is the position
@@ -81,6 +93,10 @@ pub struct BranchEntry {
     pub function_name: Option<String>,
     pub kind: BranchKind,
     pub instr_index: u32,
+    /// For `BrTableTarget` entries: which target index (0..N) this counter
+    /// covers. `None` for non-`br_table` kinds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_index: Option<u32>,
     /// Walrus `InstrSeqId` encoded as a debug string — diagnostic only.
     pub seq_debug: String,
 }
@@ -164,33 +180,212 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
                 function_name: scan.function_name.clone(),
                 kind: branch.kind,
                 instr_index: branch.instr_index,
+                target_index: branch.target_index,
                 seq_debug: format!("{:?}", branch.seq_id),
             });
         }
     }
 
+    // Phase 2: build a `__witness_brtable_<n>` helper function for every
+    // br_table site. Helpers must be added before the per-function rewrite
+    // because rewrite_function holds a `&mut LocalFunction` that conflicts
+    // with module.funcs mutations.
+    let helpers = build_brtable_helpers(module, &scans, &counter_globals)?;
+
     let mut cursor: usize = 0;
     for scan in scans.into_iter() {
         let len = scan.branches.len();
-        // SAFETY-REVIEW: `cursor` and `len` are both <= counter_globals.len()
-        // by construction — counter_globals is built in the exact iteration
-        // above with one element per BranchSite across scans.
         let end = cursor.saturating_add(len);
         let slice = counter_globals
             .get(cursor..end)
             .ok_or_else(|| Error::Instrument("counter slice out of range".to_string()))?
             .to_vec();
-        rewrite_function(module, scan.function_id, &scan.branches, &slice)?;
+        let scan_offset = cursor;
+        rewrite_function(
+            module,
+            scan.function_id,
+            &scan.branches,
+            &slice,
+            scan_offset,
+            &helpers,
+        )?;
         cursor = end;
     }
 
     Ok(entries)
 }
 
+/// Build `__witness_brtable_<n>` helper functions, one per br_table site.
+/// Returns a map keyed by absolute counter index of the FIRST counter in
+/// each br_table group, to the helper FunctionId.
+///
+/// SAFETY-REVIEW: `i`, `j`, `global_idx`, `group_start`, `n_total`,
+/// `abs_start` are all bounded by `scans.len()` and `counter_globals.len()`,
+/// which themselves are bounded by `usize::MAX` for any realistic Wasm
+/// module. The arithmetic is wraparound-safe via `saturating_add` /
+/// `saturating_sub`; indexing uses `.get()` / `.ok_or_else()` to surface
+/// out-of-range as an instrumentation error rather than panicking.
+#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+fn build_brtable_helpers(
+    module: &mut Module,
+    scans: &[FunctionScan],
+    counter_globals: &[GlobalId],
+) -> Result<HashMap<usize, FunctionId>> {
+    let mut helpers: HashMap<usize, FunctionId> = HashMap::new();
+    let mut helper_seq: u32 = 0;
+    let mut global_idx: usize = 0;
+
+    for scan in scans {
+        let mut i = 0;
+        while i < scan.branches.len() {
+            let site = &scan.branches[i];
+            if site.kind == BranchKind::BrTableTarget {
+                let group_start = i;
+                let group_seq = site.seq_id;
+                let group_idx = site.instr_index;
+                let mut j = i;
+                while j < scan.branches.len()
+                    && scan.branches[j].seq_id == group_seq
+                    && scan.branches[j].instr_index == group_idx
+                {
+                    j = j.saturating_add(1);
+                }
+                let n_total = j.saturating_sub(group_start);
+                let abs_start = global_idx.saturating_add(group_start);
+                let abs_end = abs_start.saturating_add(n_total);
+                let group_globals: Vec<GlobalId> = counter_globals
+                    .get(abs_start..abs_end)
+                    .ok_or_else(|| {
+                        Error::Instrument("br_table counter group out of range".to_string())
+                    })?
+                    .to_vec();
+                let helper_id = build_brtable_helper(module, &group_globals, helper_seq)?;
+                helpers.insert(abs_start, helper_id);
+                helper_seq = helper_seq.saturating_add(1);
+                i = j;
+            } else {
+                i = i.saturating_add(1);
+            }
+        }
+        global_idx = global_idx.saturating_add(scan.branches.len());
+    }
+
+    Ok(helpers)
+}
+
+/// Build a single helper function:
+///
+/// ```wat
+/// (func $__witness_brtable_n (param $sel i32) (result i32)
+///   ;; for each explicit target i in 0..N:
+///   local.get $sel
+///   i32.const i
+///   i32.eq
+///   if
+///     ;; counter[i] += 1
+///   end
+///   ;; default arm: selector >= N (unsigned)
+///   local.get $sel
+///   i32.const N
+///   i32.ge_u
+///   if
+///     ;; counter[N] += 1   (the default counter)
+///   end
+///   local.get $sel
+/// )
+/// ```
+fn build_brtable_helper(
+    module: &mut Module,
+    counters: &[GlobalId],
+    helper_seq: u32,
+) -> Result<FunctionId> {
+    if counters.is_empty() {
+        return Err(Error::Instrument(
+            "br_table helper requires at least the default counter".to_string(),
+        ));
+    }
+    let n_explicit = counters.len().saturating_sub(1);
+    let default_counter = *counters
+        .last()
+        .ok_or_else(|| Error::Instrument("br_table helper missing default counter".to_string()))?;
+    let n_explicit_i32 = i32::try_from(n_explicit)
+        .map_err(|_| Error::Instrument("br_table target count exceeds i32::MAX".to_string()))?;
+
+    let i32_ty = ValType::I32;
+    let mut builder = FunctionBuilder::new(&mut module.types, &[i32_ty], &[i32_ty]);
+    let selector_local = module.locals.add(i32_ty);
+
+    {
+        let mut body = builder.func_body();
+        for (i, &counter) in counters.iter().take(n_explicit).enumerate() {
+            let target_idx = i32::try_from(i).map_err(|_| {
+                Error::Instrument("br_table target index exceeds i32::MAX".to_string())
+            })?;
+            body.instr(Instr::LocalGet(LocalGet {
+                local: selector_local,
+            }));
+            body.instr(Instr::Const(Const {
+                value: Value::I32(target_idx),
+            }));
+            body.instr(Instr::Binop(Binop {
+                op: BinaryOp::I32Eq,
+            }));
+            body.if_else(
+                InstrSeqType::Simple(None),
+                |then| {
+                    counter_inc_into(then, counter);
+                },
+                |_else| {},
+            );
+        }
+        // Default arm: selector >= N (unsigned).
+        body.instr(Instr::LocalGet(LocalGet {
+            local: selector_local,
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(n_explicit_i32),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32GeU,
+        }));
+        body.if_else(
+            InstrSeqType::Simple(None),
+            |then| {
+                counter_inc_into(then, default_counter);
+            },
+            |_else| {},
+        );
+        // Return selector unchanged.
+        body.instr(Instr::LocalGet(LocalGet {
+            local: selector_local,
+        }));
+    }
+
+    let func_id = builder.finish(vec![selector_local], &mut module.funcs);
+    let export_name = format!("{BRTABLE_HELPER_PREFIX}{helper_seq}");
+    module.exports.add(&export_name, func_id);
+    Ok(func_id)
+}
+
+/// Append `counter += 1` to the given instruction-sequence builder.
+fn counter_inc_into(seq: &mut walrus::InstrSeqBuilder<'_>, counter: GlobalId) {
+    seq.instr(Instr::GlobalGet(GlobalGet { global: counter }));
+    seq.instr(Instr::Const(Const {
+        value: Value::I32(1),
+    }));
+    seq.instr(Instr::Binop(Binop {
+        op: BinaryOp::I32Add,
+    }));
+    seq.instr(Instr::GlobalSet(GlobalSet { global: counter }));
+}
+
 struct BranchSite {
     seq_id: InstrSeqId,
     instr_index: u32,
     kind: BranchKind,
+    /// For `BrTableTarget` sites only: which target index this counter
+    /// covers. `None` for non-`br_table` kinds and for `BrTableDefault`.
+    target_index: Option<u32>,
 }
 
 struct FunctionScan {
@@ -235,6 +430,7 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
                 seq_id,
                 instr_index: i,
                 kind: BranchKind::BrIf,
+                target_index: None,
             }),
             Instr::IfElse(IfElse {
                 consequent,
@@ -244,20 +440,36 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
                     seq_id,
                     instr_index: i,
                     kind: BranchKind::IfThen,
+                    target_index: None,
                 });
                 out.push(BranchSite {
                     seq_id,
                     instr_index: i,
                     kind: BranchKind::IfElse,
+                    target_index: None,
                 });
                 walk_collect(func, *consequent, out);
                 walk_collect(func, *alternative, out);
             }
-            Instr::BrTable(_) => out.push(BranchSite {
-                seq_id,
-                instr_index: i,
-                kind: BranchKind::BrTable,
-            }),
+            Instr::BrTable(bt) => {
+                // Per-target counters: one per explicit target plus one
+                // for the default arm (DEC-008 + REQ-013).
+                let n = u32::try_from(bt.blocks.len()).unwrap_or(u32::MAX);
+                for t in 0..n {
+                    out.push(BranchSite {
+                        seq_id,
+                        instr_index: i,
+                        kind: BranchKind::BrTableTarget,
+                        target_index: Some(t),
+                    });
+                }
+                out.push(BranchSite {
+                    seq_id,
+                    instr_index: i,
+                    kind: BranchKind::BrTableDefault,
+                    target_index: None,
+                });
+            }
             Instr::Block(b) => walk_collect(func, b.seq, out),
             Instr::Loop(l) => walk_collect(func, l.seq, out),
             _ => {}
@@ -265,11 +477,16 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
     }
 }
 
+/// `counter_offset` is the position of `sites[0]`'s counter within the
+/// global counter list — used to look up the right br_table helper from
+/// `helpers` (keyed by absolute counter index).
 fn rewrite_function(
     module: &mut Module,
     function_id: FunctionId,
     sites: &[BranchSite],
     counters: &[GlobalId],
+    counter_offset: usize,
+    helpers: &HashMap<usize, FunctionId>,
 ) -> Result<()> {
     let has_brif = sites.iter().any(|s| s.kind == BranchKind::BrIf);
     let brif_tmp: Option<LocalId> = if has_brif {
@@ -287,8 +504,8 @@ fn rewrite_function(
     };
 
     // Group sites by (seq_id, instr_index). IfElse emits two BranchSite
-    // entries at the same position (one IfThen, one IfElse) that we rewrite
-    // together.
+    // entries at the same position (one IfThen, one IfElse); BrTable emits
+    // N+1 entries (N targets + 1 default). We rewrite each group as one.
     let mut by_index: std::collections::BTreeMap<(InstrSeqId, u32), Vec<(usize, BranchKind)>> =
         std::collections::BTreeMap::new();
     for (idx, site) in sites.iter().enumerate() {
@@ -352,11 +569,17 @@ fn rewrite_function(
                 rewrite_ifelse(func, seq_id, at, then_counter, else_counter);
             }
             PeekKind::BrTable => {
+                // The first counter index in the group is the helper key.
                 let (idx_in_sites, _) = *group
                     .first()
                     .ok_or_else(|| Error::Instrument("empty br_table group".to_string()))?;
-                let counter = counter_at(idx_in_sites)?;
-                rewrite_brtable(func, seq_id, at, counter);
+                let absolute = counter_offset.saturating_add(idx_in_sites);
+                let helper = helpers.get(&absolute).copied().ok_or_else(|| {
+                    Error::Instrument(format!(
+                        "no br_table helper registered for counter offset {absolute}"
+                    ))
+                })?;
+                rewrite_brtable(func, seq_id, at, helper);
             }
         }
     }
@@ -445,19 +668,20 @@ fn rewrite_ifelse(
     }
 }
 
+/// Rewrite a `br_table` site by inserting `call $helper` immediately
+/// before it. The helper consumes the selector, increments the counter
+/// matching the selector's value (one of N target counters or the default
+/// counter), and pushes the selector back so the original `br_table`
+/// dispatches as before.
 fn rewrite_brtable(
     func: &mut walrus::LocalFunction,
     seq_id: InstrSeqId,
     index: usize,
-    counter: GlobalId,
+    helper: FunctionId,
 ) {
-    let increments = counter_inc_instrs(counter);
+    let call_instr = Instr::Call(walrus::ir::Call { func: helper });
     let instrs = &mut func.block_mut(seq_id).instrs;
-    for (offset, instr) in increments.into_iter().enumerate() {
-        // SAFETY-REVIEW: `offset` is <= 4 and `index` is in bounds.
-        let pos = index.saturating_add(offset);
-        instrs.insert(pos, (instr, Default::default()));
-    }
+    instrs.insert(index, (call_instr, Default::default()));
 }
 
 fn counter_inc_seq(func: &mut walrus::LocalFunction, counter: GlobalId) -> InstrSeqId {
@@ -544,7 +768,11 @@ mod tests {
     }
 
     #[test]
-    fn enumerates_br_table_as_one_branch() {
+    fn enumerates_br_table_as_per_target_plus_default() {
+        // Wasm `br_table` syntax: `br_table target0 target1 ... default`.
+        // `br_table 0 1 2` therefore has TWO explicit targets (labels 0, 1)
+        // and a default (label 2). Walrus exposes this as `bt.blocks =
+        // [target0, target1]` and `bt.default = label2`.
         let wat_src = r#"
             (module
               (func (export "f") (param i32)
@@ -559,8 +787,33 @@ mod tests {
         "#;
         let mut module = wat_to_module(wat_src);
         let entries = instrument_module(&mut module, "test").unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].kind, BranchKind::BrTable);
+        assert_eq!(
+            entries.len(),
+            3,
+            "2 explicit targets + 1 default = 3 entries"
+        );
+        let target_count = entries
+            .iter()
+            .filter(|e| e.kind == BranchKind::BrTableTarget)
+            .count();
+        let default_count = entries
+            .iter()
+            .filter(|e| e.kind == BranchKind::BrTableDefault)
+            .count();
+        assert_eq!(target_count, 2);
+        assert_eq!(default_count, 1);
+        let mut idx: Vec<u32> = entries
+            .iter()
+            .filter_map(|e| {
+                if e.kind == BranchKind::BrTableTarget {
+                    e.target_index
+                } else {
+                    None
+                }
+            })
+            .collect();
+        idx.sort_unstable();
+        assert_eq!(idx, vec![0, 1]);
     }
 
     #[test]

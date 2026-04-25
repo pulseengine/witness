@@ -197,7 +197,7 @@ mod tests {
                 hit(0, 1, BranchKind::IfThen, 0, "f"),
                 hit(1, 0, BranchKind::IfElse, 0, "f"),
                 hit(2, 3, BranchKind::BrIf, 1, "g"),
-                hit(3, 0, BranchKind::BrTable, 1, "g"),
+                hit(3, 0, BranchKind::BrTableDefault, 1, "g"),
             ],
         }
     }

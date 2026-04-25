@@ -1,26 +1,41 @@
 //! Run an instrumented Wasm module and collect coverage counters.
 //!
-//! # v0.1 strategy
+//! # Two execution modes
+//!
+//! ## Embedded wasmtime (default, since v0.1)
 //!
 //! witness embeds `wasmtime` and instantiates the instrumented module
 //! directly. For each invocation, it calls a user-specified export (the
 //! `--invoke` argument) and then iterates the module's exported globals
 //! that match the `__witness_counter_` prefix, reading each one's current
-//! value.
+//! value. No cooperation from the module-under-test required.
 //!
-//! This bypasses the "cooperation protocol" problem entirely: nothing about
-//! the module-under-test has to know about witness. The only observation
-//! surface is the Wasm global-export interface, which every conformant
-//! runtime supports.
+//! ## Subprocess harness (`--harness <cmd>`, since v0.2)
 //!
-//! # What v0.1 does NOT do
+//! When the embedded runtime is not enough — e.g. a `wasm-bindgen-test`
+//! suite running in Node, a custom WASI capability profile, or
+//! component-model modules — `--harness` spawns a subprocess and lets it
+//! drive the runtime. The harness's only cooperation cost is reading the
+//! counter snapshot at the end of its run and writing a JSON snapshot
+//! file to the path witness supplies via `WITNESS_OUTPUT`.
 //!
-//! - WASI-preview1/2 host imports are wired with a default context (stdio
-//!   inherited, no filesystem). For modules that need richer WASI, the v0.2
-//!   `--harness <cmd>` subprocess mode is the right escape hatch.
+//! Protocol (file-based handshake, see DEC-009):
+//!
+//! 1. witness sets three env vars before spawning the harness:
+//!    - `WITNESS_MODULE` — path to the instrumented `.wasm`
+//!    - `WITNESS_MANIFEST` — path to the `.witness.json` manifest
+//!    - `WITNESS_OUTPUT` — path the harness must write its snapshot to
+//! 2. The harness loads the module in its native runtime, runs tests, and
+//!    before exiting writes a snapshot JSON document of shape
+//!    `{"schema": "witness-harness-v1", "counters": {"<branch_id>": <hits>}}`.
+//! 3. witness joins the snapshot with the manifest and writes the
+//!    full run JSON to the user's `--output` path.
+//!
+//! # What v0.2 does NOT do
+//!
 //! - Component-model modules are not yet supported; only core modules.
 //! - Calling an export with arguments from the CLI is limited to no-argument
-//!   exports in v0.1. Parameterised invocations are v0.2.
+//!   exports in v0.2. Parameterised invocations remain a v0.3 concern.
 
 use crate::instrument::{BranchEntry, COUNTER_EXPORT_PREFIX, Manifest};
 use crate::{Error, Result};
@@ -72,16 +87,63 @@ pub struct RunOptions<'a> {
     pub module: &'a Path,
     pub manifest: PathBuf,
     pub output: &'a Path,
-    /// Exports to invoke, in order. Each export must take no parameters and
-    /// return no more than one value in v0.1.
+    /// Exports to invoke (embedded-runtime mode). Each export must take
+    /// no parameters and return zero or one value in v0.2. Ignored when
+    /// `harness` is `Some`.
     pub invoke: Vec<String>,
     /// If true, call `_start` automatically before any `invoke` entries
-    /// (the WASI "command" convention).
+    /// (the WASI "command" convention). Ignored when `harness` is `Some`.
     pub call_start: bool,
+    /// Subprocess harness command. When set, witness spawns this command
+    /// instead of running the module via embedded wasmtime. The harness
+    /// must read `WITNESS_MODULE` / `WITNESS_MANIFEST` and write a
+    /// counter snapshot to `WITNESS_OUTPUT`.
+    pub harness: Option<String>,
+}
+
+/// Counter snapshot the harness writes; the bridge format between
+/// subprocess harnesses and witness's run-record assembly.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct HarnessSnapshot {
+    pub schema: String,
+    pub counters: HashMap<String, u64>,
+}
+
+impl HarnessSnapshot {
+    pub const SCHEMA: &'static str = "witness-harness-v1";
+
+    pub fn load(path: &Path) -> Result<Self> {
+        let bytes = std::fs::read(path).map_err(Error::Io)?;
+        serde_json::from_slice(&bytes).map_err(|source| Error::RunOutput {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
+
+    /// Convert string-keyed counters to `branch_id -> hits` for merging.
+    pub fn into_id_map(self) -> Result<HashMap<u32, u64>> {
+        let mut out = HashMap::new();
+        for (k, v) in self.counters {
+            let id = k.parse::<u32>().map_err(|_| {
+                Error::Runtime(anyhow::anyhow!(
+                    "harness snapshot contains non-numeric counter id `{k}`"
+                ))
+            })?;
+            out.insert(id, v);
+        }
+        Ok(out)
+    }
 }
 
 /// Run the instrumented `module`, writing a `RunRecord` to `options.output`.
 pub fn run_module(options: &RunOptions<'_>) -> Result<()> {
+    if let Some(cmd) = options.harness.as_deref() {
+        return run_via_harness(options, cmd);
+    }
+    run_via_embedded(options)
+}
+
+fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     let manifest = Manifest::load(&options.manifest)?;
 
     let mut config = Config::new();
@@ -159,6 +221,106 @@ pub fn run_module(options: &RunOptions<'_>) -> Result<()> {
         branches,
     };
     record.save(options.output)
+}
+
+/// Subprocess-harness mode entry point.
+fn run_via_harness(options: &RunOptions<'_>, harness_cmd: &str) -> Result<()> {
+    let manifest = Manifest::load(&options.manifest)?;
+
+    // Create a temp file for the harness's snapshot. We don't reuse the
+    // user's --output path because that path holds the *full* RunRecord;
+    // the harness only writes the counter slice.
+    let snapshot_dir = tempfile::tempdir().map_err(Error::Io)?;
+    let snapshot_path = snapshot_dir.path().join("witness-harness-snapshot.json");
+
+    let module_abs = options
+        .module
+        .canonicalize()
+        .map_err(Error::Io)?
+        .to_string_lossy()
+        .into_owned();
+    let manifest_abs = options
+        .manifest
+        .canonicalize()
+        .map_err(Error::Io)?
+        .to_string_lossy()
+        .into_owned();
+    let snapshot_str = snapshot_path.to_string_lossy().into_owned();
+
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(harness_cmd)
+        .env("WITNESS_MODULE", &module_abs)
+        .env("WITNESS_MANIFEST", &manifest_abs)
+        .env("WITNESS_OUTPUT", &snapshot_str)
+        .status()
+        .map_err(Error::Io)?;
+
+    if !status.success() {
+        return Err(Error::Harness {
+            command: harness_cmd.to_string(),
+            code: status.code(),
+            stderr: String::new(),
+        });
+    }
+
+    if !snapshot_path.exists() {
+        return Err(Error::Runtime(anyhow::anyhow!(
+            "harness completed but did not write a snapshot to WITNESS_OUTPUT ({})",
+            snapshot_str
+        )));
+    }
+
+    let snapshot = HarnessSnapshot::load(&snapshot_path)?;
+    if snapshot.schema != HarnessSnapshot::SCHEMA {
+        return Err(Error::Runtime(anyhow::anyhow!(
+            "harness snapshot schema mismatch: expected `{}`, got `{}`",
+            HarnessSnapshot::SCHEMA,
+            snapshot.schema
+        )));
+    }
+    let counter_values = snapshot.into_id_map()?;
+
+    let record = build_run_record(&manifest, &counter_values, options.module, vec![]);
+    record.save(options.output)
+}
+
+/// Assemble a `RunRecord` from a manifest and counter snapshot. Shared
+/// between embedded and subprocess execution paths.
+fn build_run_record(
+    manifest: &Manifest,
+    counter_values: &HashMap<u32, u64>,
+    module_path: &Path,
+    invoked: Vec<String>,
+) -> RunRecord {
+    let entries_by_id: HashMap<u32, &BranchEntry> =
+        manifest.branches.iter().map(|b| (b.id, b)).collect();
+    let mut branches: Vec<BranchHit> = manifest
+        .branches
+        .iter()
+        .map(|b| {
+            let hits = counter_values.get(&b.id).copied().unwrap_or(0);
+            BranchHit {
+                id: b.id,
+                function_index: b.function_index,
+                function_name: entries_by_id
+                    .get(&b.id)
+                    .and_then(|e| e.function_name.clone()),
+                kind: b.kind,
+                instr_index: b.instr_index,
+                hits,
+            }
+        })
+        .collect();
+    branches.sort_by_key(|b| b.id);
+
+    RunRecord {
+        schema_version: manifest.schema_version.clone(),
+        witness_version: env!("CARGO_PKG_VERSION").to_string(),
+        module_path: module_path.to_string_lossy().into_owned(),
+        invoked,
+        branches,
+    }
 }
 
 fn read_counter_globals(
@@ -270,6 +432,7 @@ mod tests {
             output: &run_path,
             invoke: vec!["hit_then".to_string()],
             call_start: false,
+            harness: None,
         };
         run_module(&options).unwrap();
 
@@ -323,6 +486,7 @@ mod tests {
             output: &run_path,
             invoke: vec!["take_branch".to_string()],
             call_start: false,
+            harness: None,
         };
         run_module(&options).unwrap();
 
@@ -333,5 +497,195 @@ mod tests {
             .find(|b| b.kind == BranchKind::BrIf)
             .expect("br_if branch");
         assert_eq!(brif_hit.hits, 1, "br_if taken path should fire once");
+    }
+
+    /// Subprocess-harness round-trip. The harness here is a tiny shell
+    /// script that writes a fake snapshot — proves the file-handshake
+    /// protocol works without needing a real wasm-bindgen-test
+    /// installation in CI.
+    #[test]
+    fn harness_subprocess_round_trip() {
+        let wat_src = r#"
+            (module
+              (func (export "f") (param i32) (result i32)
+                local.get 0
+                if (result i32)
+                  i32.const 1
+                else
+                  i32.const 0
+                end))
+        "#;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("prog.wasm");
+        let manifest_path = dir.path().join("prog.wasm.witness.json");
+        let run_path = dir.path().join("run.json");
+        let entries = instrument_and_emit(wat_src, &wasm_path);
+        let manifest = Manifest {
+            schema_version: "1".to_string(),
+            witness_version: "test".to_string(),
+            module_source: wasm_path.to_string_lossy().into_owned(),
+            branches: entries,
+        };
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        // The harness pretends to have run the module and observed the
+        // then-arm taken (counter 0 = 7 hits) and the else-arm not taken
+        // (counter 1 absent → defaults to 0 in the merge step).
+        let harness_cmd = r#"cat > "$WITNESS_OUTPUT" <<'EOF'
+{
+  "schema": "witness-harness-v1",
+  "counters": { "0": 7 }
+}
+EOF"#;
+
+        let options = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path,
+            output: &run_path,
+            invoke: vec![],
+            call_start: false,
+            harness: Some(harness_cmd.to_string()),
+        };
+        run_module(&options).unwrap();
+
+        let record = RunRecord::load(&run_path).unwrap();
+        let then_hit = record
+            .branches
+            .iter()
+            .find(|b| b.kind == BranchKind::IfThen)
+            .expect("then branch");
+        assert_eq!(then_hit.hits, 7, "harness-supplied counter 0 should be 7");
+        let else_hit = record
+            .branches
+            .iter()
+            .find(|b| b.kind == BranchKind::IfElse)
+            .expect("else branch");
+        assert_eq!(else_hit.hits, 0, "absent counter defaults to 0");
+    }
+
+    /// Per-target br_table round-trip. The instrumented module fires only
+    /// the counter for the actually-taken target. We exercise three
+    /// distinct selectors via three exported thunks.
+    #[test]
+    fn round_trip_br_table_per_target() {
+        // br_table with 2 explicit targets + 1 default. selector=0 → exit
+        // outer block via target 0 (label 0 from inner block, returns 100);
+        // selector=1 → target 1 (label 1, returns 200); selector >= 2 →
+        // default (label 2, returns 300).
+        let wat_src = r#"
+            (module
+              (func $sel (param $s i32) (result i32)
+                (block $default
+                  (block $b
+                    (block $a
+                      local.get $s
+                      br_table $a $b $default
+                    )
+                    i32.const 100
+                    return
+                  )
+                  i32.const 200
+                  return
+                )
+                i32.const 300)
+              (func (export "hit_target_0") (result i32)
+                i32.const 0
+                call $sel)
+              (func (export "hit_target_1") (result i32)
+                i32.const 1
+                call $sel)
+              (func (export "hit_default") (result i32)
+                i32.const 5
+                call $sel))
+        "#;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("prog.wasm");
+        let manifest_path = dir.path().join("prog.wasm.witness.json");
+
+        let entries = instrument_and_emit(wat_src, &wasm_path);
+        let manifest = Manifest {
+            schema_version: "2".to_string(),
+            witness_version: "test".to_string(),
+            module_source: wasm_path.to_string_lossy().into_owned(),
+            branches: entries,
+        };
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        // Run hit_target_0 — only target-0 counter should fire.
+        let run_path = dir.path().join("run0.json");
+        let options = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path.clone(),
+            output: &run_path,
+            invoke: vec!["hit_target_0".to_string()],
+            call_start: false,
+            harness: None,
+        };
+        run_module(&options).unwrap();
+        let record = RunRecord::load(&run_path).unwrap();
+        let hits_target_0_total: u64 = record
+            .branches
+            .iter()
+            .filter(|b| b.kind == BranchKind::BrTableTarget)
+            .map(|b| b.hits)
+            .sum();
+        let hits_default: u64 = record
+            .branches
+            .iter()
+            .filter(|b| b.kind == BranchKind::BrTableDefault)
+            .map(|b| b.hits)
+            .sum();
+        assert_eq!(
+            hits_target_0_total, 1,
+            "exactly one target counter should fire on selector=0"
+        );
+        assert_eq!(hits_default, 0, "default counter should not fire");
+
+        // Run hit_default — only default counter should fire.
+        let run_path_def = dir.path().join("run_def.json");
+        let options_def = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path,
+            output: &run_path_def,
+            invoke: vec!["hit_default".to_string()],
+            call_start: false,
+            harness: None,
+        };
+        run_module(&options_def).unwrap();
+        let record_def = RunRecord::load(&run_path_def).unwrap();
+        let default_hits: u64 = record_def
+            .branches
+            .iter()
+            .filter(|b| b.kind == BranchKind::BrTableDefault)
+            .map(|b| b.hits)
+            .sum();
+        assert_eq!(default_hits, 1, "default counter fires on selector=5");
+    }
+
+    #[test]
+    fn harness_subprocess_failure_propagates() {
+        let dir = tempdir().unwrap();
+        let manifest = Manifest {
+            schema_version: "1".to_string(),
+            witness_version: "test".to_string(),
+            module_source: "fake".to_string(),
+            branches: vec![],
+        };
+        let manifest_path = dir.path().join("manifest.json");
+        let module_path = dir.path().join("prog.wasm");
+        let run_path = dir.path().join("run.json");
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+        std::fs::write(&module_path, b"\x00asm\x01\x00\x00\x00").unwrap();
+
+        let options = RunOptions {
+            module: &module_path,
+            manifest: manifest_path,
+            output: &run_path,
+            invoke: vec![],
+            call_start: false,
+            harness: Some("exit 1".to_string()),
+        };
+        let result = run_module(&options);
+        assert!(matches!(result, Err(Error::Harness { .. })));
     }
 }

@@ -73,13 +73,14 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Temp directories for the subprocess-harness snapshot file (run.rs).
+tempfile = "3"
+
 [dev-dependencies]
 # Parse inline Wasm text for tests.
 wat = "1"
 # Golden-output test assertions.
 insta = { version = "1", features = ["yaml"] }
-# Scratch directories for round-trip tests.
-tempfile = "3"
 
 [[bin]]
 name = "witness"

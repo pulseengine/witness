@@ -35,8 +35,12 @@ enum Command {
         output: PathBuf,
     },
 
-    /// Execute an instrumented module and collect counters via an embedded
-    /// wasmtime runtime.
+    /// Execute an instrumented module and collect counters.
+    ///
+    /// Default mode embeds wasmtime and invokes user-specified exports.
+    /// `--harness <cmd>` switches to subprocess mode: witness spawns the
+    /// command with WITNESS_MODULE / WITNESS_MANIFEST / WITNESS_OUTPUT env
+    /// vars set, and the harness writes a counter snapshot before exit.
     Run {
         /// Path to the instrumented module.
         module: PathBuf,
@@ -48,11 +52,19 @@ enum Command {
         output: PathBuf,
         /// Export to call (no arguments, any number of return values).
         /// May be repeated; exports are invoked in the order given.
+        /// Ignored when `--harness` is set.
         #[arg(long = "invoke")]
         invoke: Vec<String>,
         /// Call the `_start` WASI entry-point before `--invoke` targets.
+        /// Ignored when `--harness` is set.
         #[arg(long)]
         call_start: bool,
+        /// Subprocess harness command. When set, witness spawns this
+        /// command via `sh -c` with WITNESS_MODULE / WITNESS_MANIFEST /
+        /// WITNESS_OUTPUT env vars; the harness must write a counter
+        /// snapshot to WITNESS_OUTPUT before exiting.
+        #[arg(long)]
+        harness: Option<String>,
     },
 
     /// Produce a coverage report from collected counter data.
@@ -88,6 +100,7 @@ fn main() -> Result<()> {
             output,
             invoke,
             call_start,
+            harness,
         } => {
             let manifest =
                 manifest.unwrap_or_else(|| witness::instrument::Manifest::path_for(&module));
@@ -97,6 +110,7 @@ fn main() -> Result<()> {
                 output: &output,
                 invoke,
                 call_start,
+                harness,
             };
             witness::run::run_module(&options)?;
         }
