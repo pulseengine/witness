@@ -3059,11 +3059,10 @@ dependencies = [
 
 [[package]]
 name = "witness"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
- "gimli 0.31.1",
  "insta",
  "proptest",
  "serde",
@@ -3074,9 +3073,27 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing-subscriber",
  "walrus",
- "wasmparser 0.240.0",
  "wasmtime",
  "wasmtime-wasi",
+ "wat",
+ "witness-core",
+]
+
+[[package]]
+name = "witness-core"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "gimli 0.31.1",
+ "proptest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "walrus",
+ "wasmparser 0.240.0",
  "wat",
 ]
 

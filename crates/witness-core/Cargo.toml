@@ -1,0 +1,31 @@
+[package]
+name = "witness-core"
+description = "Pure-data algorithms for witness — instrument schema, decisions, diff, predicate, report, rivet evidence, LCOV emission. No wasmtime/walrus dependency; targets wasm32-wasip2."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["wasm", "webassembly", "coverage", "mcdc", "safety-critical"]
+categories = ["development-tools::testing", "wasm"]
+
+[lints]
+workspace = true
+
+[dependencies]
+walrus = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+gimli = { workspace = true }
+wasmparser = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+wat = { workspace = true }

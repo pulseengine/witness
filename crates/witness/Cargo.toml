@@ -1,0 +1,40 @@
+[package]
+name = "witness"
+description = "MC/DC-style branch coverage CLI for WebAssembly components."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["wasm", "webassembly", "coverage", "mcdc", "safety-critical"]
+categories = ["development-tools::testing", "wasm"]
+readme = "../../README.md"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "witness"
+path = "src/main.rs"
+
+[dependencies]
+witness-core = { path = "../witness-core" }
+walrus = { workspace = true }
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = { workspace = true }
+tracing-subscriber = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+wat = { workspace = true }
+insta = { workspace = true }
+proptest = { workspace = true }

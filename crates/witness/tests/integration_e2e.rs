@@ -41,8 +41,9 @@
 
 use std::path::{Path, PathBuf};
 
-use witness::instrument::{BranchKind, instrument_file};
-use witness::run::{RunOptions, RunRecord, run_module};
+use witness::{RunOptions, run_module};
+use witness_core::instrument::{BranchKind, instrument_file};
+use witness_core::run_record::RunRecord;
 
 /// Path to the pre-built fixture wasm. `build.sh` produces this.
 fn fixture_wasm() -> PathBuf {
@@ -101,7 +102,7 @@ fn run_with_invoke(invoke: &str) -> RunRecord {
 }
 
 /// Sum hits for branches matching `pred`.
-fn sum_hits<F: Fn(&witness::run::BranchHit) -> bool>(rec: &RunRecord, pred: F) -> u64 {
+fn sum_hits<F: Fn(&witness_core::run_record::BranchHit) -> bool>(rec: &RunRecord, pred: F) -> u64 {
     rec.branches
         .iter()
         .filter(|b| pred(b))
@@ -138,7 +139,7 @@ fn fixture_instruments_and_records_branches() {
         p.push(".witness.json");
         PathBuf::from(p)
     };
-    let manifest = witness::instrument::Manifest::load(Path::new(&manifest_path)).unwrap();
+    let manifest = witness_core::instrument::Manifest::load(Path::new(&manifest_path)).unwrap();
     assert!(
         !manifest.branches.is_empty(),
         "expected the fixture to contain at least one instrumentable branch; got 0"

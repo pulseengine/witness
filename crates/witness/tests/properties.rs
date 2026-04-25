@@ -40,9 +40,9 @@
 
 use proptest::collection::vec as pvec;
 use proptest::prelude::*;
-use witness::instrument::{BranchEntry, BranchKind, Manifest};
-use witness::rivet_evidence::{MapEntry, RequirementMap};
-use witness::run::{BranchHit, RunRecord, merge_records};
+use witness_core::instrument::{BranchEntry, BranchKind, Manifest};
+use witness_core::rivet_evidence::{MapEntry, RequirementMap};
+use witness_core::run_record::{BranchHit, RunRecord, merge_records};
 
 // ---------------------------------------------------------------------------
 // Generators

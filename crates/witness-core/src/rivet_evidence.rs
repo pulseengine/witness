@@ -16,7 +16,7 @@
 //! level wrapper has a `schema:` field for self-identification; rivet
 //! rejects unknown schema URLs with a clear error.
 
-use crate::run::{BranchHit, RunRecord};
+use crate::run_record::{BranchHit, RunRecord};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

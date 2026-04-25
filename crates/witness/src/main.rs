@@ -7,6 +7,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use witness::run;
 
 #[derive(Parser)]
 #[command(
@@ -131,6 +132,26 @@ enum Command {
         format: DiffFormat,
     },
 
+    /// Emit LCOV from a run JSON for codecov ingestion.
+    /// DWARF-correlated decisions emit BRDA records; uncorrelated
+    /// branches go in a sibling overview text file (per
+    /// docs/research/v05-lcov-format.md).
+    Lcov {
+        /// Path to a run JSON.
+        #[arg(long)]
+        run: PathBuf,
+        /// Path to the manifest (defaults to `<run>.witness.json` style:
+        /// the manifest must accompany the run).
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Output path for the LCOV file.
+        #[arg(short, long, default_value = "lcov.info")]
+        output: PathBuf,
+        /// Output path for the sibling overview text.
+        #[arg(long, default_value = "witness-overview.txt")]
+        overview: PathBuf,
+    },
+
     /// Emit rivet-shape coverage evidence YAML, partitioned by a
     /// branch→artefact mapping. Output is consumable by rivet's
     /// `CoverageStore` (landing in the rivet upstream PR coordinated
@@ -177,7 +198,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Instrument { input, output } => {
-            witness::instrument::instrument_file(&input, &output)?;
+            witness_core::instrument::instrument_file(&input, &output)?;
         }
         Command::Run {
             module,
@@ -188,8 +209,8 @@ fn main() -> Result<()> {
             harness,
         } => {
             let manifest =
-                manifest.unwrap_or_else(|| witness::instrument::Manifest::path_for(&module));
-            let options = witness::run::RunOptions {
+                manifest.unwrap_or_else(|| witness_core::instrument::Manifest::path_for(&module));
+            let options = run::RunOptions {
                 module: &module,
                 manifest,
                 output: &output,
@@ -197,10 +218,10 @@ fn main() -> Result<()> {
                 call_start,
                 harness,
             };
-            witness::run::run_module(&options)?;
+            run::run_module(&options)?;
         }
         Command::Report { input, format } => {
-            let report = witness::report::from_run_file(&input)?;
+            let report = witness_core::report::from_run_file(&input)?;
             // SAFETY-REVIEW: CLI's job is to write the report to stdout;
             // `println!` is the intended output channel for end users.
             #[allow(clippy::print_stdout)]
@@ -210,7 +231,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Merge { inputs, output } => {
-            witness::run::merge_files(&inputs, &output)?;
+            witness_core::run_record::merge_files(&inputs, &output)?;
         }
         Command::Predicate {
             run,
@@ -219,14 +240,14 @@ fn main() -> Result<()> {
             harness,
             output,
         } => {
-            let report = witness::report::from_run_file(&run)?;
-            let stmt = witness::predicate::build_statement(
+            let report = witness_core::report::from_run_file(&run)?;
+            let stmt = witness_core::predicate::build_statement(
                 &report,
                 &module,
                 original.as_deref(),
                 harness.as_deref(),
             )?;
-            witness::predicate::save_statement(&stmt, &output)?;
+            witness_core::predicate::save_statement(&stmt, &output)?;
         }
         Command::Diff {
             base,
@@ -234,7 +255,7 @@ fn main() -> Result<()> {
             output,
             format,
         } => {
-            let delta = witness::diff::diff(&base, &head)?;
+            let delta = witness_core::diff::diff(&base, &head)?;
             // SAFETY-REVIEW: CLI prints to stdout for human consumers.
             #[allow(clippy::print_stdout)]
             match format {
@@ -244,11 +265,21 @@ fn main() -> Result<()> {
                     println!("{json}");
                 }
                 DiffFormat::Text => {
-                    let text = witness::diff::delta_to_text(&delta);
+                    let text = witness_core::diff::delta_to_text(&delta);
                     std::fs::write(&output, &text)?;
                     println!("{text}");
                 }
             }
+        }
+        Command::Lcov {
+            run,
+            manifest,
+            output,
+            overview,
+        } => {
+            let manifest_loaded = witness_core::instrument::Manifest::load(&manifest)?;
+            let record = witness_core::run_record::RunRecord::load(&run)?;
+            witness_core::lcov::emit_lcov_files(&manifest_loaded, &record, &output, &overview)?;
         }
         Command::RivetEvidence {
             run,
@@ -257,17 +288,17 @@ fn main() -> Result<()> {
             commit,
             output,
         } => {
-            let record = witness::run::RunRecord::load(&run)?;
-            let map = witness::rivet_evidence::RequirementMap::load(&requirement_map)?;
+            let record = witness_core::run_record::RunRecord::load(&run)?;
+            let map = witness_core::rivet_evidence::RequirementMap::load(&requirement_map)?;
             let flat = map.flatten()?;
-            let file = witness::rivet_evidence::build_evidence(
+            let file = witness_core::rivet_evidence::build_evidence(
                 &record,
                 &flat,
                 "witness rivet-evidence",
                 environment.as_deref(),
                 commit.as_deref(),
             )?;
-            witness::rivet_evidence::save_evidence(&file, &output)?;
+            witness_core::rivet_evidence::save_evidence(&file, &output)?;
         }
     }
 

@@ -14,7 +14,7 @@
 
 use crate::Result;
 use crate::instrument::BranchKind;
-use crate::run::{BranchHit, RunRecord};
+use crate::run_record::{BranchHit, RunRecord};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -169,7 +169,7 @@ pub fn from_run_file(path: &Path) -> Result<Report> {
 )]
 mod tests {
     use super::*;
-    use crate::run::BranchHit;
+    use crate::run_record::BranchHit;
 
     fn hit(id: u32, hits: u64, kind: BranchKind, fn_idx: u32, fn_name: &str) -> BranchHit {
         BranchHit {

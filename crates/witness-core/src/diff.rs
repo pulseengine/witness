@@ -7,7 +7,7 @@
 //! both structural and coverage-percentage delta.
 
 use crate::instrument::{BranchEntry, BranchKind, Manifest};
-use crate::run::RunRecord;
+use crate::run_record::RunRecord;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -325,7 +325,7 @@ pub fn delta_to_text(delta: &Delta) -> String {
 mod tests {
     use super::*;
     use crate::instrument::{BranchEntry, BranchKind, Manifest};
-    use crate::run::{BranchHit, RunRecord};
+    use crate::run_record::{BranchHit, RunRecord};
     use tempfile::tempdir;
 
     fn make_branch(id: u32, kind: BranchKind, instr_index: u32) -> BranchEntry {
