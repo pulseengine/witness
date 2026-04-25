@@ -192,6 +192,58 @@ artifacts:
       priority: must
       category: functional
 
+  - id: REQ-017
+    type: requirement
+    title: Cross-run coverage aggregation (`witness merge`)
+    status: draft
+    description: >
+      The system shall provide a `witness merge` subcommand that
+      validates that multiple run JSON files share the same
+      instrumented module and branch list, and emits a single merged
+      run JSON with per-branch counters summed and `invoked` lists
+      concatenated. Real test suites produce one run per test binary;
+      rivet wants one coverage claim per requirement, so merging is
+      load-bearing for v0.3 rivet integration.
+    tags: [v0.3, runtime, aggregation]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-018
+    type: requirement
+    title: In-toto coverage predicate emission for sigil
+    status: draft
+    description: >
+      The system shall emit an unwrapped in-toto Statement v1.0 with
+      predicate type https://pulseengine.eu/witness-coverage/v1
+      carrying the coverage report, measurement metadata, and the
+      original module's digest. Sigil wraps and signs the Statement;
+      witness produces the body only (out of the key-management
+      business). Sigil reads the predicate type opaquely (no registry,
+      no schema validation per type) so no sigil-side change is
+      required.
+    tags: [v0.3, sigil, attestation]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-019
+    type: requirement
+    title: Quality bar — property tests, mutation testing, miri
+    status: draft
+    description: >
+      The system shall include property-based tests (proptest) on the
+      load-bearing invariants — merge commutativity / monotonicity /
+      sum-preservation, Manifest and RunRecord serde round-trips,
+      RequirementMap flattening. The CI pipeline shall run cargo-mutants
+      informationally on the main branch and miri on the pure-Rust
+      modules to detect undefined behaviour. The codecov project
+      threshold shall be 75% (patch 80%).
+    tags: [v0.3, quality, testing]
+    fields:
+      priority: must
+      category: non-functional
+
   # -------------------------------------------------------------------------
   # v0.4 — variant-aware scope and pipeline integration
   # -------------------------------------------------------------------------

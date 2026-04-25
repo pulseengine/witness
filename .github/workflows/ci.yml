@@ -54,6 +54,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-targets
 
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - name: Run miri on the lib
+        env:
+          MIRIFLAGS: "-Zmiri-disable-isolation -Zmiri-tree-borrows"
+        # Miri does not run wasmtime / walrus FFI cleanly; constrain
+        # to the witness pure-Rust modules that benefit from UB
+        # detection (decisions, error, report, predicate hex/SHA path).
+        run: |
+          cargo miri test --lib report::
+          cargo miri test --lib decisions::
+          cargo miri test --lib predicate::tests::sha256_known_vector
+          cargo miri test --lib predicate::tests::rfc3339_format_is_well_formed
+
   deny:
     name: Cargo Deny
     runs-on: ubuntu-latest
@@ -75,6 +96,31 @@ jobs:
       - run: |
           cargo install cargo-audit --locked
           cargo audit
+
+  proptest-extended:
+    name: Proptest (extended cases)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --test properties
+        env:
+          PROPTEST_CASES: "2048"
+
+  mutants:
+    name: Mutation testing (informational)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          cargo install cargo-mutants --locked
+          cargo mutants --no-shuffle --timeout-multiplier 3 -j 2 || true
 
   coverage:
     name: Coverage

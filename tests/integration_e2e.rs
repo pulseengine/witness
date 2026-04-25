@@ -102,7 +102,11 @@ fn run_with_invoke(invoke: &str) -> RunRecord {
 
 /// Sum hits for branches matching `pred`.
 fn sum_hits<F: Fn(&witness::run::BranchHit) -> bool>(rec: &RunRecord, pred: F) -> u64 {
-    rec.branches.iter().filter(|b| pred(b)).map(|b| b.hits).sum()
+    rec.branches
+        .iter()
+        .filter(|b| pred(b))
+        .map(|b| b.hits)
+        .sum()
 }
 
 /// Sum hits for branches in any function whose name contains `fn_name_part`,

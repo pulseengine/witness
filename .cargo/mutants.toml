@@ -1,0 +1,32 @@
+# cargo-mutants configuration for witness.
+#
+# Run with `cargo mutants` after `cargo install cargo-mutants --locked`.
+# CI runs this on the main branch only (informational; not gating PRs)
+# until the catch rate is high enough to gate.
+
+# Mutate only library code; leave bin entry-points (main.rs) alone.
+examine_globs = [
+    "src/instrument.rs",
+    "src/run.rs",
+    "src/report.rs",
+    "src/predicate.rs",
+    "src/rivet_evidence.rs",
+    "src/decisions.rs",
+    "src/error.rs",
+]
+
+# Skip the SCRC-allow blocks and the test modules (mutants in tests
+# don't add signal — tests are SUPPOSED to fail under mutation).
+exclude_re = [
+    "^.*#\\[cfg\\(test\\)\\].*$",
+    "^.*mod tests.*$",
+]
+
+# Run mutation tests in parallel.
+test_tool = "cargo"
+timeout_multiplier = 2.0
+
+# Skip mutating the SAFETY-REVIEW allow attributes themselves and the
+# walrus IR enum reconstruction tables (mutating those produces
+# uninteresting changes — the walrus AST is the input domain).
+additional_cargo_args = ["--lib"]

@@ -1,6 +1,6 @@
 [package]
 name = "witness"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.91"
 description = "MC/DC-style branch coverage for WebAssembly components"
@@ -87,6 +87,8 @@ serde_yaml = "0.9"
 wat = "1"
 # Golden-output test assertions.
 insta = { version = "1", features = ["yaml"] }
+# Property-based testing.
+proptest = "1"
 
 [[bin]]
 name = "witness"

@@ -7,6 +7,81 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-25
+
+### Added
+
+- **`witness merge`** subcommand. Aggregates per-branch counters across
+  multiple `witness run` outputs (one per test binary or harness
+  invocation). Validates that all inputs share the same instrumented
+  module and branch list before summing. Five new tests + four proptest
+  properties (commutativity, monotonicity, sum-preservation,
+  single-record identity).
+- **`witness predicate`** subcommand. Emits an unwrapped in-toto
+  Statement v1.0 carrying the coverage report as a
+  `https://pulseengine.eu/witness-coverage/v1` predicate. Subject is
+  the instrumented module (sha256); the original module's digest goes
+  in the predicate body. Sigil reads the predicate type opaquely (no
+  registry, no schema validation per type — see
+  `docs/research/sigil-predicate-format.md`), so witness emits today
+  with no sigil-side change. 5 unit tests including known-vector
+  SHA-256 and RFC 3339 timestamp calibration.
+- **`witness rivet-evidence`** subcommand. Emits coverage in the
+  `https://pulseengine.eu/witness-rivet-evidence/v1` schema, partitioned
+  by a user-supplied `branch_id → artefact_id` mapping YAML. The
+  schema mirrors rivet's existing `ResultStore` shape so the consumer
+  can be a near-drop-in copy. 4 unit tests + 2 proptest properties on
+  RequirementMap flattening.
+- **rivet upstream consumer** on the
+  `feat/witness-coverage-evidence-consumer` branch in
+  `pulseengine/rivet`. Adds `rivet-core::coverage_evidence::CoverageStore`
+  mirroring `ResultStore`, plus 9 unit tests, plus the new
+  `Error::CoverageEvidence` variant. 491 LOC. 780 rivet-core tests
+  pass; clippy/fmt/deny clean. Branch is **left local for review** —
+  not pushed to origin.
+- **`docs/research/rivet-evidence-consumer.md`** and
+  **`docs/research/sigil-predicate-format.md`** — evidence-of-design
+  briefs that established the schemas before the code was written.
+- **Rust→Wasm test fixture** under `tests/fixtures/sample-rust-crate/`.
+  A minimal `no_std` Rust crate that compiles to Wasm and exercises
+  every instrumentation pattern (`br_if`, `if/else`, `br_table`).
+  Eight integration tests in `tests/integration_e2e.rs` runtime-skip
+  if the fixture isn't built; `./tests/fixtures/sample-rust-crate/build.sh`
+  is the one-shot builder for CI.
+
+### Quality bar (REQ-019, FEAT-010)
+
+- **Property-based tests** via `proptest` (new dev-dependency). 8
+  properties covering merge invariants, serde round-trip of `Manifest`
+  / `RunRecord`, and `RequirementMap::flatten` semantics. CI's
+  `proptest-extended` job on main runs with `PROPTEST_CASES=2048`.
+- **Mutation testing** via `cargo-mutants`. New CI job `mutants` runs
+  on main as informational (continue-on-error: true). Configuration
+  in `.cargo/mutants.toml` constrains mutation to the witness library
+  and skips test modules.
+- **Miri** CI job runs nightly miri with `-Zmiri-tree-borrows` over the
+  pure-Rust modules (`report::*`, `decisions::*`, predicate's SHA
+  vector + RFC 3339 path). The walrus / wasmtime FFI surface is
+  excluded — miri's foreign-call constraints make it more noise than
+  signal there.
+- **Coverage threshold raised** to 75% project / 80% patch
+  (`codecov.yml`).
+
+### Implements / Verifies (rivet trailers)
+
+- Implements: REQ-007, REQ-008, REQ-017, REQ-018, REQ-019
+- Implements: FEAT-003 (rivet/sigil integration), FEAT-010 (quality bar)
+
+### Notes
+
+- v0.2.1 (DWARF reconstruction algorithm body) remains an any-time
+  release. The schema is forward-compatible — when v0.2.1 lands, the
+  rivet-evidence and predicate emitters automatically populate
+  `decisions: [...]` for hosts that consume MC/DC.
+- rivet integration is end-to-end **once the rivet upstream branch is
+  pushed and a rivet release cuts**. The witness output is correctly
+  shaped today; the rivet consumer code is on a feature branch.
+
 ## [0.2.0] — 2026-04-25
 
 ### Added

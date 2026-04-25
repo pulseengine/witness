@@ -166,8 +166,8 @@ pub fn build_evidence(
         .into_iter()
         .map(|(artifact, hits)| {
             let total = u64::try_from(hits.len()).unwrap_or(u64::MAX);
-            let covered = u64::try_from(hits.iter().filter(|h| h.hits > 0).count())
-                .unwrap_or(u64::MAX);
+            let covered =
+                u64::try_from(hits.iter().filter(|h| h.hits > 0).count()).unwrap_or(u64::MAX);
             // SAFETY-REVIEW: u64 → f64 is lossy only for counters above
             // 2^53; coverage hit counts in real test runs do not approach
             // that. Lossy precision on huge counts is acceptable for a
@@ -181,11 +181,8 @@ pub fn build_evidence(
                 (covered_f / total_f) * 100.0
             };
             let hit_counts: Vec<u64> = hits.iter().map(|h| h.hits).collect();
-            let mut uncovered: Vec<u32> = hits
-                .iter()
-                .filter(|h| h.hits == 0)
-                .map(|h| h.id)
-                .collect();
+            let mut uncovered: Vec<u32> =
+                hits.iter().filter(|h| h.hits == 0).map(|h| h.id).collect();
             uncovered.sort_unstable();
             CoverageEvidence {
                 artifact,
@@ -221,9 +218,8 @@ pub fn build_evidence(
 
 /// Save an `EvidenceFile` to disk as YAML.
 pub fn save_evidence(file: &EvidenceFile, path: &Path) -> Result<()> {
-    let yaml = serde_yaml::to_string(file).map_err(|e| {
-        Error::Runtime(anyhow::anyhow!("failed to serialise rivet evidence: {e}"))
-    })?;
+    let yaml = serde_yaml::to_string(file)
+        .map_err(|e| Error::Runtime(anyhow::anyhow!("failed to serialise rivet evidence: {e}")))?;
     std::fs::write(path, yaml).map_err(Error::Io)
 }
 

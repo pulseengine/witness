@@ -157,8 +157,10 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn file_name_string(p: &Path) -> String {
-    p.file_name()
-        .map_or_else(|| p.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned())
+    p.file_name().map_or_else(
+        || p.to_string_lossy().into_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 /// RFC 3339 / ISO 8601 timestamp using only `std`. v0.3 keeps witness
@@ -201,9 +203,7 @@ fn rfc3339_from_unix(secs: u64) -> String {
         let m = if mp < 10 { mp + 3 } else { mp - 9 };
         let y = if m <= 2 { y + 1 } else { y };
 
-        format!(
-            "{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z"
-        )
+        format!("{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z")
     }
 }
 
@@ -246,8 +246,17 @@ mod tests {
         assert_eq!(stmt.subject.len(), 1);
         assert_eq!(stmt.subject[0].name, "app.instrumented.wasm");
         assert_eq!(stmt.subject[0].digest.sha256.len(), 64);
-        assert!(stmt.subject[0].digest.sha256.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_eq!(stmt.predicate.measurement.harness.as_deref(), Some("cargo test"));
+        assert!(
+            stmt.subject[0]
+                .digest
+                .sha256
+                .chars()
+                .all(|c| c.is_ascii_hexdigit())
+        );
+        assert_eq!(
+            stmt.predicate.measurement.harness.as_deref(),
+            Some("cargo test")
+        );
         assert!(stmt.predicate.original_module.is_none());
     }
 
@@ -273,7 +282,10 @@ mod tests {
         let json = serde_json::to_string(&stmt).unwrap();
         let parsed: Statement = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.predicate_type, stmt.predicate_type);
-        assert_eq!(parsed.subject[0].digest.sha256, stmt.subject[0].digest.sha256);
+        assert_eq!(
+            parsed.subject[0].digest.sha256,
+            stmt.subject[0].digest.sha256
+        );
     }
 
     #[test]

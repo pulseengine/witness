@@ -106,9 +106,12 @@ artifacts:
     title: v0.3 — rivet and sigil integration
     status: draft
     description: >
-      Coverage reports emitted as rivet evidence (requirement-to-test
-      links) and as in-toto predicates that sigil attestation bundles
-      can carry.
+      Coverage reports emitted in the witness-rivet-evidence/v1 schema
+      consumed by the upstreamed rivet-core::coverage_evidence::CoverageStore;
+      and as in-toto Statements with predicate type
+      https://pulseengine.eu/witness-coverage/v1 consumed opaquely by
+      sigil's existing DSSE bundle reader. New `witness merge` subcommand
+      aggregates per-branch counters across multiple test-binary runs.
     tags: [v0.3, rivet, sigil]
     fields:
       phase: phase-3
@@ -117,6 +120,28 @@ artifacts:
         target: REQ-007
       - type: satisfies
         target: REQ-008
+      - type: satisfies
+        target: REQ-017
+      - type: satisfies
+        target: REQ-018
+
+  - id: FEAT-010
+    type: feature
+    title: v0.3 — quality bar (proptest, mutants, miri)
+    status: draft
+    description: >
+      Property-based tests via proptest on merge_records, serde
+      round-trip of Manifest and RunRecord, RequirementMap flattening.
+      cargo-mutants configured for the witness library, run as an
+      informational CI job on main. miri job verifies UB-freedom on the
+      pure-Rust modules (report, decisions, predicate). Coverage
+      threshold raised to 75% project / 80% patch.
+    tags: [v0.3, quality, testing]
+    fields:
+      phase: phase-3
+    links:
+      - type: satisfies
+        target: REQ-019
 
   - id: FEAT-004
     type: feature
