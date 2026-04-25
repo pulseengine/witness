@@ -91,9 +91,28 @@ jobs:
           name: binary-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
 
+  compliance:
+    name: Generate compliance evidence
+    needs: [build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/compliance
+        id: evidence
+        with:
+          report-label: ${{ github.ref_name }}
+          run-json: ""
+          modules: "[]"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compliance-evidence
+          path: ${{ steps.evidence.outputs.archive-path }}
+
   create-github-release:
     name: Create GitHub Release
-    needs: [build-binaries]
+    needs: [build-binaries, compliance]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

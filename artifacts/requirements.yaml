@@ -244,8 +244,50 @@ artifacts:
       priority: must
       category: non-functional
 
+  - id: REQ-020
+    type: requirement
+    title: Branch-set / coverage delta subcommand
+    status: draft
+    description: >
+      The system shall provide `witness diff --base <snapshot> --head
+      <snapshot>` that computes added / removed / changed branches and
+      a coverage-percentage delta when both inputs are run records.
+      Required by the witness-delta.yml PR workflow.
+    tags: [v0.4, cli, delta]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-021
+    type: requirement
+    title: Release-time compliance evidence bundle
+    status: draft
+    description: >
+      The release workflow shall produce a tar.gz compliance evidence
+      bundle containing the coverage report, in-toto predicates, and
+      branch manifests, attached to the GitHub release alongside the
+      binary archives. Implemented as a composite action at
+      .github/actions/compliance modelled on rivet's equivalent.
+    tags: [v0.4, ci, release, compliance]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-022
+    type: requirement
+    title: Coverage-delta PR workflow
+    status: draft
+    description: >
+      The CI shall run a coverage-delta workflow on every PR that
+      computes the witness diff between base and head, and posts the
+      result as an artefact (and optionally a PR comment).
+    tags: [v0.4, ci]
+    fields:
+      priority: must
+      category: functional
+
   # -------------------------------------------------------------------------
-  # v0.4 — variant-aware scope and pipeline integration
+  # v0.5 — variant-aware scope and pipeline integration (was v0.4)
   # -------------------------------------------------------------------------
   - id: REQ-009
     type: requirement
@@ -255,7 +297,7 @@ artifacts:
       The system shall support measuring coverage on Wasm at any stage of
       the PulseEngine pipeline — post-rustc, post-meld fusion, post-loom
       optimization — with coverage reports scoped to the measurement point.
-    tags: [v0.4, pipeline, variant]
+    tags: [v0.5, pipeline, variant]
     fields:
       priority: should
       category: functional
@@ -270,7 +312,7 @@ artifacts:
       equivalence proof between pre- and post-transformation modules, so
       coverage measurements across levels compose into a single audit
       argument.
-    tags: [v0.4, loom, translation-validation]
+    tags: [v0.5, loom, translation-validation]
     fields:
       priority: should
       category: functional
@@ -286,7 +328,7 @@ artifacts:
       or operate on the component directly. Walrus does not currently
       support components well; the implementation may need to migrate to
       wasm-tools or Whamm (DEC-011).
-    tags: [v0.4, component-model]
+    tags: [v0.5, component-model]
     fields:
       priority: should
       category: functional

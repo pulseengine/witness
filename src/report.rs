@@ -12,9 +12,9 @@
 //! BTreeMap keyed by `function_index` and an explicit sort on uncovered
 //! branches keep HashMap iteration order from leaking into output.
 
+use crate::Result;
 use crate::instrument::BranchKind;
 use crate::run::{BranchHit, RunRecord};
-use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -156,11 +156,6 @@ impl Report {
 pub fn from_run_file(path: &Path) -> Result<Report> {
     let record = RunRecord::load(path)?;
     Ok(Report::from_record(&record))
-}
-
-pub fn save_json(report: &Report, path: &Path) -> Result<()> {
-    let json = serde_json::to_string_pretty(report).map_err(Error::Serde)?;
-    std::fs::write(path, json).map_err(Error::Io)
 }
 
 #[cfg(test)]

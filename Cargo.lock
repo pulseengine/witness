@@ -3059,7 +3059,7 @@ dependencies = [
 
 [[package]]
 name = "witness"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3072,7 +3072,6 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 2.0.18",
- "tracing",
  "tracing-subscriber",
  "walrus",
  "wasmparser 0.240.0",

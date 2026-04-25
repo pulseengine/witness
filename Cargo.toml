@@ -1,6 +1,6 @@
 [package]
 name = "witness"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.91"
 description = "MC/DC-style branch coverage for WebAssembly components"
@@ -69,8 +69,10 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Logging / tracing.
-tracing = "0.1"
+# Logging / tracing. Only `tracing-subscriber` is actively used (by
+# main.rs's init_tracing). The `tracing` crate proper is currently a
+# transitive dep via tracing-subscriber; surface it directly when we
+# add `#[tracing::instrument]` attributes.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Temp directories for the subprocess-harness snapshot file (run.rs).

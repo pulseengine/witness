@@ -7,6 +7,77 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-25
+
+### Added
+
+- **DWARF-grounded MC/DC reconstruction** (FEAT-011, REQ-005, REQ-006,
+  REQ-016). `decisions::reconstruct_decisions` now parses Wasm DWARF
+  custom sections via `gimli` and `wasmparser`, builds a
+  `(byte_offset → file, line)` map per compilation unit, and groups
+  `BrIf` `BranchEntry`s sharing a `(function, file, line)` key into
+  source-level `Decision`s. Strict per-`br_if` fallback when DWARF is
+  absent. Lifted from v0.2.1 plan; v0.2.1 is therefore not released as
+  a separate version.
+- **`witness diff` subcommand** (REQ-020). Computes added / removed /
+  changed branches and (when both inputs are runs) coverage-percentage
+  delta. Schema URL `https://pulseengine.eu/witness-delta/v1`. Both
+  JSON and text output. Required by the v0.4 PR delta workflow.
+- **`witness-delta.yml` PR workflow** (REQ-022). Triggers on every PR
+  touching `src/` / `tests/` / `Cargo.toml`. Checks out base + head,
+  builds the head witness, runs `witness diff` on whatever manifests
+  the fixture pipeline emits, attaches the delta JSON+text as a PR
+  artefact. `continue-on-error` throughout — never blocks merge.
+- **`actions/compliance` composite action** (REQ-021). Mirrors rivet's
+  equivalent. Generates a tar.gz evidence bundle on release containing
+  coverage report, in-toto predicates per module, branch manifests,
+  and a README. Wired into `release.yml` between `build-binaries` and
+  `create-github-release` as a new `compliance` job; the resulting
+  archive is attached to the GitHub release alongside the binaries.
+
+### Research output
+
+- `docs/research/v04-blog-principles.md` — survey of every published
+  pulseengine.eu post and the principles witness must adopt; 4756
+  words across 14/16 posts; 20-item adoption checklist; voice
+  mechanics catalogued.
+- `docs/research/v04-ci-ports.md` — adaptation brief for
+  rivet-delta.yml and the rivet compliance composite action; full
+  YAML drafts for both witness-side workflow files.
+- `docs/research/v04-compiler-qualification-reduction.md` — 451-line
+  brief: ISO 26262-8 §11.4.5 substitution argument for ASIL B
+  (works), DAL B (weaker), DAL A (broken). Most surprising finding:
+  the TCL framework explicitly yields TCL 1 — "no qualification
+  required" — when TI 1 *or* TD 1 holds; the work is in establishing
+  TD 1, not in carving an exception.
+- `docs/research/v04-mythos-slop-audit.md` — quick-pass slop audit
+  using the methodology from
+  <http://127.0.0.1:1024/blog/mythos-slop-hunt/>. Two P1 findings
+  applied (deleted `report::save_json`; removed direct `tracing` dep).
+  Two P2 findings kept as consumer-facing constants. Twelve P3
+  findings documented as intentional defensiveness.
+
+### Removed
+
+- `report::save_json` — orphan-slop, no callers (P1 slop-hunt finding).
+- `tracing = "0.1"` direct dependency — only `tracing-subscriber` is
+  actively used (P1 slop-hunt finding).
+
+### Deferred to v0.5
+
+- Component-model coverage (was nominal v0.4; needs walrus or wac
+  component support).
+- Post-cfg / post-meld / post-loom measurement points (depends on
+  loom's translation-validation evidence shape, which is itself
+  evolving).
+- A Wasm Component Model fixture for end-to-end testing (folded with
+  the above).
+
+### Implements / Verifies
+
+- Implements: REQ-005, REQ-006, REQ-016, REQ-020, REQ-021, REQ-022
+- Implements: FEAT-011 (v0.4 feature wrapper)
+
 ## [0.3.0] — 2026-04-25
 
 ### Added

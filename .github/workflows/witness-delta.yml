@@ -1,0 +1,85 @@
+name: Coverage Delta
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "Cargo.toml"
+      - ".github/workflows/witness-delta.yml"
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: witness-delta-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  coverage-delta:
+    name: Coverage Delta
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: head
+          fetch-depth: 0
+      - uses: actions/checkout@v5
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: head
+
+      - name: Build witness (head)
+        working-directory: head
+        run: cargo build --release
+
+      - name: Locate manifests if present
+        id: fixtures
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          base_manifest=""
+          head_manifest=""
+          if [ -f base/tests/fixtures/sample-rust-crate/sample.wasm.witness.json ]; then
+            base_manifest="base/tests/fixtures/sample-rust-crate/sample.wasm.witness.json"
+          fi
+          if [ -f head/tests/fixtures/sample-rust-crate/sample.wasm.witness.json ]; then
+            head_manifest="head/tests/fixtures/sample-rust-crate/sample.wasm.witness.json"
+          fi
+          echo "base_manifest=$base_manifest" >> "$GITHUB_OUTPUT"
+          echo "head_manifest=$head_manifest" >> "$GITHUB_OUTPUT"
+
+      - name: Compute manifest delta
+        if: ${{ steps.fixtures.outputs.base_manifest != '' && steps.fixtures.outputs.head_manifest != '' }}
+        continue-on-error: true
+        run: |
+          mkdir -p delta-out
+          ./head/target/release/witness diff \
+            --base "${{ steps.fixtures.outputs.base_manifest }}" \
+            --head "${{ steps.fixtures.outputs.head_manifest }}" \
+            --output delta-out/coverage-delta.json \
+            --format json
+          ./head/target/release/witness diff \
+            --base "${{ steps.fixtures.outputs.base_manifest }}" \
+            --head "${{ steps.fixtures.outputs.head_manifest }}" \
+            --output delta-out/coverage-delta.txt \
+            --format text
+
+      - name: Upload delta artifact
+        if: ${{ steps.fixtures.outputs.head_manifest != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: witness-delta-pr-${{ github.event.pull_request.number }}
+          path: delta-out/
+          retention-days: 14
+          if-no-files-found: warn

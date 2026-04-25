@@ -143,15 +143,46 @@ artifacts:
       - type: satisfies
         target: REQ-019
 
+  - id: FEAT-011
+    type: feature
+    title: v0.4 — DWARF reconstruction + witness diff + compliance bundle
+    status: draft
+    description: >
+      DWARF-grounded reconstruction algorithm body lifted from v0.2.1
+      into v0.4: parse Wasm DWARF custom sections via gimli, build a
+      (function, byte_offset) → (file, line) map, group br_if branches
+      sharing a source line into Decisions. New `witness diff`
+      subcommand for coverage / branch-set delta. New
+      `witness-delta.yml` PR workflow. New `.github/actions/compliance`
+      composite action attaches release-time evidence to GitHub
+      releases. Mythos slop-hunt applied (orphan exports + unused deps
+      removed).
+    tags: [v0.4, mcdc, ci]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-005
+      - type: satisfies
+        target: REQ-006
+      - type: satisfies
+        target: REQ-016
+      - type: satisfies
+        target: REQ-020
+      - type: satisfies
+        target: REQ-021
+      - type: satisfies
+        target: REQ-022
+
   - id: FEAT-004
     type: feature
-    title: v0.4 — variant-aware measurement across the pipeline
+    title: v0.5 — variant-aware measurement across the pipeline (was v0.4)
     status: draft
     description: >
       Support post-cfg, post-meld, post-loom measurement points. Consume
       loom's translation-validation output to compose coverage across
       transformation layers. Component-model coverage.
-    tags: [v0.4, pipeline]
+    tags: [v0.5, pipeline]
     fields:
       phase: future
     links:
