@@ -194,6 +194,8 @@ mod tests {
                 hit(2, 3, BranchKind::BrIf, 1, "g"),
                 hit(3, 0, BranchKind::BrTableDefault, 1, "g"),
             ],
+            decisions: vec![],
+            trace_health: Default::default(),
         }
     }
 
@@ -228,6 +230,8 @@ mod tests {
             module_path: "empty.wasm".to_string(),
             invoked: vec![],
             branches: vec![],
+            decisions: vec![],
+            trace_health: Default::default(),
         };
         let report = Report::from_record(&empty);
         assert_eq!(report.total_branches, 0);

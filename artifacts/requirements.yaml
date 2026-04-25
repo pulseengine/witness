@@ -334,6 +334,307 @@ artifacts:
       category: functional
 
   # -------------------------------------------------------------------------
+  # v0.6 — real MC/DC truth tables, verdict suite, V-model traceability
+  # -------------------------------------------------------------------------
+  # NOTE: v0.6 is a redirect from the original "DWARF preservation through
+  # loom + meld + component-model coverage" plan. v0.5 shipped branch
+  # coverage with DWARF-grouped decisions but did NOT compute MC/DC truth
+  # tables (the Report had only total/covered counts per branch). v0.6
+  # closes that gap with real MC/DC: per-row condition vectors,
+  # independent-effect citations, gap analysis with row-closure
+  # recommendations, plus a verdict suite of canonical compound decisions
+  # so MC/DC capability is demonstrable rather than asserted. The
+  # original v0.6 scope (loom/meld DWARF, component-model) shifts to
+  # v0.7+ pending the v0.7 scaling research output.
+  - id: REQ-027
+    type: requirement
+    title: Per-decision MC/DC truth-table emission
+    status: draft
+    description: >
+      The system shall emit, for each source-level Decision, a truth
+      table recording every (decision, test-row) tuple's evaluated
+      condition vector and decision outcome. Tables are deterministic
+      and serialise as JSON under schema
+      https://pulseengine.eu/witness-mcdc/v1. Conditions not evaluated
+      under short-circuit semantics are recorded as NotEvaluated
+      (distinct from True or False) per DEC-014.
+    tags: [v0.6, mcdc, reporting]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-028
+    type: requirement
+    title: Independent-effect citation per condition
+    status: draft
+    description: >
+      For each condition in each Decision, the report shall cite the
+      specific test-row pair that proves the condition independently
+      affects the decision outcome under either unique-cause or masking
+      MC/DC (DO-178C accepted). When no such pair exists in the run,
+      the report shall identify the condition as having an MC/DC gap
+      and emit the row-closure recommendation per REQ-029.
+    tags: [v0.6, mcdc, reporting]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-029
+    type: requirement
+    title: MC/DC gap analysis with row-closure recommendations
+    status: draft
+    description: >
+      For every condition flagged in REQ-028 as having an MC/DC gap,
+      the report shall name a specific condition vector that a new
+      test row could provide to close the missing pair, plus the
+      expected outcome under that vector. The recommendation must be
+      consumable both by humans (one-line text) and by AI agents
+      (structured JSON for autonomous test authorship per the v0.9
+      agent-UX plan).
+    tags: [v0.6, mcdc, reporting]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-030
+    type: requirement
+    title: Verdict suite as canonical MC/DC evidence
+    status: draft
+    description: >
+      The witness repository shall ship a verdict suite of well-
+      characterised compound boolean decisions covering 2-, 3-, 4-,
+      and 5-condition shapes plus mixed AND/OR operators and a
+      real-world Rust-crate anchor. Each verdict ships source,
+      instrumented Wasm, manifest, two test-row sets (full-MC/DC-
+      passing and deliberately-incomplete), run record, report, signed
+      predicate, LCOV, and a one-page V-MODEL.md tracing requirement →
+      design decision → conditions → rows → evidence.
+    tags: [v0.6, verdict-suite, vmodel]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-031
+    type: requirement
+    title: witness-core.wasm shipped as a signed release asset
+    status: draft
+    description: >
+      Each release shall ship a wasm32-wasip2 build of witness-core
+      as a release asset, signed with the release-time DSSE key. The
+      asset is the deployable component form of witness-core; sigil
+      verification shall reproduce against the published verifying
+      key. v0.5 built the wasm artefact in CI but did not ship it as
+      a release asset; v0.6 closes that gap.
+    tags: [v0.6, release, deployment]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-032
+    type: requirement
+    title: V-model traceability matrix in every release
+    status: draft
+    description: >
+      The compliance evidence bundle shall include a traceability
+      matrix in JSON and HTML, generated from rivet artefacts at
+      release time, that traces every requirement through its
+      satisfying features, supporting design decisions, verifying
+      verdicts, test rows, and signed predicates. The matrix is
+      reproducible from artifacts/*.yaml; no hand-curated traceability.
+    tags: [v0.6, vmodel, compliance]
+    fields:
+      priority: must
+      category: non-functional
+
+  - id: REQ-033
+    type: requirement
+    title: Compliance bundle populated with real evidence
+    status: draft
+    description: >
+      The .github/actions/compliance bundle shall contain real
+      coverage reports, real run records, real signed predicates,
+      and real branch manifests sourced from running the verdict
+      suite at release time. v0.5 shipped a structural placeholder
+      with empty predicates/ and manifests/ directories; v0.6
+      replaces the placeholder with verdict-suite-derived evidence.
+    tags: [v0.6, compliance, release]
+    fields:
+      priority: must
+      category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.6.1 — on-Wasm instrumentation runtime
+  # -------------------------------------------------------------------------
+  - id: REQ-034
+    type: requirement
+    title: On-Wasm trace-buffer instrumentation
+    status: proposed
+    description: >
+      The system shall instrument Wasm modules with a linear-memory
+      trace buffer (per
+      docs/research/v06-instrumentation-primitive.md, primitive B)
+      that records per-condition (decision_id, condition_index,
+      evaluated_value) records under short-circuit semantics. The
+      runner shall emit row-marker records between test invocations
+      and parse the resulting trace into RunRecord.decisions. Closes
+      the v0.6.0 gap where the consumer side (schema + reporter) is
+      shipped but the instrumentation runtime is not.
+    tags: [v0.6.1, mcdc, instrumentation]
+    fields:
+      priority: must
+      category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.7 — scaling MC/DC to real-application workloads
+  # (provisional; research output at docs/research/v07-scaling-roadmap.md)
+  # -------------------------------------------------------------------------
+  - id: REQ-035
+    type: requirement
+    title: MC/DC at real-application scale
+    status: proposed
+    description: >
+      The system shall produce correct, reviewable MC/DC reports for a
+      destination workload of ~1500 decisions (initial pick:
+      seanmonstar/httparse per the v0.7 research brief), within a
+      bounded memory budget and CI-tractable runtime. Closes the gap
+      between v0.6's curated 7-verdict suite and "MC/DC for a real
+      Rust application".
+    tags: [v0.7, scaling]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-036
+    type: requirement
+    title: Counter overflow prevention at scale
+    status: proposed
+    description: >
+      The system shall use i64 saturating counters for per-condition
+      hits and shall provide a streaming counter encoding mode for
+      modules whose decision count exceeds the host's exported-globals
+      cap. Property-based fuzz-test corpora must not be able to wrap
+      counters in seconds.
+    tags: [v0.7, scaling, instrumentation]
+    fields:
+      priority: must
+      category: non-functional
+
+  - id: REQ-037
+    type: requirement
+    title: BrTable per-row MC/DC reconstruction
+    status: proposed
+    description: >
+      The system shall extend the per-row instrumentation to br_table
+      dispatches, enabling MC/DC analysis for Rust pattern-match arms
+      with guard expressions. Deferred from v0.6 (DEC-015).
+    tags: [v0.7, mcdc, instrumentation]
+    fields:
+      priority: should
+      category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.8 — visualisation tooling
+  # (provisional; research output at docs/research/v08-visualisation-roadmap.md)
+  # -------------------------------------------------------------------------
+  - id: REQ-038
+    type: requirement
+    title: Interactive visualisation of MC/DC truth tables
+    status: proposed
+    description: >
+      The system shall provide interactive visualisation of per-
+      decision truth tables, condition independent-effect proofs,
+      gap drill-down with copy-paste test stubs, and V-model
+      navigation (REQ → DEC → decision → rows → signed evidence).
+      Per-decision permalinks for citation in PR reviews.
+    tags: [v0.8, visualisation]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-039
+    type: requirement
+    title: MCP server for MC/DC truth-table queries
+    status: proposed
+    description: >
+      The system shall expose an MCP (Model Context Protocol) server
+      mounted on the visualisation Axum router with MC/DC-native
+      tool calls (find_missing_witness, propose_test_row_to_close_gap,
+      verify_gap_closed). The MCP surface is a strict subset of the
+      REST+JSON HTTP surface so humans and agents see the same
+      semantic model.
+    tags: [v0.8, agent-ux, mcp]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-040
+    type: requirement
+    title: Visualiser is itself MC/DC-witnessed (dogfood)
+    status: proposed
+    description: >
+      The system's visualisation component shall be witnessed by
+      witness itself, with Playwright-driven user-flow tests
+      generating MC/DC-relevant decisions. Coverage threshold ratchet:
+      ≥70% v0.8, ≥80% v0.9, ≥90% v1.0. The visualiser visualises
+      its own coverage.
+    tags: [v0.8, dogfood, vmodel]
+    fields:
+      priority: must
+      category: non-functional
+
+  # -------------------------------------------------------------------------
+  # v0.9 — state-of-the-art positioning + autonomous AI-agent gap closure
+  # (provisional; research output at docs/research/v09-soa-and-agent-ux.md)
+  # -------------------------------------------------------------------------
+  - id: REQ-041
+    type: requirement
+    title: Complete MC/DC for a high-complexity Rust application
+    status: proposed
+    description: >
+      The system shall produce reviewable, signed MC/DC evidence for
+      a high-complexity Rust application identified per v0.7's
+      destination workload selection. The evidence chain shall be
+      reproducible from rivet artefacts and the source repository.
+    tags: [v0.9, destination]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-042
+    type: requirement
+    title: Autonomous AI-agent gap-closing loop
+    status: proposed
+    description: >
+      The system shall support an autonomous AI-agent loop: agent
+      reads gap report via MCP, proposes test rows via tool call,
+      witness re-runs and verifies the gap actually closed before
+      signing the new evidence. Agent attribution is recorded in
+      the rivet V-model so test authorship is auditable.
+    tags: [v0.9, agent-ux, autonomy]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-043
+    type: requirement
+    title: Superior PR-review experience vs incumbents
+    status: proposed
+    description: >
+      The system's PR-time review experience shall surpass LDRA /
+      VectorCAST / Cantata / RapiCover on at least three axes:
+      (1) inline truth-table rendering with row citations rather
+      than coverage percentage, (2) tutorial-style gap explanations
+      naming the exact missing condition vector, (3) cross-link
+      navigation REQ → FEAT → DEC → decision → rows → signed
+      predicate. Free under Apache-OR-MIT, where commercial
+      competitors charge five-figure per-seat plus separate
+      qualification kits.
+    tags: [v0.9, positioning, ux]
+    fields:
+      priority: must
+      category: non-functional
+
+  # -------------------------------------------------------------------------
   # v1.0 — qualification under DO-330 via the Check-It pattern
   # -------------------------------------------------------------------------
   - id: REQ-011

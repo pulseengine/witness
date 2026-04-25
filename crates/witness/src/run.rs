@@ -24,7 +24,7 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 use witness_core::Result;
 use witness_core::error::Error;
 use witness_core::instrument::{COUNTER_EXPORT_PREFIX, Manifest};
-use witness_core::run_record::{BranchHit, HarnessSnapshot, RunRecord};
+use witness_core::run_record::{BranchHit, HarnessSnapshot, RunRecord, TraceHealth};
 
 /// Options for `run_module`. Constructed by the CLI layer; exposed as a
 /// struct so library callers can drive witness programmatically.
@@ -190,6 +190,8 @@ fn build_run_record(
         module_path: module_path.to_string_lossy().into_owned(),
         invoked,
         branches,
+        decisions: vec![],
+        trace_health: TraceHealth::default(),
     }
 }
 

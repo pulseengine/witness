@@ -1,0 +1,21 @@
+[package]
+name = "verdict-leap-year"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Witness verdict: textbook 3-condition mixed AND/OR MC/DC example. (year%4==0 && year%100!=0) || year%400==0."
+license = "Apache-2.0 OR MIT"
+
+# Standalone — not part of the witness workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+debug = true
+strip = false
+codegen-units = 1
+lto = false
+panic = "abort"
+opt-level = 1

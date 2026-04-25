@@ -247,6 +247,8 @@ mod tests {
                     hits: h,
                 })
                 .collect(),
+            decisions: vec![],
+            trace_health: Default::default(),
         }
     }
 

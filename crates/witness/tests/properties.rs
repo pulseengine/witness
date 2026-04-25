@@ -107,6 +107,8 @@ prop_compose! {
             module_path: "fixed.wasm".to_string(),
             invoked: vec![],
             branches,
+            decisions: vec![],
+            trace_health: Default::default(),
         }
     }
 }
@@ -139,6 +141,8 @@ prop_compose! {
                 module_path: "fixed.wasm".to_string(),
                 invoked: vec![],
                 branches,
+                decisions: vec![],
+                trace_health: Default::default(),
             }
         };
         (make(hits_a), make(hits_b))

@@ -320,6 +320,387 @@ artifacts:
       - type: depends-on
         target: REQ-011
 
+  - id: DEC-013
+    type: design-decision
+    title: MC/DC instrumentation primitive — linear-memory trace buffer with row markers
+    status: draft
+    description: >
+      v0.6 instruments br_if and if-else decisions with appends to a
+      linear-memory trace buffer. Each append writes a fixed-size
+      record carrying decision_id, condition_branch_id, and the
+      evaluated boolean. The wasmtime runner emits row-marker records
+      between test invocations; the reporter parses the trace into
+      DecisionRow entries with sparse `evaluated` maps. br_table
+      retains v0.5's per-target counter globals (DEC-015 defers
+      br_table MC/DC to v0.7). Trace-buffer size is bounded; overflow
+      is recorded in a trace_health field on RunRecord and causes the
+      reporter to refuse MC/DC verdicts on affected decisions
+      (safety-critical conservative default). Full design at
+      docs/research/v06-instrumentation-primitive.md.
+    rationale: >
+      Trace-buffer with row markers preserves Rust source-level
+      short-circuit semantics natively — short-circuited conditions
+      are simply absent from the row's sparse evaluated map, no
+      eager-evaluation emulation required. Pattern-counter primitive
+      would force evaluation of all conditions per invocation and
+      cannot tell "condition was F" from "condition was not reached"
+      without an additional per-condition evaluated flag, growing the
+      counter footprint to 4^N. Trace-buffer is what every cited
+      safety-critical tool uses: LDRA TBmanager records branch-
+      condition pairs to a trace, VectorCAST/MCDC writes
+      decision-row events to a per-test log, Cantata's branch-
+      condition recording is structurally identical, and gcov 14+'s
+      pending -fmcdc patch follows the same pattern. The choice also
+      aligns with the v0.8 Axum+HTMX UI which can render the trace
+      stream directly without an intermediate transformation.
+    alternatives: >
+      Pattern-counter+reset (Option A): simpler instrumentation but
+      requires eager evaluation (semantic violation for side-effecting
+      conditions per DEC-014) plus reset-snapshot machinery in the
+      runner; rejected. Hybrid pattern-counter for ≤4-cond decisions
+      plus trace-buffer for larger ones: rejected as unnecessary
+      complexity — trace-buffer scales adequately for v0.6 verdict
+      sizes (max 5 conditions in safety_envelope). Per-condition
+      tee-and-record into globals: rejected because globals do not
+      preserve row identity without per-row reset.
+    tags: [v0.6, mcdc, instrumentation]
+    links:
+      - type: satisfies
+        target: REQ-027
+      - type: refines
+        target: DEC-006
+
+  - id: DEC-014
+    type: design-decision
+    title: Short-circuit semantics preserved by instrumentation
+    status: draft
+    description: >
+      Witness instrumentation shall not force evaluation of conditions
+      that the source-level operator would short-circuit. Conditions
+      that were not evaluated in a given test row are recorded as
+      NotEvaluated (distinct from True or False) in the per-row
+      condition vector. The MC/DC reporter accepts partial vectors
+      via masking-MC/DC analysis (DO-178C accepted variant since 1992).
+    rationale: >
+      Forcing eager evaluation would change observable behaviour for
+      any condition with side effects — violates REQ-004 semantic
+      preservation invariant. Masking MC/DC produces valid
+      independent-effect proofs from partial-evaluation vectors and
+      is the standard regulatory accept under DO-178C; choosing
+      unique-cause MC/DC exclusively would make many real-world
+      decisions unprovable. The RunRecord per-row schema carries the
+      NotEvaluated marker explicitly so reporters can distinguish
+      "condition was F" from "condition was not reached".
+    alternatives: >
+      Eager evaluation with side-effect-free assumption — rejected
+      because we cannot statically determine side-effect freedom across
+      arbitrary Rust conditions; even pure conditions may have type-
+      conversion observability. Per-condition "evaluated" flag in
+      addition to T/F — same effect via more complex schema; rolled
+      into a single tri-state NotEvaluated/T/F. Unique-cause-only
+      MC/DC — rejected as too restrictive for real-world decisions.
+    tags: [v0.6, mcdc, instrumentation, semantics]
+    links:
+      - type: satisfies
+        target: REQ-027
+      - type: refines
+        target: REQ-004
+
+  - id: DEC-015
+    type: design-decision
+    title: BrTable MC/DC deferred to v0.7
+    status: draft
+    description: >
+      v0.6 emits per-row data only for br_if and if-else decisions.
+      br_table dispatches remain branch-coverage-only, retaining the
+      per-target hit counters from v0.2 / DEC-008 unchanged. MC/DC
+      analysis for table dispatch lands in v0.7 alongside the scaling
+      work, where real-world workloads will surface the table-dispatch
+      patterns we need to model correctly.
+    rationale: >
+      br_table's source-level analogue is the Rust `match` expression
+      with potential guard expressions per arm. The MC/DC interpretation
+      conflates "arm taken" with "guard expressions evaluated"; modelling
+      this correctly requires DWARF-driven guard reconstruction which
+      is non-trivial and not on the v0.6 critical path. The verdict
+      suite (REQ-030) demonstrates MC/DC capability without table
+      dispatch; deferring keeps v0.6 scope tractable while leaving
+      v0.7 a natural home for the work alongside scaling research.
+    alternatives: >
+      Block v0.6 on table-dispatch MC/DC — rejected as scope creep that
+      would defer the core MC/DC delivery. Approximate br_table MC/DC
+      by treating it as N independent conditions — rejected because
+      it misrepresents source-level semantics; emitting nothing is
+      better than emitting wrong evidence. Defer to v1.0 — rejected
+      because the v0.7 scaling work naturally surfaces table-dispatch
+      patterns from real workloads.
+    tags: [v0.6, mcdc, instrumentation, scope]
+    links:
+      - type: satisfies
+        target: REQ-027
+      - type: refines
+        target: DEC-008
+
+  - id: DEC-016
+    type: design-decision
+    title: Verdict suite composition — canonical compound-decision shapes
+    status: draft
+    description: >
+      The v0.6 verdict suite covers seven shapes: leap_year (3-cond
+      mixed AND/OR — textbook MC/DC example), range_overlap (2-cond
+      AND — minimal compound), triangle (Myers-paper classifier),
+      state_guard (4-cond AND chain), mixed_or_and (4-cond nested
+      operators (a||b)&&(c||d)), safety_envelope (5-cond scaling
+      case beyond LLVM's 6-condition cap), parser_dispatch (real
+      Rust crate anchor — non-synthetic).
+    rationale: >
+      Each verdict probes a distinct shape of source-level decision
+      so downstream consumers can verify witness's MC/DC report
+      against a hand-derivable expected truth table. Shapes were
+      chosen for coverage of: condition count from minimal to
+      scaling-stress; operator mix from pure-AND through mixed
+      precedence to mixed nesting; synthetic for reproducibility plus
+      a real-world anchor for credibility. Seven is the number that
+      controls every shape called out in the v0.6 plan; fewer leaves
+      shape gaps; more dilutes attention without adding shape
+      coverage.
+    alternatives: >
+      Smaller suite (3-4 verdicts) — rejected after explicit user
+      direction to include all shapes for control. Larger suite (10+)
+      — no additional shape coverage; would dilute attention.
+      Synthetic-only — rejected because parser_dispatch's real-world
+      anchor is needed for credibility against state-of-the-art
+      tools (per v0.9 superiority brief).
+    tags: [v0.6, verdict-suite, vmodel]
+    links:
+      - type: satisfies
+        target: REQ-030
+
+  - id: DEC-017
+    type: design-decision
+    title: V-model traceability matrix as release asset
+    status: draft
+    description: >
+      Every release shall include a JSON+HTML traceability matrix
+      generated by `rivet trace` from artifacts/*.yaml at release
+      time, bundled in the compliance archive. The matrix traces
+      every requirement through satisfying features, supporting
+      design decisions, verifying verdicts, test rows, and signed
+      predicates. No hand-curated traceability — single source of
+      truth is the rivet artefact graph.
+    rationale: >
+      V-model evidence must be reproducible and auditable.
+      Generating from rivet at release time eliminates drift between
+      artefacts and prose claims. Compliance-archive bundling under
+      DSSE signature makes the matrix immutable for downstream
+      audit. This closes the user concern that without provable
+      V-model usage and knowledge, nothing else helps.
+    alternatives: >
+      Maintain a separate hand-written traceability document —
+      rejected because it drifts from the artefact graph. Skip the
+      matrix and rely on rivet ad-hoc inspection — rejected because
+      the compliance archive needs to be self-contained for offline
+      audit (no rivet binary required to read evidence).
+    tags: [v0.6, vmodel, compliance]
+    links:
+      - type: satisfies
+        target: REQ-032
+
+  - id: DEC-018
+    type: design-decision
+    title: Compliance bundle populated by verdict-suite execution
+    status: draft
+    description: >
+      .github/actions/compliance shall execute the verdict suite
+      (instrument → run → report → predicate → attest → lcov →
+      rivet-evidence) during release and bundle the resulting
+      artefacts into the compliance evidence archive. v0.5's empty-
+      bundle structural placeholder is replaced with real evidence.
+    rationale: >
+      The bundle is the showable proof of every release. Empty
+      directories are an admission that the release has nothing to
+      show; real artefacts make the V-model claim auditable. Cost is
+      bounded: the verdict suite is intentionally small (7 verdicts),
+      total CI overhead per release is minutes not hours.
+    alternatives: >
+      Keep the bundle empty as a structural placeholder — rejected
+      after explicit user direction. Generate dummy predicates —
+      rejected because they would be misleading in audit. Run only
+      a subset of verdicts in compliance bundle — rejected because
+      then the bundle is non-deterministic; deterministic full-suite
+      execution is the right behaviour.
+    tags: [v0.6, release, compliance]
+    links:
+      - type: satisfies
+        target: REQ-033
+
+  - id: DEC-019
+    type: design-decision
+    title: v0.7 destination workload — seanmonstar/httparse
+    status: proposed
+    description: >
+      v0.7's scaling target is seanmonstar/httparse — RFC 7230
+      parser, ~1500 decisions, clean wasm32-wasip2 build (no
+      ring/native deps), real test suite, shipped via hyper into
+      much of the Rust web stack. Backups: wasmparser (5k-decision
+      density stress test), witness-core itself (dogfood + rivet
+      integration test). Rejected: rustls (ring's wasm32 support
+      is partial as of 2026-04 per rustls #808).
+    rationale: >
+      httparse is the right scaling middle-ground: substantial
+      enough to stress witness's machinery (1500 decisions, real
+      compound boolean logic), simple enough that a coverage gap
+      is reviewable by hand, and shipped through hyper so any
+      coverage there has supply-chain leverage. v0.9's "high-
+      complexity" workload selection happens at v0.7 close,
+      informed by what httparse exposed.
+    alternatives: >
+      Choose rustls for v0.7 — rejected due to ring's partial
+      wasm32 support. Choose tokio core for v0.7 — likely too much
+      native I/O abstraction. Build a synthetic 1500-decision
+      torture test — rejected because real-world workloads expose
+      patterns synthetic tests miss.
+    tags: [v0.7, destination]
+    links:
+      - type: satisfies
+        target: REQ-035
+
+  - id: DEC-020
+    type: design-decision
+    title: v0.8 visualisation architecture — wstd-axum + maud + HTMX
+    status: proposed
+    description: >
+      v0.8 ships witness-viz as an Axum Router compiled to
+      wasm32-wasip2 via wstd-axum (https://docs.rs/wstd-axum/),
+      runnable standalone via `wasmtime serve` or composed
+      in-process via `wac plug`. Server-side templating with
+      maud (avoids the format!-string maintenance pain rivet's
+      serve module exhibits at 5908 lines). HTMX 2.x bundled
+      inline as include_bytes! — same pattern rivet uses for
+      its inline htmx.min.js. Primary data path: read
+      run-record.json from a --dir-mounted directory.
+    rationale: >
+      Three constraints forced the choice. (1) The visualiser
+      must be deployable as a Wasm component for the v0.6 "the
+      deployable IS the wasm component" thesis to extend to
+      tooling. wstd-axum is the only path to Axum on wasm32-wasip2
+      that's currently maintained. (2) Server-side templating
+      beats client-side rendering for accessibility and for
+      auditable HTML evidence (the rendered page is itself a
+      coverage-evidence artefact). (3) HTMX preserves a single
+      mental model: server emits HTML fragments, client swaps
+      them in — no separate API surface to keep in sync with
+      the UI. The MCP transport (rmcp::transport::
+      streamable_http_server) mounts on the same Axum router so
+      humans and agents see the same semantic model.
+    alternatives: >
+      Yew or Leptos with WASM client-side rendering — rejected:
+      the visualiser would be its own Wasm component AND the
+      page contents would be opaque to non-Wasm consumers (curl
+      pulls JSON, not the rendered evidence). Native Axum (no
+      wasm component target) — rejected: breaks the deployable-
+      component thesis. Static-HTML report generator — rejected:
+      lacks interactivity needed for gap drill-down and per-
+      decision navigation.
+    tags: [v0.8, visualisation, architecture]
+    links:
+      - type: satisfies
+        target: REQ-038
+      - type: satisfies
+        target: REQ-039
+
+  - id: DEC-021
+    type: design-decision
+    title: v0.9 superiority axes — Rust+Wasm+signed+agent-native
+    status: proposed
+    description: >
+      v0.9 positions witness against LDRA, VectorCAST, Cantata,
+      BullseyeCoverage, Squore, gcov+gcovr, and RapiCover on
+      three superiority axes: (1) MCP server with MC/DC-native
+      tool calls (find_missing_witness, propose_test_row_to_close_
+      gap, verify_gap_closed) plus signed agent attribution in
+      the rivet V-model — no commercial competitor ships this;
+      (2) DSSE-signed in-toto coverage predicates as the default
+      report format — no commercial competitor ships this;
+      (3) PR-time truth-table review with tutorial-style gap
+      explanations cross-linking REQ → FEAT → DEC → decision →
+      rows.
+    rationale: >
+      The market scan in docs/research/v09-soa-and-agent-ux.md
+      identified RapiCover as the closest competitor (already
+      ships unbounded conditions and missing-vector highlighting
+      for C/C++/Ada). Witness cannot beat RapiCover on
+      certification heritage in Ada DAL A avionics; instead, the
+      superiority claim narrows to *Rust-via-Wasm projects that
+      want signed evidence and agent integration*. This sharper
+      positioning is auditable: it states what witness is for
+      and what it is not for, rather than aspirational
+      "best MC/DC tool" framing. The MCP angle is the real
+      novelty — Parasoft shipped a generic MCP server in
+      March 2026 but nothing MC/DC-native exists as of 2026-04.
+    alternatives: >
+      Position as "best MC/DC tool" — rejected as aspirational
+      and not defensible against RapiCover's Ada heritage.
+      Position as "MC/DC for everything" — rejected as too
+      broad; the Rust+Wasm+signed+agent-native niche is real
+      and underserved. Skip the competitive positioning entirely
+      — rejected because v0.9 is the destination release and
+      needs the positioning brief to inform v1.0 qualification
+      strategy.
+    tags: [v0.9, positioning, agent-ux]
+    links:
+      - type: satisfies
+        target: REQ-041
+      - type: satisfies
+        target: REQ-042
+      - type: satisfies
+        target: REQ-043
+
+  - id: DEC-022
+    type: design-decision
+    title: Roadmap composition — v0.6 redo defers runtime to v0.6.1
+    status: draft
+    description: >
+      v0.6.0 ships the consumer side of the MC/DC redo — schema
+      additions, mcdc_report module, verdict suite scaffolding
+      with hand-derived TRUTH-TABLE.md oracles, V-model artefact
+      graph, four research-agent docs covering v0.6.1, v0.7,
+      v0.8, v0.9. The on-Wasm trace-buffer instrumentation
+      (recommended in docs/research/v06-instrumentation-primitive.md)
+      lands as v0.6.1 because the engineering scope of the
+      instrumentation rewrite plus runner extension plus end-to-
+      end verdict execution exceeds what can be shipped in one
+      release alongside the consumer-side work.
+    rationale: >
+      Three reasons. (1) Independence: schema, reporter, and
+      verdict oracles are independent of the runtime path; they
+      can be reviewed and adopted by downstream consumers
+      (rivet, sigil) immediately. (2) Verifiability: the
+      reporter's correctness is verified against hand-derived
+      TRUTH-TABLE.md oracles via 6 unit tests (and against the
+      `mcdc_report::tests::leap_year_full_mcdc` test that
+      reproduces the canonical 3-condition mixed AND/OR
+      example). (3) Honesty: shipping v0.6.0 with a half-working
+      runtime path would repeat v0.5's overclaim mistake. Better
+      to ship the foundation and clearly mark v0.6.1 as the
+      closing release than to ship a v0.6.0 that asserts
+      capabilities it doesn't deliver.
+    alternatives: >
+      Block v0.6.0 on the runtime instrumentation rewrite —
+      rejected because it concentrates risk and delays the
+      consumer-side value. Skip the v0.6 release entirely and
+      ship as v0.7 — rejected because the v0.6 redo of v0.5's
+      overclaim is an explicit user requirement and should not
+      be elided. Ship v0.6 with the runtime stubbed but
+      claimed-as-working — rejected as a repeat of v0.5's
+      pattern.
+    tags: [v0.6, scope, release-strategy]
+    links:
+      - type: satisfies
+        target: REQ-027
+      - type: refines
+        target: DEC-013
+
   - id: DEC-011
     type: design-decision
     title: Keep walrus as the rewrite backend in v0.2; revisit in v0.3

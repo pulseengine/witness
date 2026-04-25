@@ -253,6 +253,8 @@ mod tests {
             module_path: "app.wasm".to_string(),
             invoked: vec!["f".to_string()],
             branches,
+            decisions: vec![],
+            trace_health: Default::default(),
         }
     }
 

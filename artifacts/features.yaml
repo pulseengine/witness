@@ -193,6 +193,178 @@ artifacts:
       - type: satisfies
         target: REQ-012
 
+  - id: FEAT-012
+    type: feature
+    title: v0.6 — real MC/DC truth tables and verdict suite
+    status: draft
+    description: >
+      Decision-level instrumentation primitive (Option C) emitting
+      per-row condition vectors. Exact primitive (pattern-counters
+      with reset vs linear-memory trace buffer with row markers)
+      selected per DEC-013 following the v06-instrumentation-primitive
+      research output. MC/DC reporter emits truth tables, independent-
+      effect citations under unique-cause + masking variants, gap
+      analysis with row-closure recommendations. Verdict suite ships
+      seven canonical compound-decision shapes from 2 to 5 conditions
+      across pure-AND, pure-OR, mixed operators, plus a real Rust
+      crate anchor. Strict source-level short-circuit semantics
+      preserved (DEC-014); BrTable MC/DC deferred to v0.7 (DEC-015).
+    tags: [v0.6, mcdc]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-027
+      - type: satisfies
+        target: REQ-028
+      - type: satisfies
+        target: REQ-029
+      - type: satisfies
+        target: REQ-030
+      - type: refines
+        target: FEAT-002
+
+  - id: FEAT-013
+    type: feature
+    title: v0.6 — witness-core.wasm signed release asset
+    status: draft
+    description: >
+      Release pipeline builds witness-core to wasm32-wasip2, signs
+      the .wasm binary with the release DSSE key, attaches the signed
+      artefact and verification key fingerprint to the GitHub release
+      alongside the existing platform binaries. Closes the v0.5 gap
+      where the wasm artefact built in CI but never shipped as a
+      release asset.
+    tags: [v0.6, release, deployment]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-031
+
+  - id: FEAT-014
+    type: feature
+    title: v0.6 — V-model traceability matrix and populated compliance bundle
+    status: draft
+    description: >
+      Generate REQ → FEAT → DEC → verdict → evidence traceability
+      matrix in JSON and HTML during release via `rivet trace`.
+      Bundle into compliance evidence archive alongside real coverage
+      reports, real run records, real signed predicates, and real
+      branch manifests sourced from verdict-suite execution. Replaces
+      v0.5's empty-bundle structural placeholder.
+    tags: [v0.6, vmodel, compliance]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-032
+      - type: satisfies
+        target: REQ-033
+
+  - id: FEAT-015
+    type: feature
+    title: v0.6.1 — on-Wasm trace-buffer instrumentation
+    status: proposed
+    description: >
+      Implementation of the trace-buffer primitive recommended in
+      docs/research/v06-instrumentation-primitive.md: exported
+      `__witness_trace` linear memory, header-stored cursor and
+      overflow flag, 8-byte fixed records carrying decision_id,
+      condition_index, evaluated_value, record_kind. Helper exports
+      `__witness_trace_reset`, `__witness_row_marker(u32)`,
+      `__witness_trace_snapshot(out_ptr, out_len)`. Walrus-side
+      rewrite for br_if and if-else; br_table retains v0.5 counter
+      globals (DEC-015 v0.7 deferral).
+    tags: [v0.6.1, instrumentation]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-034
+      - type: refines
+        target: FEAT-012
+
+  - id: FEAT-016
+    type: feature
+    title: v0.7 — scaling architecture
+    status: proposed
+    description: >
+      Streaming counter encoding for modules whose decision count
+      exceeds host-exported-globals caps. i64 saturating counters.
+      Inlined-subroutine handling in DWARF reconstruction (closes
+      the v0.4 over-grouping gap for inlined hot paths). Auto-
+      generated synthetic requirements (REQ-AUTO-<crate>-<file>) so
+      hand-mapping is not required at 5k-decision scale. Module-
+      rollup default report (per-branch wall is unreadable past
+      ~100 decisions). Destination workload: seanmonstar/httparse.
+    tags: [v0.7, scaling]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-035
+      - type: satisfies
+        target: REQ-036
+      - type: satisfies
+        target: REQ-037
+
+  - id: FEAT-017
+    type: feature
+    title: v0.8 — Axum+HTMX wasm-component visualiser
+    status: proposed
+    description: >
+      Witness-viz Axum router compiled to wasm32-wasip2 via
+      wstd-axum, with maud server-side templating and HTMX 2.x
+      bundled inline as include_bytes!. Runnable standalone via
+      `wasmtime serve` or composed in-process via `wac plug`.
+      Primary data path: read run-record.json from a --dir-mounted
+      directory; WIT composition with witness-core deferred to
+      v0.8.1. AI-agent surface = REST+JSON content-negotiation +
+      MCP transport (rmcp::transport::streamable_http_server)
+      mounted on the same Axum router; strict subset of HTTP
+      tools, no MCP-private surface. Per-decision permalinks
+      `/decision/<module>/<function>/<offset>` rendering
+      uncapped condition counts. Gap drill-down emits copy-paste
+      Rust test stubs. Playwright tests reuse rivet's pattern;
+      visualiser visualises its own coverage as the v0.8 demo.
+    tags: [v0.8, visualisation, agent-ux]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-038
+      - type: satisfies
+        target: REQ-039
+      - type: satisfies
+        target: REQ-040
+
+  - id: FEAT-018
+    type: feature
+    title: v0.9 — autonomous agent gap-closing loop + signed attribution
+    status: proposed
+    description: >
+      End-to-end agent-native MCP loop: agent reads gap report via
+      MCP tool call, proposes test rows via structured tool input,
+      witness re-runs and verifies gap actually closed before
+      signing new evidence with sigil DSSE. Agent identity recorded
+      in the rivet V-model trace as the test-row author so
+      contributions are attributable. Plus the human-side ergonomics
+      that make witness superior to LDRA/VectorCAST/Cantata/RapiCover
+      on three axes (inline truth table, tutorial gap explanations,
+      REQ→evidence cross-link navigation). Destination workload:
+      complete MC/DC for the v0.7-selected real Rust application.
+    tags: [v0.9, agent-ux, signed-attribution, positioning]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-041
+      - type: satisfies
+        target: REQ-042
+      - type: satisfies
+        target: REQ-043
+
   - id: FEAT-005
     type: feature
     title: v1.0 — Check-It qualification artifact

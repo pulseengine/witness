@@ -197,10 +197,14 @@ enum Command {
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum ReportFormat {
-    /// Human-readable summary.
+    /// Human-readable branch-coverage summary.
     Text,
-    /// Machine-readable JSON for tools (rivet, CI).
+    /// Machine-readable JSON branch coverage for tools (rivet, CI).
     Json,
+    /// Human-readable MC/DC truth tables, verdicts, gap analysis (v0.6).
+    Mcdc,
+    /// Machine-readable MC/DC JSON, schema https://pulseengine.eu/witness-mcdc/v1 (v0.6).
+    McdcJson,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -240,13 +244,26 @@ fn main() -> Result<()> {
             run::run_module(&options)?;
         }
         Command::Report { input, format } => {
-            let report = witness_core::report::from_run_file(&input)?;
             // SAFETY-REVIEW: CLI's job is to write the report to stdout;
             // `println!` is the intended output channel for end users.
             #[allow(clippy::print_stdout)]
             match format {
-                ReportFormat::Text => println!("{}", report.to_text()),
-                ReportFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+                ReportFormat::Text => {
+                    let report = witness_core::report::from_run_file(&input)?;
+                    println!("{}", report.to_text());
+                }
+                ReportFormat::Json => {
+                    let report = witness_core::report::from_run_file(&input)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                ReportFormat::Mcdc => {
+                    let report = witness_core::mcdc_report::from_run_file(&input)?;
+                    println!("{}", report.to_text());
+                }
+                ReportFormat::McdcJson => {
+                    let report = witness_core::mcdc_report::from_run_file(&input)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
             }
         }
         Command::Merge { inputs, output } => {

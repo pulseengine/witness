@@ -1,0 +1,20 @@
+[package]
+name = "verdict-safety-envelope"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Witness verdict: 5-condition AND — safety-envelope check beyond LLVM's 6-condition cap territory."
+license = "Apache-2.0 OR MIT"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+debug = true
+strip = false
+codegen-units = 1
+lto = false
+panic = "abort"
+opt-level = 1

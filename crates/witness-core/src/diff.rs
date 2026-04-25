@@ -370,6 +370,8 @@ mod tests {
             module_path: "x.wasm".to_string(),
             invoked: vec![],
             branches,
+            decisions: vec![],
+            trace_health: Default::default(),
         };
         std::fs::write(path, serde_json::to_string(&r).unwrap()).unwrap();
     }

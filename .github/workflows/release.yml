@@ -110,9 +110,36 @@ jobs:
           name: compliance-evidence
           path: ${{ steps.evidence.outputs.archive-path }}
 
+  wasm-component:
+    name: Build witness-core.wasm component
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-wasm32-wasip2
+
+      - name: Build witness-core for wasm32-wasip2
+        run: cargo build --release --target wasm32-wasip2 -p witness-core
+
+      - name: Stage wasm asset
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          ASSET="witness-core-${VERSION}-wasm32-wasip2.wasm"
+          cp target/wasm32-wasip2/release/witness_core.wasm "$ASSET"
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-component
+          path: ${{ env.ASSET }}
+
   create-github-release:
     name: Create GitHub Release
-    needs: [build-binaries, compliance]
+    needs: [build-binaries, compliance, wasm-component]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -123,7 +150,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.wasm" \) -exec cp {} release-assets/ \;
           cd release-assets && sha256sum * > SHA256SUMS.txt
 
       - name: Create Release

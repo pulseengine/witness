@@ -7,6 +7,139 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-25
+
+### What v0.6 is — and what it is not
+
+v0.5.0 shipped DWARF-grouped branch coverage but the report layer
+computed *per-branch hit counts*, not MC/DC truth tables. The CHANGELOG
+described it as MC/DC; that was an overclaim. v0.6 is the redo: the
+schema, the reporter, the verdict suite, and the V-model artefact graph
+that real MC/DC requires. The on-Wasm instrumentation that captures
+per-row condition vectors lands as a v0.6.1 follow-up — see "Deferred
+to v0.6.1" below.
+
+### Added — schema and reporter
+
+- **`RunRecord` schema v3**: new `decisions: Vec<DecisionRecord>` and
+  `trace_health: TraceHealth` fields (REQ-027, FEAT-012, DEC-013).
+  `DecisionRecord` carries per-decision `rows: Vec<DecisionRow>`; each
+  `DecisionRow` has a sparse `evaluated: BTreeMap<u32, bool>` so
+  short-circuited conditions are first-class evidence (DEC-014). v0.5
+  records (schema "2") still load — both new fields default to empty.
+- **`witness-core::mcdc_report` module**: per-decision truth tables,
+  independent-effect citations under masking MC/DC (DO-178C accepted
+  variant), gap analysis with row-closure recommendations (REQ-028,
+  REQ-029). 6 unit tests covering all canonical decision shapes pass.
+- **`witness report --format mcdc`** and **`--format mcdc-json`**:
+  CLI surface for the new reporter. Schema URL
+  `https://pulseengine.eu/witness-mcdc/v1`.
+
+### Added — verdict suite (REQ-030, FEAT-012, DEC-016)
+
+The `verdicts/` directory contains seven canonical compound-decision
+verdicts, each as a self-contained Rust crate that compiles to
+`wasm32-wasip2`. Each verdict ships:
+
+- `Cargo.toml` — standalone, opts out of the witness workspace.
+- `src/lib.rs` — the predicate plus `run_row_<n>` exports, one per
+  test row.
+- `TRUTH-TABLE.md` — the **expected** MC/DC analysis, hand-derived,
+  with a machine-readable JSON block. Acts as the verification oracle
+  for the `mcdc_report` reporter.
+- `V-MODEL.md` — one-page traceability: REQ → DEC → conditions → rows
+  → evidence.
+- `build.sh` — standalone build to `wasm32-wasip2`.
+
+The seven verdicts and their shapes:
+
+| Verdict | Decision | Conds | Rows |
+|---|---|---|---|
+| `leap_year` | `(y%4==0 && y%100!=0) \|\| y%400==0` | 3 | 4 |
+| `range_overlap` | `a.start <= b.end && b.start <= a.end` | 2 | 3 |
+| `triangle` | Myers-paper "not a triangle" check (3-cond OR) | 3 | 4 |
+| `state_guard` | TLS handshake guard (4-cond AND chain) | 4 | 5 |
+| `mixed_or_and` | `(a\|\|b) && (c\|\|d)` | 4 | 5 |
+| `safety_envelope` | 5-cond automotive envelope (beyond LLVM 6-cap) | 5 | 6 |
+| `parser_dispatch` | RFC 3986 URL authority validator (real-world anchor) | 5 | 6 |
+
+The reporter's correctness has been verified by reproducing each
+verdict's hand-derived `TRUTH-TABLE.md` from a hand-curated
+`DecisionRecord` in unit tests.
+
+### Added — V-model artefact graph (REQ-032, FEAT-014, DEC-017)
+
+- 7 new requirements (REQ-027..033)
+- 3 new features (FEAT-012..014)
+- 6 new design decisions (DEC-013..018), with DEC-013 documenting the
+  trace-buffer instrumentation primitive recommendation from the
+  `v06-instrumentation-primitive` research brief.
+- `rivet validate` PASS across the workspace.
+
+### Added — research roadmap (4 parallel agent docs, ~19k words total)
+
+- `docs/research/v06-instrumentation-primitive.md` — chooses linear-
+  memory trace buffer with row markers as the v0.6.1 instrumentation
+  primitive. Wasm-side rewrite sketch, schema diff, short-circuit
+  semantics policy, BrTable v0.7 deferral, prior-art citations,
+  implementation risk register.
+- `docs/research/v07-scaling-roadmap.md` — destination workload pick:
+  `seanmonstar/httparse` (~1500 decisions, clean wasm32-wasip2 build).
+  v0.7 capability list (streaming counter encoding, i64 saturating
+  counters, inlined-subroutine DWARF, auto-generated synthetic
+  requirements, module-rollup default report). Top scaling risk:
+  DWARF parsing memory at scale.
+- `docs/research/v08-visualisation-roadmap.md` — architecture call:
+  `wstd-axum` + `maud` + HTMX 2.x, runnable as `wasmtime serve` or
+  composed via `wac plug`. AI-agent surface = REST+JSON content
+  negotiation plus `rmcp` MCP transport mounted on the same Axum
+  router. Playwright tests reuse rivet's pattern; visualiser
+  visualises its own coverage (the v0.8 demo screenshot).
+- `docs/research/v09-soa-and-agent-ux.md` — competitive scan
+  (LDRA, VectorCAST, Cantata, BullseyeCoverage, Squore, gcov+gcovr).
+  v0.9 positioning: first MC/DC tool with end-to-end signed evidence
+  and agent-native MCP API. Top 3 superiority features identified.
+  Biggest competitive risk: RapiCover already has unbounded
+  conditions plus DO-178C heritage for C/C++/Ada.
+
+### Deferred to v0.6.1
+
+- **On-Wasm instrumentation that captures per-row data.** The
+  trace-buffer rewrite from `v06-instrumentation-primitive.md` is
+  scoped for v0.6.1. v0.6.0 ships the consumer side (schema +
+  reporter + verdict suite oracles + CLI). The `witness instrument`
+  subcommand still emits v0.5-style per-counter instrumentation;
+  v0.6.1 extends it with the trace primitive so `witness run`
+  produces populated `RunRecord.decisions`.
+- **End-to-end verdict execution.** Each verdict's `src/lib.rs`,
+  `TRUTH-TABLE.md`, and `V-MODEL.md` are in place; `cargo build
+  --target wasm32-wasip2` against each verdict crate produces a
+  `.wasm`. The reporter's correctness has been verified against the
+  hand-derived truth tables in unit tests, and the verdicts' V-MODEL
+  evidence chains will be populated by `compliance` when v0.6.1's
+  instrumentation lands.
+
+### Why ship the foundation as 0.6.0
+
+The schema, reporter, verdict-suite oracles, and V-model artefact
+graph are independent of the instrumentation runtime path. Shipping
+them as v0.6.0 lets downstream consumers (rivet, sigil, agent
+integrations) build against the v3 schema and the
+`witness-mcdc/v1` predicate type now, while the instrumentation
+work continues in the v0.6.1 release. The verdicts' `TRUTH-TABLE.md`
+files are the verification oracles v0.6.1 will reproduce.
+
+### Implements / Verifies
+
+- Implements: REQ-027 (truth-table emission), REQ-028 (independent-
+  effect citations), REQ-029 (gap-closure recommendations), REQ-030
+  (verdict suite — scaffolded), REQ-032 (V-model traceability —
+  artefact graph), REQ-033 (compliance bundle structure).
+- Implements: FEAT-012 (real MC/DC reporter — consumer side),
+  FEAT-014 (V-model artefact graph).
+- Verifies: 6 mcdc_report unit tests reproduce each canonical verdict
+  shape's expected truth table and pair-finding outcomes.
+
 ## [0.5.0] — 2026-04-25
 
 ### Added
