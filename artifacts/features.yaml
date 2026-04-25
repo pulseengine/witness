@@ -2,12 +2,14 @@ artifacts:
   - id: FEAT-001
     type: feature
     title: v0.1 — branch-level coverage on Wasm
-    status: draft
+    status: approved
     description: >
       CLI with instrument / run / report subcommands. Strict per-instruction
-      counting at br_if, br_table, if. No MC/DC decomposition yet. First
-      empirical deliverable behind the variant-pruning argument.
-    tags: [v0.1]
+      counting at br_if (per-taken), if-else (per-arm), br_table (executed-
+      only; per-target counting moved to FEAT-007 in v0.2). Embedded
+      wasmtime runner. Counters exported as __witness_counter_<id>
+      mutable globals. Shipped 2026-04-24 as v0.1.0.
+    tags: [v0.1, shipped]
     fields:
       phase: phase-1
     links:
@@ -22,14 +24,16 @@ artifacts:
 
   - id: FEAT-002
     type: feature
-    title: v0.2 — MC/DC condition decomposition
+    title: v0.2 — MC/DC condition decomposition via DWARF reconstruction
     status: draft
     description: >
       DWARF-informed reconstruction of source-level decisions from Wasm
-      br_if sequences. Strict-per-br_if fallback when DWARF absent.
-      Deserves an accompanying short paper documenting the decision-
-      granularity algorithm and its soundness.
-    tags: [v0.2]
+      br_if sequences, producing MC/DC condition tables per decision.
+      Strict per-br_if fallback when DWARF is absent (FEAT-001 behaviour).
+      No artificial condition-count cap — supports decisions of any size.
+      Soundness writeup is FEAT-009; per-target br_table is FEAT-007;
+      subprocess harness is FEAT-006.
+    tags: [v0.2, mcdc]
     fields:
       phase: phase-2
     links:
@@ -37,14 +41,74 @@ artifacts:
         target: REQ-005
       - type: satisfies
         target: REQ-006
+      - type: satisfies
+        target: REQ-015
+      - type: refines
+        target: FEAT-001
+
+  - id: FEAT-006
+    type: feature
+    title: v0.2 — subprocess harness mode
+    status: draft
+    description: >
+      Add `witness run --harness <cmd>` mode that spawns a user-supplied
+      subprocess with WITNESS_MODULE / WITNESS_OUTPUT / WITNESS_MANIFEST
+      env vars set, and merges the harness-written counter dump with the
+      manifest. Escape hatch for non-wasmtime runtimes (browser-based
+      tests, native test frameworks, wasi-preview2-only modules).
+    tags: [v0.2, runtime]
+    fields:
+      phase: phase-2
+    links:
+      - type: satisfies
+        target: REQ-014
+
+  - id: FEAT-007
+    type: feature
+    title: v0.2 — per-target br_table counting
+    status: draft
+    description: >
+      Replace v0.1's single "executed" counter for br_table with one
+      counter per target via a __witness_brtable_<id>(selector) helper-
+      function-call pattern (DEC-008). When DWARF is present, each target
+      is mapped to its source-level match arm.
+    tags: [v0.2, instrumentation]
+    fields:
+      phase: phase-2
+    links:
+      - type: satisfies
+        target: REQ-013
+      - type: refines
+        target: FEAT-001
+
+  - id: FEAT-009
+    type: feature
+    title: v0.2 — coverage-lifting paper
+    status: draft
+    description: >
+      Short paper at docs/paper/v0.2-mcdc-wasm.md with: motivation
+      (C-macro precedent + JaCoCo lateral), formal MC/DC at Wasm,
+      reconstruction algorithm, coverage-lifting soundness argument,
+      comparison with rustc-mcdc / Clang / wasmcov, regulatory framing.
+      Cites arxiv:2409.08708 directly. Sources DO-178C post-preprocessor
+      MC/DC clause.
+    tags: [v0.2, research, paper]
+    fields:
+      phase: phase-2
+    links:
+      - type: satisfies
+        target: REQ-006
+      - type: satisfies
+        target: REQ-016
 
   - id: FEAT-003
     type: feature
     title: v0.3 — rivet and sigil integration
     status: draft
     description: >
-      Coverage reports emitted as rivet evidence (requirement-to-test links)
-      and as in-toto predicates that sigil attestation bundles can carry.
+      Coverage reports emitted as rivet evidence (requirement-to-test
+      links) and as in-toto predicates that sigil attestation bundles
+      can carry.
     tags: [v0.3, rivet, sigil]
     fields:
       phase: phase-3
@@ -61,7 +125,7 @@ artifacts:
     description: >
       Support post-cfg, post-meld, post-loom measurement points. Consume
       loom's translation-validation output to compose coverage across
-      transformation layers.
+      transformation layers. Component-model coverage.
     tags: [v0.4, pipeline]
     fields:
       phase: future
@@ -70,6 +134,8 @@ artifacts:
         target: REQ-009
       - type: satisfies
         target: REQ-010
+      - type: satisfies
+        target: REQ-012
 
   - id: FEAT-005
     type: feature
@@ -78,7 +144,8 @@ artifacts:
     description: >
       Coverage attestation emitted as a checkable artifact. DO-330
       qualification effort moves from "qualify witness" (infeasible) to
-      "qualify a small independent checker" (tractable).
+      "qualify a small independent checker" (tractable). Closes the
+      soundness assumption stated by REQ-016 / DEC-010.
     tags: [v1.0, qualification]
     fields:
       phase: future

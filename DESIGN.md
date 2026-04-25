@@ -26,10 +26,10 @@ bundles, and tractable at AI-velocity authorship scale.
 
 | Version | Capability | Blocking question |
 |---|---|---|
-| v0.1 | Branch-level coverage. Instrument → run → report. Strict per-instruction counting. | **Resolved:** v0.1 ships counters as exported mutable globals (`__witness_counter_<id>`), not a dump function. Any runtime that can read Wasm globals can extract coverage — no cooperation protocol required. |
-| v0.2 | MC/DC condition decomposition when DWARF-in-Wasm is present; strict fallback otherwise. | Decision-granularity formal definition — see below. |
+| v0.1 (shipped 2026-04-24) | Branch-level coverage. Instrument → run → report. Strict per-instruction counting. | **Resolved:** v0.1 ships counters as exported mutable globals (`__witness_counter_<id>`), not a dump function. Any runtime that can read Wasm globals can extract coverage — no cooperation protocol required. |
+| v0.2 | MC/DC condition decomposition via DWARF reconstruction; strict per-`br_if` fallback when DWARF is absent. Per-target `br_table` counting. **No artificial condition-count cap** (witness has no encoder constraint, unlike LLVM/rustc which cap at 6). Subprocess `--harness <cmd>` mode as embedded-runtime escape hatch. Coverage-lifting writeup proving Wasm coverage projects soundly to source-level MC/DC. | Reconstruction-algorithm formalisation; soundness proof relative to source-level MC/DC; DO-178C post-preprocessor precedent sourcing. |
 | v0.3 | rivet integration (coverage → requirement). In-toto predicate emission for sigil bundles. | rivet schema for coverage predicates; sigil predicate format. |
-| v0.4 | Variant-aware scope. Post-cfg, post-meld, post-loom measurement points. | How does witness interact with loom's translation-validation output? |
+| v0.4 | Variant-aware scope. Post-cfg, post-meld, post-loom measurement points. Component-model coverage. | How does witness interact with loom's translation-validation output? Does walrus support components, or do we need wasm-tools / Whamm? |
 | v1.0 | Check-It pattern qualification. Emit a checkable coverage attestation that a small qualified checker can validate under DO-330. | What does the minimal trusted checker look like? |
 
 ## Architecture (v0.1)
@@ -102,28 +102,199 @@ Aggregates the raw run data into a coverage report:
 - Per-branch hit counts.
 - Uncovered branches with source location (when manifest provides it).
 
-## Open research question — decision granularity at Wasm level
+## v0.2 — MC/DC at Wasm level
 
-**The problem.** Short-circuit evaluation at Rust source (`a && b && c`)
-compiles to a sequence of `br_if` instructions. MC/DC requires that each
-condition independently affect the decision outcome. Two interpretations:
+This section is the architectural plan for v0.2. The corresponding rivet
+artefacts live in `artifacts/requirements.yaml`,
+`artifacts/features.yaml`, and `artifacts/design-decisions.yaml` with
+`v0.2` tags. The `docs/research/mcdc-bytecode-research.md` brief is the
+literature anchor; the constraints listed there flow directly into the
+choices below.
+
+### Goal
+
+Group Wasm-level branch instrumentation back into source-level decisions
+when DWARF-in-Wasm is present, measure MC/DC over the reconstruction, and
+produce evidence that projects soundly to source-level MC/DC claims
+(coverage-lifting). When DWARF is absent, fall back to v0.1's strict
+per-`br_if` / per-`if-else` counting.
+
+### The decision-granularity problem
+
+Short-circuit evaluation at Rust source (`a && b && c`) compiles to a
+sequence of `br_if` instructions. MC/DC requires that each condition
+independently affect the decision outcome. Two interpretations:
 
 - **Strict:** each `br_if` is its own decision. Easy to measure; loses
-  the source-level "condition" grouping. v0.1 uses this.
+  the source-level "condition" grouping. v0.1 ships this; v0.2 keeps it
+  as the fallback.
 - **Reconstructed:** group the `br_if` sequence back into the source-level
-  decision and measure MC/DC over the reconstruction. Harder; needs
-  DWARF-in-Wasm or explicit compiler hints.
+  decision and measure MC/DC over the reconstruction. Needs
+  DWARF-in-Wasm.
 
-**v0.2 plan.** Reconstruction when DWARF is present; strict fallback when
-not. The reconstruction algorithm is a local pattern match on `br_if`
-sequences that share a common control-flow merge, grouped by source-line
-information from DWARF. Exact algorithm TBD; ship the strict-only report
-in parallel for any module where the reconstruction fails.
+### Design choices that the research forced
 
-**Deserves a paper.** The decision-granularity definition at Wasm level is
-not settled in the literature. A short write-up of the algorithm plus a
-proof of its soundness relative to source-level MC/DC would be publishable
-and would give witness's v0.2 output regulatory defensibility.
+The MC/DC-on-bytecode brief (`docs/research/mcdc-bytecode-research.md`)
+made three choices non-negotiable:
+
+1. **No condition-count cap.** Clang's source-based MC/DC and rustc's
+   `-Zcoverage-options=mcdc` both cap decisions at 6 conditions because
+   LLVM's coverage bitmap encodes condition combinations as integers in
+   `[0, 2^N)`. Witness uses exported globals — no encoder constraint.
+   v0.2 must support decisions of any size. This is positioning: witness
+   covers what rustc-mcdc cannot.
+2. **Per-target `br_table` counting belongs in v0.2, not later.** The
+   same DWARF that maps `br_if` chains to source decisions also maps
+   `br_table` targets to match arms. Splitting these across versions
+   leaves Rust pattern-matching coverage half-done. Ship them together.
+3. **Coverage-lifting is an explicit deliverable.** Translation-validation
+   literature (Pnueli) has the formal apparatus, but no prior work
+   formalises *coverage* lifting. Witness's regulatory defensibility
+   depends on the soundness argument: "Wasm-level decision X covers
+   source-level decision Y because the lifting from low-level to
+   source-level is sound under DWARF-grounded reconstruction."
+
+### Reconstruction algorithm (sketch)
+
+Pseudocode, refined in the v0.2 paper:
+
+```
+for each br_if-sequence S in the Wasm CFG:
+    line_set = { dwarf_line(instr) : instr in S }
+    decision_marker = lexical_decision_id(S, dwarf)  // distinguishes
+                                                     // multiple decisions
+                                                     // on the same line
+    if line_set has a single source line and
+       all instrs in S share the same decision_marker:
+        group S as one source-level decision D
+        emit MC/DC condition table for D
+        each br_if in S maps to one condition in D
+    else:
+        emit each br_if in S as a strict-fallback decision
+```
+
+The interesting cases:
+
+- **Macro expansion.** A single source line may compile to multiple
+  decisions (e.g., `assert!(a && b)` expands the macro). The
+  decision-marker uses the lexical decision id from DWARF, not just the
+  line number, to keep these distinct.
+- **Inlining.** When a function is inlined, the inlined `br_if`s carry
+  their original source line, not the call-site line. The reconstruction
+  must group by inlined-source-line, not Wasm-physical-position.
+- **CFG fragmentation.** Compiler optimisation may split a logically-
+  single decision across multiple basic blocks. The reconstruction must
+  follow control-flow merges, not just instruction adjacency.
+
+### `br_table` per-target instrumentation
+
+Replace v0.1's "single counter before `br_table`" with one counter per
+target. Implementation candidates:
+
+- **Helper function.** `__witness_brtable_<id>(selector: i32) -> i32`
+  increments `counter[id][selector]` (with bounds check) and returns
+  `selector`. Cost: one call per `br_table`. Simple. Chosen for v0.2.
+- **Inline i32.eq chain.** N `if (selector == k) { incr counter_k }`
+  blocks before the `br_table`. Cost: N branches per N-target table —
+  too expensive for tables with many targets.
+
+DWARF maps `br_table` targets to source-level match arms; the manifest
+gains a `target_index` field and a `match_arm_label` (when DWARF
+supplies it).
+
+### Subprocess harness mode (`--harness <cmd>`)
+
+Embedded wasmtime is the default for `witness run`. v0.2 adds a
+subprocess escape hatch for modules that need a richer runtime
+(`wasm-bindgen-test` on Node/browser, custom WASI capabilities, native
+test frameworks):
+
+```
+witness run prog.instrumented.wasm --harness "cargo test --target wasm32-wasip1 ..."
+```
+
+Protocol (file-based handshake):
+
+1. Witness sets `WITNESS_MODULE=<path>`, `WITNESS_OUTPUT=<run.json>`,
+   `WITNESS_MANIFEST=<path>` env vars and spawns the harness command.
+2. The harness loads the instrumented module in its native runtime,
+   runs tests, then before exiting reads every `__witness_counter_*`
+   global and writes a partial run JSON to `$WITNESS_OUTPUT`.
+3. Witness joins the harness output with the manifest and emits the
+   final run JSON.
+
+A `witness-harness` companion crate (v0.3) would provide the harness-
+side helper so test authors don't reinvent the loop.
+
+### Coverage-lifting (the soundness claim)
+
+For each Wasm-level decision D_w produced by the reconstruction
+algorithm, define the corresponding source-level decision D_s from the
+DWARF mapping. The lifting claim is:
+
+> If MC/DC is satisfied for D_w (every condition demonstrated to
+> independently affect the decision outcome), then MC/DC is satisfied
+> for D_s under the assumption that the compiler preserves the
+> independence-of-condition relation when lowering the source decision.
+
+This assumption is exactly what translation validation (Pnueli et al.)
+proves about correctness-preserving compilation. For DAL A use, the
+lifting argument needs either:
+
+- **Direct proof:** demonstrate that rustc + LLVM at a specific
+  optimisation level preserves the independence relation. Hard.
+- **Witness-and-checker:** have rustc emit the decision-marker DWARF
+  itself, and trust the marker. Practical for v0.2; the small qualified
+  checker (v1.0) verifies the marker matches the structure.
+
+v0.2 ships the witness-and-checker variant and documents the
+soundness-relative-to-DWARF-correctness assumption in the paper.
+
+### Differentiation from related work
+
+(Mirrors the README "Related work" section; see also
+`docs/research/mcdc-bytecode-research.md`.)
+
+| Tool | Measurement point | Relationship to witness |
+|---|---|---|
+| **JaCoCo** | JVM bytecode | Direct precedent. Branch coverage at bytecode is a shipped, accepted pattern. JaCoCo doesn't have MC/DC; v0.2 closes that gap for Wasm. |
+| **Clang source-based MC/DC** | LLVM IR | 6-condition cap; needs source AST decoration; doesn't survive Wasm lowering. |
+| **rustc `-Zcoverage-options=mcdc`** | HIR → MIR | 6-condition cap; pre-LLVM; complementary to witness (different blind spots). |
+| **wasmcov / minicov** | LLVM source-level projected through Wasm | Different measurement point. Source-level coverage *via* Wasm execution. Complementary; not competing. |
+| **Whamm** | Wasm bytecode rewriting / engine monitoring | General-purpose instrumentation DSL; possible future implementation backend for witness's rewrite phase. |
+| **Wasabi** | Dynamic Wasm analysis | Precedent for Rust-based Wasm instrumentation; not coverage-specific. |
+
+The Ferrous/DLR Rust-MC/DC effort under the SCRC 2026 Project Goal sits
+at the rustc layer. Witness sits at the post-rustc Wasm layer. Both are
+adopted because the measurement points have different blind spots — the
+"overdo stance" from `docs/research/overdo-alignment.md`.
+
+### v0.2 honest-assessment table
+
+(Per the overdo-alignment C7 constraint — what v0.2 *will* clear vs.
+*won't*.)
+
+- ✅ MC/DC for source decisions of any size when DWARF is present
+- ✅ Strict per-`br_if` fallback when DWARF is absent
+- ✅ Per-target `br_table` counting (DWARF-driven)
+- ✅ Subprocess `--harness` escape hatch for non-wasmtime runtimes
+- ✅ Coverage-lifting writeup with stated soundness assumption
+- ◐ Soundness *proof* of lifting — depends on rustc+LLVM optimisation
+   preservation; v0.2 ships the assumption-stated variant
+- ❌ Component-model coverage (still v0.4)
+- ❌ rivet evidence-format integration (still v0.3)
+- ❌ sigil in-toto predicate emission (still v0.3)
+- ❌ Check-It qualification artefact (still v1.0)
+
+### Paper output
+
+`docs/paper/v0.2-mcdc-wasm.md`. Target: 15-25 pages. Sections: motivation
+(C-macro precedent + JaCoCo lateral), formal definition of MC/DC at Wasm,
+reconstruction algorithm, coverage-lifting claim and its soundness
+argument, comparison with rustc-mcdc and Clang, regulatory framing. Cite
+arxiv:2409.08708 ("Towards MC/DC of Rust") directly. Source the DO-178C
+post-preprocessor MC/DC clause from a credited secondary if the standard
+itself stays paywalled.
 
 ## Dependency choices
 

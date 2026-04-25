@@ -1,31 +1,34 @@
 artifacts:
   # -------------------------------------------------------------------------
-  # v0.1 — branch-level coverage on WebAssembly
+  # v0.1 — branch-level coverage on WebAssembly (SHIPPED 2026-04-24)
   # -------------------------------------------------------------------------
   - id: REQ-001
     type: requirement
     title: Instrument Wasm modules with branch counters
-    status: draft
+    status: approved
     description: >
       The system shall rewrite a .wasm module to count the number of times
-      each br_if, br_table, and if instruction is taken during execution.
-      The instrumented module shall be semantically equivalent to the
-      original module for every well-formed input, modulo the coverage
-      dump export.
-    tags: [v0.1, core, instrumentation]
+      each br_if and if-else (per arm) is taken during execution, and how
+      many times each br_table is executed (per-target counting is REQ-013,
+      v0.2). The instrumented module shall be semantically equivalent to
+      the original module for every well-formed input, modulo the exported
+      __witness_counter_* globals.
+    tags: [v0.1, core, instrumentation, shipped]
     fields:
       priority: must
       category: functional
 
   - id: REQ-002
     type: requirement
-    title: Execute instrumented module against a test harness
-    status: draft
+    title: Execute instrumented module and collect counters
+    status: approved
     description: >
-      The system shall provide a command-line interface that accepts a shell
-      command as the test harness and spawns it against an instrumented
-      Wasm module, collecting counter data after the harness completes.
-    tags: [v0.1, core, runtime]
+      The system shall provide a command-line interface that runs an
+      instrumented Wasm module and collects counter values. v0.1 ships
+      this via an embedded wasmtime runner that invokes user-specified
+      no-argument exports. Subprocess harness mode (REQ-014) is the v0.2
+      escape hatch for non-wasmtime runtimes.
+    tags: [v0.1, core, runtime, shipped]
     fields:
       priority: must
       category: functional
@@ -33,12 +36,13 @@ artifacts:
   - id: REQ-003
     type: requirement
     title: Emit branch-coverage report
-    status: draft
+    status: approved
     description: >
       The system shall produce a coverage report keyed to
-      (module, function, instruction offset) for each branch point, in
-      both human-readable text and machine-readable JSON formats.
-    tags: [v0.1, core, reporting]
+      (function_index, instr_index, kind) for each branch point, in both
+      human-readable text and machine-readable JSON formats. Reports must
+      be deterministic for a given (module, run-data) pair.
+    tags: [v0.1, core, reporting, shipped]
     fields:
       priority: must
       category: functional
@@ -46,19 +50,21 @@ artifacts:
   - id: REQ-004
     type: requirement
     title: Semantic preservation under instrumentation
-    status: draft
+    status: approved
     description: >
       For any well-formed Wasm module M and any input I, the observable
       output of the instrumented module M' on input I shall be identical
-      to the observable output of M on input I, with the exception of the
-      __witness_dump_counters export and its side-effectful counter updates.
-    tags: [v0.1, invariant, correctness]
+      to the observable output of M on input I, with the exception of
+      the exported __witness_counter_* mutable globals (and, in v0.2+,
+      the exported __witness_brtable_* helper functions and their
+      side-effectful counter updates).
+    tags: [v0.1, invariant, correctness, shipped]
     fields:
       priority: must
       category: non-functional
 
   # -------------------------------------------------------------------------
-  # v0.2 — MC/DC condition decomposition
+  # v0.2 — MC/DC condition decomposition + per-target br_table + harness mode
   # -------------------------------------------------------------------------
   - id: REQ-005
     type: requirement
@@ -68,8 +74,9 @@ artifacts:
       When DWARF-in-Wasm information is available in the module, the system
       shall reconstruct source-level decisions from sequences of br_if
       instructions and report MC/DC satisfaction at the decision level.
-      Falls back to the strict per-br_if interpretation when DWARF is
-      absent.
+      Falls back to the strict per-br_if interpretation (REQ-001) when
+      DWARF is absent. The reconstruction must support decisions of any
+      condition count — no artificial cap (REQ-015).
     tags: [v0.2, mcdc]
     fields:
       priority: must
@@ -82,8 +89,75 @@ artifacts:
     description: >
       The algorithm used for reconstructing source-level decisions from
       Wasm br_if sequences shall be specified in DESIGN.md and accompanied
-      by a soundness argument relative to source-level MC/DC. See the
-      open-research section of DESIGN.md.
+      by a soundness argument relative to source-level MC/DC, published
+      as a short paper at docs/paper/v0.2-mcdc-wasm.md. The soundness
+      claim is the coverage-lifting argument (REQ-016). Cite arxiv
+      2409.08708 ("Towards MC/DC of Rust") directly.
+    tags: [v0.2, mcdc, research]
+    fields:
+      priority: must
+      category: non-functional
+
+  - id: REQ-013
+    type: requirement
+    title: Per-target br_table counting
+    status: draft
+    description: >
+      The system shall count each br_table target separately, not the
+      br_table instruction as a whole. When DWARF is present, each target
+      shall be mapped to its source-level match arm. The implementation
+      uses a helper-function-call pattern (DEC-008) to keep per-branch
+      cost bounded.
+    tags: [v0.2, instrumentation]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-014
+    type: requirement
+    title: Subprocess harness mode (--harness)
+    status: draft
+    description: >
+      The system shall provide a --harness <cmd> CLI mode that spawns a
+      user-supplied subprocess (e.g. cargo test, wasm-bindgen-test) with
+      WITNESS_MODULE / WITNESS_OUTPUT / WITNESS_MANIFEST environment
+      variables set, and joins the harness-written counter dump back with
+      the manifest. Provides an escape hatch for runtimes the embedded
+      wasmtime cannot accommodate (browser-based tests, wasi-preview2-only
+      modules, custom WASI capability profiles).
+    tags: [v0.2, runtime]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-015
+    type: requirement
+    title: No artificial condition-count cap
+    status: draft
+    description: >
+      The system shall not impose an artificial cap on the number of
+      conditions per decision. Clang and rustc both cap at 6 conditions
+      because LLVM's coverage bitmap encodes combinations as integers
+      in [0, 2^N). Witness uses exported globals — no encoder constraint.
+      Decisions of any size must be supported.
+    tags: [v0.2, mcdc, differentiation]
+    fields:
+      priority: must
+      category: non-functional
+
+  - id: REQ-016
+    type: requirement
+    title: Coverage-lifting soundness argument
+    status: draft
+    description: >
+      The system shall ship a written soundness argument (in the v0.2
+      paper at docs/paper/v0.2-mcdc-wasm.md) showing that MC/DC at Wasm
+      level, when produced by the DWARF reconstruction algorithm,
+      projects soundly to source-level MC/DC under the assumption that
+      the rustc + LLVM lowering preserves the independence-of-condition
+      relation (the witness-and-checker variant per DEC-010). The
+      assumption shall be explicit; v1.0 (REQ-011) closes it via the
+      Check-It pattern.
     tags: [v0.2, mcdc, research]
     fields:
       priority: must
@@ -149,6 +223,22 @@ artifacts:
       priority: should
       category: functional
 
+  - id: REQ-012
+    type: requirement
+    title: Component-model coverage support
+    status: draft
+    description: >
+      The system shall measure coverage on Wasm component-model modules
+      (not just core Wasm modules). Components wrap one or more core
+      modules; instrumentation must either extract-instrument-recompose
+      or operate on the component directly. Walrus does not currently
+      support components well; the implementation may need to migrate to
+      wasm-tools or Whamm (DEC-011).
+    tags: [v0.4, component-model]
+    fields:
+      priority: should
+      category: functional
+
   # -------------------------------------------------------------------------
   # v1.0 — qualification under DO-330 via the Check-It pattern
   # -------------------------------------------------------------------------
@@ -161,7 +251,7 @@ artifacts:
       sufficient information for a small, independently qualified checker
       to validate the coverage claim without re-running the instrumentation.
       The checker rather than the emitter is what requires DO-330
-      qualification.
+      qualification. Closes the soundness assumption stated by REQ-016.
     tags: [v1.0, qualification, do-330]
     fields:
       priority: must

@@ -140,10 +140,10 @@ The roadmap (`DESIGN.md`) runs v0.1 → v1.0. Do not mix versions:
 
 | Version | Ships |
 |---|---|
-| v0.1 | Strict per-`br_if` / per-`if-else` branch coverage and "executed" counting for `br_table`. Instrument, run, report. Counter values are exposed via exported mutable globals (`__witness_counter_<id>`), not via a dump function — so any runtime that can read Wasm globals can extract coverage without the module-under-test cooperating. Run-phase uses embedded wasmtime (subprocess-harness is v0.2). No MC/DC condition decomposition yet. No rivet integration. No sigil predicate emission. |
-| v0.2 | DWARF-informed condition decomposition. Strict fallback. Short paper documenting the decision-granularity algorithm. |
+| v0.1 (shipped 2026-04-24) | Strict per-`br_if` / per-`if-else` branch coverage and "executed" counting for `br_table`. Instrument, run, report. Counter values are exposed via exported mutable globals (`__witness_counter_<id>`), not via a dump function — so any runtime that can read Wasm globals can extract coverage without the module-under-test cooperating. Run-phase uses embedded wasmtime (subprocess-harness is v0.2). No MC/DC condition decomposition yet. No rivet integration. No sigil predicate emission. |
+| v0.2 | DWARF-informed condition decomposition with strict per-`br_if` fallback when DWARF is absent. Per-target `br_table` counting (DWARF-driven). **No artificial condition-count cap** (witness has no encoder constraint, unlike LLVM/rustc which cap at 6). Subprocess `--harness <cmd>` mode as embedded-runtime escape hatch. Coverage-lifting writeup: short paper proving the reconstruction algorithm sound and the resulting coverage-lift valid relative to source-level MC/DC. |
 | v0.3 | rivet evidence format. in-toto predicate format for sigil bundles. |
-| v0.4 | Post-cfg / post-meld / post-loom measurement points. Consume loom's translation-validation output. |
+| v0.4 | Post-cfg / post-meld / post-loom measurement points. Consume loom's translation-validation output. Component-model coverage. |
 | v1.0 | Check-It qualification artifact — emit a checkable attestation; qualify the checker, not the emitter. |
 
 If a v0.2 concern surfaces during v0.1 work, file it as a rivet artifact or
@@ -175,15 +175,32 @@ Two honest interpretations:
   algorithm plus its soundness relative to source-level MC/DC is worth a
   short paper.
 
-See `DESIGN.md` for the full treatment and the references.
+The MC/DC-on-bytecode research brief (`docs/research/mcdc-bytecode-research.md`)
+established three constraints for v0.2 that should not regress:
+
+1. **No condition-count cap.** Clang and rustc both cap MC/DC at 6
+   conditions per decision because of LLVM's bitmap encoding. Witness
+   has no encoder constraint and must support unbounded decisions.
+2. **Per-target `br_table` counting belongs in v0.2 alongside DWARF
+   reconstruction.** DWARF maps `br_table` targets to source-level match
+   arms; splitting these across versions leaves Rust pattern-matching
+   coverage half-done.
+3. **Coverage-lifting is an explicit deliverable.** Translation-validation
+   literature has the formal apparatus, but no prior work formalises
+   *coverage* lifting. The v0.2 paper makes the soundness argument:
+   "Wasm-level decision X covers source-level decision Y because the
+   lifting from low-level to source-level is sound under DWARF-grounded
+   reconstruction."
+
+See `DESIGN.md` §"v0.2 — MC/DC at Wasm level" for the full treatment.
 
 ## Invariants that must not regress
 
 1. **Semantic preservation under instrumentation.** For any well-formed
    input `I`, the instrumented module produces the same observable output
-   as the original, modulo the `__witness_dump_counters` export. Verify
-   with round-trip tests against the wasm-tools reference interpreter
-   before merging any instrumentation change.
+   as the original, modulo the exported `__witness_counter_*` globals
+   and (in v0.2+) the `__witness_brtable_*` helper functions. Verify
+   with round-trip tests before merging any instrumentation change.
 2. **Branch IDs map to original-module offsets, not instrumented-module
    offsets.** The manifest must reference the pre-instrumentation CFG.
 3. **Reports are deterministic.** Same `(module, run-data)` → same report.
