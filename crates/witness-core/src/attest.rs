@@ -1,39 +1,35 @@
 //! DSSE-signed attestation for witness coverage predicates.
 //!
-//! Wraps an unwrapped in-toto Statement (produced by [`crate::predicate::build_statement`])
-//! in a DSSE envelope signed with an Ed25519 secret key. The output
-//! envelope is byte-compatible with sigil's `wsc verify` and with any
-//! tool that consumes DSSE-wrapped in-toto Statements (cosign,
-//! sigstore, in-toto-attestation).
+//! Wraps an unwrapped in-toto Statement (produced by
+//! [`crate::predicate::build_statement`]) in a DSSE envelope signed
+//! with an Ed25519 secret key.
 //!
-//! Depends on `wsc-attestation` (sigil's lightweight attestation
-//! crate) for the DSSE primitives + Ed25519 binding. Wasm-compatible
-//! under `wasm32-wasip2`.
+//! Built on top of [`wsc_attestation::dsse::DsseEnvelope`] — sigil's
+//! lightweight attestation crate (now on crates.io). The output
+//! envelope is therefore identical to what sigil would produce, and
+//! verifies through `wsc verify`, sigstore cosign, and any
+//! in-toto-attestation consumer.
 //!
-//! Per the v0.5 wsc-integration brief
-//! (`docs/research/v05-wsc-integration.md`), witness keeps its own
-//! `Statement` / `CoveragePredicate` types and only borrows the DSSE
-//! wrapper, avoiding coupling to sigil's higher-level
-//! `TransformationAttestation` builder.
+//! Pure Rust, `wasm32-wasip2`-compatible (wsc-attestation's `signing`
+//! feature only adds `ed25519-compact` + `ct-codecs`, both pure Rust).
 
 use crate::Result;
 use crate::error::Error;
 use crate::predicate::Statement;
 use std::path::Path;
+use wsc_attestation::dsse::DsseEnvelope;
 
 /// Sign an unwrapped Statement and return the DSSE envelope JSON bytes.
 ///
 /// `secret_key_bytes` is a 64-byte Ed25519 secret key (32-byte seed +
-/// 32-byte public key); accept the raw form for now and extend to PEM
-/// in v0.5.1.
+/// 32-byte public key). PEM/DER input is a v0.5.1 extension.
 pub fn sign_statement(
     statement: &Statement,
     secret_key_bytes: &[u8],
     key_id: Option<&str>,
 ) -> Result<Vec<u8>> {
     let payload_json = serde_json::to_vec(statement).map_err(Error::Serde)?;
-    let mut envelope =
-        wsc_attestation::dsse::DsseEnvelope::new(&payload_json, "application/vnd.in-toto+json");
+    let mut envelope = DsseEnvelope::new(&payload_json, "application/vnd.in-toto+json");
 
     let secret_key = ed25519_compact::SecretKey::from_slice(secret_key_bytes).map_err(|e| {
         Error::Runtime(anyhow::anyhow!(
@@ -69,8 +65,7 @@ pub fn sign_predicate_file(
 /// Verify a DSSE envelope produced by [`sign_statement`] against the
 /// matching Ed25519 public key. Returns the inner Statement on success.
 pub fn verify_envelope(envelope_bytes: &[u8], public_key_bytes: &[u8]) -> Result<Statement> {
-    let envelope: wsc_attestation::dsse::DsseEnvelope =
-        serde_json::from_slice(envelope_bytes).map_err(Error::Serde)?;
+    let envelope: DsseEnvelope = serde_json::from_slice(envelope_bytes).map_err(Error::Serde)?;
     let public_key = ed25519_compact::PublicKey::from_slice(public_key_bytes).map_err(|e| {
         Error::Runtime(anyhow::anyhow!(
             "public key must be 32 bytes (Ed25519): {e}"
@@ -81,7 +76,7 @@ pub fn verify_envelope(envelope_bytes: &[u8], public_key_bytes: &[u8]) -> Result
         .map_err(|e| Error::Runtime(anyhow::anyhow!("DSSE verify failed: {e:?}")))?;
     if !valid {
         return Err(Error::Runtime(anyhow::anyhow!(
-            "DSSE signature verification returned false"
+            "DSSE signature did not verify against the supplied public key"
         )));
     }
     let payload = envelope

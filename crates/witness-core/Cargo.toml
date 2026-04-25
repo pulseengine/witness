@@ -26,6 +26,7 @@ gimli = { workspace = true }
 wasmparser = { workspace = true }
 wsc-attestation = { workspace = true }
 ed25519-compact = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
