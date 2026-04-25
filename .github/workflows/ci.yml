@@ -138,6 +138,77 @@ jobs:
       - uses: codecov/codecov-action@v4
         with:
           files: lcov.info
+          flags: rust-source
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  dogfood:
+    name: Dogfood — witness measures the fixture
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build witness binary
+        run: cargo build --release -p witness
+      - name: Build fixture wasm
+        run: |
+          chmod +x crates/witness/tests/fixtures/sample-rust-crate/build.sh
+          cd crates/witness/tests/fixtures/sample-rust-crate
+          ./build.sh
+      - name: Instrument + run + emit LCOV
+        run: |
+          set -euo pipefail
+          fixture="crates/witness/tests/fixtures/sample-rust-crate/sample.wasm"
+          ./target/release/witness instrument "$fixture" \
+            -o sample.instrumented.wasm
+          ./target/release/witness run sample.instrumented.wasm \
+            --invoke run_then_arm \
+            --invoke run_else_arm \
+            --invoke run_brif_taken \
+            --invoke run_brif_not_taken \
+            --invoke run_match_arm_0 \
+            --invoke run_match_arm_1 \
+            --invoke run_match_default \
+            --output witness-run.json
+          ./target/release/witness lcov \
+            --run witness-run.json \
+            --manifest sample.instrumented.wasm.witness.json \
+            -o wasm-bytecode.lcov.info \
+            --overview witness-overview.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-bytecode-coverage
+          path: |
+            wasm-bytecode.lcov.info
+            witness-overview.txt
+            witness-run.json
+            sample.instrumented.wasm.witness.json
+      - uses: codecov/codecov-action@v4
+        with:
+          files: wasm-bytecode.lcov.info
+          flags: wasm-bytecode
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  wasm-component:
+    name: Build witness-core for wasm32-wasip2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - name: Build witness-core (wasm32-wasip2)
+        run: cargo build -p witness-core --release --target wasm32-wasip2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: witness-core-wasm
+          path: target/wasm32-wasip2/release/witness_core.wasm
+          if-no-files-found: warn

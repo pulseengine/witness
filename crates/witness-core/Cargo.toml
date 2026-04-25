@@ -24,6 +24,8 @@ thiserror = { workspace = true }
 sha2 = { workspace = true }
 gimli = { workspace = true }
 wasmparser = { workspace = true }
+wsc-attestation = { workspace = true }
+ed25519-compact = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

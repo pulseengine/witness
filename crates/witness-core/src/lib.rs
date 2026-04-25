@@ -16,6 +16,7 @@
 //! Wasmtime-based execution (the `witness run` CLI path) lives in the
 //! `witness` binary crate.
 
+pub mod attest;
 pub mod decisions;
 pub mod diff;
 pub mod error;

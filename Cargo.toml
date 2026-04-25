@@ -65,6 +65,14 @@ tempfile = "3"
 wat = "1"
 insta = { version = "1", features = ["yaml"] }
 proptest = "1"
+# Sigil's attestation crate. Path-dep until wsc-attestation publishes
+# to crates.io; the v0.5 dev environment expects a sibling
+# pulseengine/sigil checkout. The `signing` feature enables Ed25519
+# DSSE signing via ed25519-compact (pure Rust, wasm-compatible).
+wsc-attestation = { path = "../sigil/src/attestation", features = ["signing"] }
+# Direct dep of ed25519-compact so witness-core's `attest.rs` can build
+# / verify keypairs without going through wsc-attestation's API.
+ed25519-compact = "2.1"
 
 [profile.release]
 strip = true

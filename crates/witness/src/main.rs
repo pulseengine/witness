@@ -132,6 +132,25 @@ enum Command {
         format: DiffFormat,
     },
 
+    /// Sign an unwrapped Statement (from `witness predicate`) and
+    /// produce a DSSE envelope. Compatible with sigil's `wsc verify`,
+    /// cosign, sigstore, and any in-toto-attestation consumer.
+    Attest {
+        /// Path to the Statement JSON (output of `witness predicate`).
+        #[arg(long)]
+        predicate: PathBuf,
+        /// Path to the Ed25519 secret key (raw 64 bytes: 32-byte seed
+        /// + 32-byte public key, no PEM in v0.5; PEM/DER in v0.5.1).
+        #[arg(long)]
+        secret_key: PathBuf,
+        /// Optional key identifier embedded in the DSSE signature.
+        #[arg(long)]
+        key_id: Option<String>,
+        /// Output path for the DSSE envelope JSON.
+        #[arg(short, long, default_value = "witness-envelope.json")]
+        output: PathBuf,
+    },
+
     /// Emit LCOV from a run JSON for codecov ingestion.
     /// DWARF-correlated decisions emit BRDA records; uncorrelated
     /// branches go in a sibling overview text file (per
@@ -270,6 +289,19 @@ fn main() -> Result<()> {
                     println!("{text}");
                 }
             }
+        }
+        Command::Attest {
+            predicate,
+            secret_key,
+            key_id,
+            output,
+        } => {
+            witness_core::attest::sign_predicate_file(
+                &predicate,
+                &secret_key,
+                &output,
+                key_id.as_deref(),
+            )?;
         }
         Command::Lcov {
             run,

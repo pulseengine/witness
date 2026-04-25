@@ -7,6 +7,90 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-25
+
+### Added
+
+- **Workspace split.** Single-crate `witness` becomes a workspace with
+  `crates/witness-core` (pure-data algorithms; `wasm32-wasip2`-buildable)
+  and `crates/witness` (CLI binary plus the wasmtime-using runner).
+  All algorithm modules — instrument, decisions, diff, predicate,
+  report, rivet_evidence, run_record, lcov, attest — live in
+  witness-core. Only main.rs + run.rs (wasmtime embedder) stay in the
+  binary crate.
+- **`witness lcov`** subcommand (REQ-023). Emits LCOV from a
+  `RunRecord` per the
+  [v0.5 LCOV format brief](docs/research/v05-lcov-format.md). Hybrid
+  emission: DWARF-correlated `Decision`s become standard `BRDA`
+  records keyed to real source files; uncorrelated branches go in a
+  sibling overview text. Codecov-ingestible as `flag: wasm-bytecode`.
+- **`witness attest`** subcommand (REQ-024). Wraps an unwrapped
+  in-toto Statement (from `witness predicate`) in a DSSE envelope
+  signed with an Ed25519 secret key. Compatible with sigil's
+  `wsc verify`, sigstore cosign, and any in-toto-attestation
+  consumer. Implementation depends on the workspace `wsc-attestation`
+  path-dep into `pulseengine/sigil`.
+- **Wasm-target artefact.** `cargo build -p witness-core --target
+  wasm32-wasip2` produces `target/wasm32-wasip2/release/witness_core.wasm`,
+  uploaded as a CI artefact and (in release builds) attached to the
+  GitHub release. The full Component Model build with WIT bindings
+  is the v0.6 stretch goal.
+- **CI dogfood loop.** New `dogfood` job builds the
+  `sample-rust-crate` fixture, instruments it with the freshly-built
+  witness, runs every `run_*` export, and emits LCOV. Uploads to
+  codecov with `flag: wasm-bytecode` for side-by-side comparison
+  with the existing `flag: rust-source` LCOV (cargo-llvm-cov).
+- **`witness-core` Wasm-target CI job.** Verifies witness-core
+  compiles to `wasm32-wasip2` on every push to main; uploads the
+  resulting `.wasm` artefact.
+- **Loom + meld upstream issue drafts** at
+  `docs/research/v05-loom-meld-upstream.md` ready for the maintainer
+  to file. Both ask for DWARF preservation plus a byte-offset
+  translation map so witness v0.6 can correlate post-loom / post-meld
+  Wasm to source-level decisions.
+
+### Research output
+
+- `docs/research/v05-blog-principles.md` (placeholder; previously
+  `v04-blog-principles.md` covers the same corpus).
+- `docs/research/v05-lcov-format.md` — codecov-flag-compatible LCOV
+  emission; recommends hybrid C strategy (BRDA for correlated, text
+  overview for uncorrelated).
+- `docs/research/v05-wsc-integration.md` — wsc-attestation API
+  surface, Cargo dep model, witness-attest subcommand sketch. Confirmed
+  wasm32 compatibility under the `signing` feature.
+- `docs/research/v05-component-witness.md` — component-model build
+  path; confirms cargo-component, wac, wit-bindgen all installed
+  locally; identifies wasmtime as the only host-only dep.
+- `docs/research/v05-loom-meld-upstream.md` — issue drafts for the
+  upstream tools.
+
+### Changed
+
+- The `coverage` CI job now uploads with `flag: rust-source` so the
+  new bytecode-coverage upload (`flag: wasm-bytecode`) renders
+  side-by-side in codecov.
+- Workspace pulls `wsc-attestation` from a sibling
+  `pulseengine/sigil` checkout (path dep). Will become a regular
+  crates.io dep when wsc-attestation publishes.
+- Direct `ed25519-compact` dep added to witness-core for keypair
+  generation in tests and direct use by `attest.rs`.
+
+### Implements / Verifies
+
+- Implements: REQ-023 (witness lcov), REQ-024 (witness attest), plus
+  the v0.5 workspace-split and dogfood-CI requirements (REQ-025,
+  REQ-026 in the artefact set).
+
+### Deferred to v0.6
+
+- DWARF preservation through loom optimisation (gated on the upstream
+  loom issue).
+- DWARF preservation through meld fusion (gated on the upstream meld
+  issue).
+- Full Component Model build with WIT interface and `wac`-based
+  composition with sigil's wsc component for in-process signing.
+
 ## [0.4.0] — 2026-04-25
 
 ### Added
