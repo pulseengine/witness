@@ -9,3 +9,8 @@ Cargo.lock.bak
 # Blog post HTML mirrors — fetched ad-hoc by research agents; not source.
 docs/research/blog-mirror/
 
+# Verdict-suite build outputs — regenerated on every CI run by build-all.sh.
+verdicts/*/target/
+verdicts/*/Cargo.lock
+verdicts/*/*.wasm
+

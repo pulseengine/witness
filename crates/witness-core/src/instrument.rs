@@ -65,6 +65,25 @@ pub const COUNTER_EXPORT_PREFIX: &str = "__witness_counter_";
 /// branch id of its first target.
 pub const BRTABLE_HELPER_PREFIX: &str = "__witness_brtable_";
 
+/// v0.6.1 — per-row condition value. For `BrIf` branches: the evaluated
+/// condition value (0 or 1) when reached this row. For `IfThen`/`IfElse`
+/// arms: 1 when the arm fired this row, 0 otherwise. Set by instrumentation;
+/// zeroed by `__witness_row_reset` between row invocations. Only allocated
+/// for `BrIf` / `IfThen` / `IfElse` branches; `BrTable*` branches stay on
+/// counter-only per DEC-015.
+pub const BRVAL_EXPORT_PREFIX: &str = "__witness_brval_";
+
+/// v0.6.1 — per-row evaluation count. Increments each time the branch is
+/// reached this row. The runner reads it after each row invocation to
+/// determine "was this condition evaluated this row?" — non-zero means
+/// evaluated, zero means short-circuited (absent from `DecisionRow.evaluated`).
+pub const BRCNT_EXPORT_PREFIX: &str = "__witness_brcnt_";
+
+/// v0.6.1 — exported helper function the runner calls between row
+/// invocations to zero all `BRVAL` / `BRCNT` globals so the next row's
+/// captures don't leak prior state.
+pub const ROW_RESET_EXPORT: &str = "__witness_row_reset";
+
 /// Kind of branch a counter is counting.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -196,24 +215,63 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
 }
 
 /// Instrument `module` in place, returning the branch manifest entries.
+///
+/// v0.6.1: in addition to the v0.5 per-branch counter (sums hits across
+/// all rows), allocates per-row `__witness_brval_<id>` and
+/// `__witness_brcnt_<id>` globals for `BrIf` / `IfThen` / `IfElse`
+/// branches, plus an exported `__witness_row_reset` function that the
+/// runner calls between row invocations. `BrTable*` branches keep
+/// counter-only instrumentation per DEC-015.
 pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Vec<BranchEntry>> {
     let scans: Vec<FunctionScan> = collect_scans(module);
 
     let mut entries: Vec<BranchEntry> = Vec::new();
     let mut counter_globals: Vec<GlobalId> = Vec::new();
+    let mut brval_globals: Vec<Option<GlobalId>> = Vec::new();
+    let mut brcnt_globals: Vec<Option<GlobalId>> = Vec::new();
     for scan in &scans {
         for branch in &scan.branches {
             let id = u32::try_from(entries.len())
                 .map_err(|_| Error::Instrument("branch count exceeds u32::MAX".to_string()))?;
-            let global = module.globals.add_local(
+            let counter = module.globals.add_local(
                 ValType::I32,
                 true,
                 false,
                 ConstExpr::Value(Value::I32(0)),
             );
-            let export_name = format!("{COUNTER_EXPORT_PREFIX}{id}");
-            module.exports.add(&export_name, global);
-            counter_globals.push(global);
+            module
+                .exports
+                .add(&format!("{COUNTER_EXPORT_PREFIX}{id}"), counter);
+            counter_globals.push(counter);
+
+            // v0.6.1: allocate per-row capture globals for non-br_table branches.
+            let (brval, brcnt) = match branch.kind {
+                BranchKind::BrIf | BranchKind::IfThen | BranchKind::IfElse => {
+                    let bv = module.globals.add_local(
+                        ValType::I32,
+                        true,
+                        false,
+                        ConstExpr::Value(Value::I32(0)),
+                    );
+                    module
+                        .exports
+                        .add(&format!("{BRVAL_EXPORT_PREFIX}{id}"), bv);
+                    let bc = module.globals.add_local(
+                        ValType::I32,
+                        true,
+                        false,
+                        ConstExpr::Value(Value::I32(0)),
+                    );
+                    module
+                        .exports
+                        .add(&format!("{BRCNT_EXPORT_PREFIX}{id}"), bc);
+                    (Some(bv), Some(bc))
+                }
+                BranchKind::BrTableTarget | BranchKind::BrTableDefault => (None, None),
+            };
+            brval_globals.push(brval);
+            brcnt_globals.push(brcnt);
+
             entries.push(BranchEntry {
                 id,
                 function_index: scan.function_index,
@@ -237,23 +295,60 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
     for scan in scans.into_iter() {
         let len = scan.branches.len();
         let end = cursor.saturating_add(len);
-        let slice = counter_globals
+        let counters_slice = counter_globals
             .get(cursor..end)
             .ok_or_else(|| Error::Instrument("counter slice out of range".to_string()))?
+            .to_vec();
+        let brval_slice = brval_globals
+            .get(cursor..end)
+            .ok_or_else(|| Error::Instrument("brval slice out of range".to_string()))?
+            .to_vec();
+        let brcnt_slice = brcnt_globals
+            .get(cursor..end)
+            .ok_or_else(|| Error::Instrument("brcnt slice out of range".to_string()))?
             .to_vec();
         let scan_offset = cursor;
         rewrite_function(
             module,
             scan.function_id,
             &scan.branches,
-            &slice,
+            &counters_slice,
+            &brval_slice,
+            &brcnt_slice,
             scan_offset,
             &helpers,
         )?;
         cursor = end;
     }
 
+    // v0.6.1: build the __witness_row_reset helper function.
+    build_row_reset(module, &brval_globals, &brcnt_globals)?;
+
     Ok(entries)
+}
+
+/// Build the `__witness_row_reset()` exported function that zeroes every
+/// `__witness_brval_*` and `__witness_brcnt_*` global. The runner calls
+/// this between row invocations so the next row's captures don't carry
+/// residual state from the prior row.
+fn build_row_reset(
+    module: &mut Module,
+    brval_globals: &[Option<GlobalId>],
+    brcnt_globals: &[Option<GlobalId>],
+) -> Result<()> {
+    let mut builder = FunctionBuilder::new(&mut module.types, &[], &[]);
+    {
+        let mut body = builder.func_body();
+        for &g in brval_globals.iter().chain(brcnt_globals.iter()).flatten() {
+            body.instr(Instr::Const(Const {
+                value: Value::I32(0),
+            }));
+            body.instr(Instr::GlobalSet(GlobalSet { global: g }));
+        }
+    }
+    let func_id = builder.finish(vec![], &mut module.funcs);
+    module.exports.add(ROW_RESET_EXPORT, func_id);
+    Ok(())
 }
 
 /// Build `__witness_brtable_<n>` helper functions, one per br_table site.
@@ -533,11 +628,14 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
 /// `counter_offset` is the position of `sites[0]`'s counter within the
 /// global counter list — used to look up the right br_table helper from
 /// `helpers` (keyed by absolute counter index).
+#[allow(clippy::too_many_arguments)]
 fn rewrite_function(
     module: &mut Module,
     function_id: FunctionId,
     sites: &[BranchSite],
     counters: &[GlobalId],
+    brvals: &[Option<GlobalId>],
+    brcnts: &[Option<GlobalId>],
     counter_offset: usize,
     helpers: &HashMap<usize, FunctionId>,
 ) -> Result<()> {
@@ -596,6 +694,14 @@ fn rewrite_function(
                 .copied()
                 .ok_or_else(|| Error::Instrument(format!("counter index {site_idx} out of range")))
         };
+        // SAFETY-REVIEW: indices are bounded by `sites.len()` and the
+        // brval/brcnt slices are constructed with the same length as
+        // `counters`. `.get()` returns `None` for out-of-bounds, surfacing
+        // as `None` (not a panic) for non-instrumented kinds.
+        let brval_at =
+            |site_idx: usize| -> Option<GlobalId> { brvals.get(site_idx).copied().flatten() };
+        let brcnt_at =
+            |site_idx: usize| -> Option<GlobalId> { brcnts.get(site_idx).copied().flatten() };
 
         match kind_at {
             PeekKind::BrIf => {
@@ -603,23 +709,39 @@ fn rewrite_function(
                     .first()
                     .ok_or_else(|| Error::Instrument("empty br_if group".to_string()))?;
                 let counter = counter_at(idx_in_sites)?;
+                let brval = brval_at(idx_in_sites);
+                let brcnt = brcnt_at(idx_in_sites);
                 let tmp = brif_tmp.ok_or_else(|| {
                     Error::Instrument("br_if site without brif_tmp local".to_string())
                 })?;
-                rewrite_brif(func, seq_id, at, counter, tmp);
+                rewrite_brif(func, seq_id, at, counter, brval, brcnt, tmp);
             }
             PeekKind::IfElse => {
-                let then_counter = group
+                let then_idx = group
                     .iter()
                     .find(|(_, k)| matches!(k, BranchKind::IfThen))
-                    .map(|(i, _)| counter_at(*i))
-                    .transpose()?;
-                let else_counter = group
+                    .map(|(i, _)| *i);
+                let else_idx = group
                     .iter()
                     .find(|(_, k)| matches!(k, BranchKind::IfElse))
-                    .map(|(i, _)| counter_at(*i))
-                    .transpose()?;
-                rewrite_ifelse(func, seq_id, at, then_counter, else_counter);
+                    .map(|(i, _)| *i);
+                let then_counter = then_idx.map(counter_at).transpose()?;
+                let else_counter = else_idx.map(counter_at).transpose()?;
+                let then_brval = then_idx.and_then(brval_at);
+                let then_brcnt = then_idx.and_then(brcnt_at);
+                let else_brval = else_idx.and_then(brval_at);
+                let else_brcnt = else_idx.and_then(brcnt_at);
+                rewrite_ifelse(
+                    func,
+                    seq_id,
+                    at,
+                    then_counter,
+                    else_counter,
+                    then_brval,
+                    then_brcnt,
+                    else_brval,
+                    else_brcnt,
+                );
             }
             PeekKind::BrTable => {
                 // The first counter index in the group is the helper key.
@@ -647,13 +769,24 @@ enum PeekKind {
     BrTable,
 }
 
-/// Rewrite `br_if L` at `(seq_id, index)` into:
-/// `local.tee tmp; if (inc counter) end; local.get tmp; br_if L`.
+/// Rewrite `br_if L` at `(seq_id, index)`.
+///
+/// v0.5 emitted: `local.tee tmp; if (inc counter) end; local.get tmp; br_if L`.
+///
+/// v0.6.1 prepends per-row capture writes when `brval` and `brcnt` are
+/// available: `local.tee tmp; local.get tmp; global.set brval; brcnt += 1;
+/// local.get tmp; if (inc counter) end; local.get tmp; br_if L`.
+///
+/// Stack invariant identical: the original condition value flows through
+/// the rewrite unchanged.
+#[allow(clippy::too_many_arguments)]
 fn rewrite_brif(
     func: &mut walrus::LocalFunction,
     seq_id: InstrSeqId,
     index: usize,
     counter: GlobalId,
+    brval: Option<GlobalId>,
+    brcnt: Option<GlobalId>,
     tmp: LocalId,
 ) {
     // SAFETY-REVIEW: caller has already peeked at `(seq_id, index)` and
@@ -675,30 +808,56 @@ fn rewrite_brif(
         .dangling_instr_seq(InstrSeqType::Simple(None))
         .id();
 
-    let replacement = [
-        Instr::LocalTee(LocalTee { local: tmp }),
-        Instr::IfElse(IfElse {
-            consequent: inc_seq,
-            alternative: empty_seq,
-        }),
-        Instr::LocalGet(LocalGet { local: tmp }),
-        Instr::BrIf(BrIf { block: target }),
-    ];
+    // Build the replacement instruction list. Begin with the v0.5 tee.
+    let mut replacement: Vec<Instr> = Vec::with_capacity(12);
+    replacement.push(Instr::LocalTee(LocalTee { local: tmp }));
+    // v0.6.1 brval write: brval = tmp value.
+    if let Some(bv) = brval {
+        replacement.push(Instr::LocalGet(LocalGet { local: tmp }));
+        replacement.push(Instr::GlobalSet(GlobalSet { global: bv }));
+    }
+    // v0.6.1 brcnt increment.
+    if let Some(bc) = brcnt {
+        replacement.push(Instr::GlobalGet(GlobalGet { global: bc }));
+        replacement.push(Instr::Const(Const {
+            value: Value::I32(1),
+        }));
+        replacement.push(Instr::Binop(Binop {
+            op: BinaryOp::I32Add,
+        }));
+        replacement.push(Instr::GlobalSet(GlobalSet { global: bc }));
+    }
+    // v0.5 counter-on-taken pattern. The tee'd value is still on the
+    // stack from `local.tee tmp` (and the brval/brcnt sequences are
+    // stack-neutral), so we don't re-fetch tmp before the if.
+    replacement.push(Instr::IfElse(IfElse {
+        consequent: inc_seq,
+        alternative: empty_seq,
+    }));
+    // Restore condition for the original br_if.
+    replacement.push(Instr::LocalGet(LocalGet { local: tmp }));
+    replacement.push(Instr::BrIf(BrIf { block: target }));
+
     let instrs = &mut func.block_mut(seq_id).instrs;
     for (offset, instr) in replacement.into_iter().enumerate() {
-        // SAFETY-REVIEW: `offset` is <= replacement.len() (=4) and
-        // `index` is an in-bounds position into the sequence's instrs.
+        // SAFETY-REVIEW: `offset` is bounded by `replacement.len()` (≤ 12)
+        // and `index` is an in-bounds position into the sequence's instrs.
         let pos = index.saturating_add(offset);
         instrs.insert(pos, (instr, Default::default()));
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn rewrite_ifelse(
     func: &mut walrus::LocalFunction,
     seq_id: InstrSeqId,
     index: usize,
     then_counter: Option<GlobalId>,
     else_counter: Option<GlobalId>,
+    then_brval: Option<GlobalId>,
+    then_brcnt: Option<GlobalId>,
+    else_brval: Option<GlobalId>,
+    else_brcnt: Option<GlobalId>,
 ) {
     // SAFETY-REVIEW: caller has peeked and confirmed IfElse at this position.
     #[allow(clippy::wildcard_enum_match_arm)]
@@ -714,10 +873,45 @@ fn rewrite_ifelse(
     };
 
     if let Some(c) = then_counter {
-        prepend_counter_inc(func, then_id, c);
+        prepend_arm_capture(func, then_id, c, then_brval, then_brcnt);
     }
     if let Some(c) = else_counter {
-        prepend_counter_inc(func, else_id, c);
+        prepend_arm_capture(func, else_id, c, else_brval, else_brcnt);
+    }
+}
+
+/// Prepend per-arm v0.6.1 capture: `brval = 1` (this arm fired this row)
+/// and `brcnt += 1`, plus the v0.5 counter increment.
+fn prepend_arm_capture(
+    func: &mut walrus::LocalFunction,
+    seq_id: InstrSeqId,
+    counter: GlobalId,
+    brval: Option<GlobalId>,
+    brcnt: Option<GlobalId>,
+) {
+    let mut prelude: Vec<Instr> = Vec::with_capacity(12);
+    if let Some(bv) = brval {
+        prelude.push(Instr::Const(Const {
+            value: Value::I32(1),
+        }));
+        prelude.push(Instr::GlobalSet(GlobalSet { global: bv }));
+    }
+    if let Some(bc) = brcnt {
+        prelude.push(Instr::GlobalGet(GlobalGet { global: bc }));
+        prelude.push(Instr::Const(Const {
+            value: Value::I32(1),
+        }));
+        prelude.push(Instr::Binop(Binop {
+            op: BinaryOp::I32Add,
+        }));
+        prelude.push(Instr::GlobalSet(GlobalSet { global: bc }));
+    }
+    for instr in counter_inc_instrs(counter) {
+        prelude.push(instr);
+    }
+    let instrs = &mut func.block_mut(seq_id).instrs;
+    for (offset, instr) in prelude.into_iter().enumerate() {
+        instrs.insert(offset, (instr, Default::default()));
     }
 }
 
@@ -758,14 +952,6 @@ fn counter_inc_instrs(counter: GlobalId) -> [Instr; 4] {
         }),
         Instr::GlobalSet(GlobalSet { global: counter }),
     ]
-}
-
-fn prepend_counter_inc(func: &mut walrus::LocalFunction, seq_id: InstrSeqId, counter: GlobalId) {
-    let increments = counter_inc_instrs(counter);
-    let instrs = &mut func.block_mut(seq_id).instrs;
-    for (offset, instr) in increments.into_iter().enumerate() {
-        instrs.insert(offset, (instr, Default::default()));
-    }
 }
 
 #[cfg(test)]

@@ -16,15 +16,19 @@
 //!   with `WITNESS_MODULE` / `WITNESS_MANIFEST` / `WITNESS_OUTPUT` env
 //!   vars set; merge its counter snapshot with the manifest.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use wasmtime::{Config, Engine, Linker, Module, Store, Val};
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::p1::WasiP1Ctx;
 use witness_core::Result;
 use witness_core::error::Error;
-use witness_core::instrument::{COUNTER_EXPORT_PREFIX, Manifest};
-use witness_core::run_record::{BranchHit, HarnessSnapshot, RunRecord, TraceHealth};
+use witness_core::instrument::{
+    BRCNT_EXPORT_PREFIX, BRVAL_EXPORT_PREFIX, COUNTER_EXPORT_PREFIX, Manifest, ROW_RESET_EXPORT,
+};
+use witness_core::run_record::{
+    BranchHit, DecisionRecord, DecisionRow, HarnessSnapshot, RunRecord, TraceHealth,
+};
 
 /// Options for `run_module`. Constructed by the CLI layer; exposed as a
 /// struct so library callers can drive witness programmatically.
@@ -82,7 +86,22 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         invoked.push("_start".to_string());
     }
 
-    for name in &options.invoke {
+    // v0.6.1: per-row capture. For each invoked export, reset the per-row
+    // globals, run the export, capture its return value as the decision
+    // outcome, and read the per-condition (brval, brcnt) pairs.
+    let row_reset = instance.get_func(&mut store, ROW_RESET_EXPORT);
+    let mut rows_per_decision: BTreeMap<u32, Vec<DecisionRow>> = BTreeMap::new();
+    for d in &manifest.decisions {
+        rows_per_decision.insert(d.id, Vec::new());
+    }
+
+    for (row_index, name) in options.invoke.iter().enumerate() {
+        if let Some(reset) = row_reset {
+            reset
+                .call(&mut store, &[], &mut [])
+                .map_err(|e| Error::Runtime(e.into()))?;
+        }
+
         let func = instance.get_func(&mut store, name).ok_or_else(|| {
             Error::Runtime(anyhow::anyhow!(
                 "export `{name}` not found in instrumented module"
@@ -93,11 +112,105 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         func.call(&mut store, &[], &mut results)
             .map_err(|e| Error::Runtime(e.into()))?;
         invoked.push(name.clone());
+
+        // SAFETY-REVIEW: only `i32` is interpretable as a bool outcome.
+        // Other Wasm value types (`i64`, `f32`, `f64`, `v128`, ref types)
+        // are not coerced to bool — outcome stays `None`.
+        #[allow(clippy::wildcard_enum_match_arm)]
+        let outcome: Option<bool> = results.first().and_then(|v| match v {
+            Val::I32(n) => Some(*n != 0),
+            _ => None,
+        });
+
+        let (brvals, brcnts) = read_per_row_globals(&mut store, &instance)?;
+        let row_id = u32::try_from(row_index).unwrap_or(u32::MAX);
+        for d in &manifest.decisions {
+            let mut evaluated: BTreeMap<u32, bool> = BTreeMap::new();
+            for (cond_idx, branch_id) in d.conditions.iter().enumerate() {
+                let cnt = brcnts.get(branch_id).copied().unwrap_or(0);
+                if cnt > 0 {
+                    let val = brvals.get(branch_id).copied().unwrap_or(0);
+                    let cond_idx_u32 = u32::try_from(cond_idx).unwrap_or(u32::MAX);
+                    evaluated.insert(cond_idx_u32, val != 0);
+                }
+            }
+            rows_per_decision
+                .entry(d.id)
+                .or_default()
+                .push(DecisionRow {
+                    row_id,
+                    evaluated,
+                    outcome,
+                });
+        }
     }
 
     let counter_values = read_counter_globals(&mut store, &instance)?;
-    let record = build_run_record(&manifest, &counter_values, options.module, invoked);
+    let mut record = build_run_record(&manifest, &counter_values, options.module, invoked);
+
+    // v0.6.1: attach per-decision row tables and trace health.
+    let mut decisions: Vec<DecisionRecord> = Vec::with_capacity(manifest.decisions.len());
+    for d in &manifest.decisions {
+        let rows = rows_per_decision.remove(&d.id).unwrap_or_default();
+        decisions.push(DecisionRecord {
+            id: d.id,
+            source_file: d.source_file.clone(),
+            source_line: d.source_line,
+            condition_branch_ids: d.conditions.clone(),
+            rows,
+        });
+    }
+    let row_total = u64::try_from(options.invoke.len()).unwrap_or(u64::MAX);
+    record.decisions = decisions;
+    record.trace_health = TraceHealth {
+        overflow: false,
+        rows: row_total,
+        ambiguous_rows: false,
+    };
     record.save(options.output)
+}
+
+/// Read the per-row `__witness_brval_<id>` and `__witness_brcnt_<id>`
+/// globals into two maps keyed by branch id. Globals not present
+/// (e.g. for `BrTable*` branches that don't get per-row capture) are
+/// simply absent from the maps.
+fn read_per_row_globals(
+    store: &mut Store<WasiP1Ctx>,
+    instance: &wasmtime::Instance,
+) -> Result<(HashMap<u32, i32>, HashMap<u32, i32>)> {
+    let mut brvals: HashMap<u32, i32> = HashMap::new();
+    let mut brcnts: HashMap<u32, i32> = HashMap::new();
+    let names: Vec<String> = instance
+        .exports(&mut *store)
+        .map(|e| e.name().to_string())
+        .collect();
+    for name in names {
+        let (target, prefix): (&mut HashMap<u32, i32>, &str) =
+            if name.starts_with(BRVAL_EXPORT_PREFIX) {
+                (&mut brvals, BRVAL_EXPORT_PREFIX)
+            } else if name.starts_with(BRCNT_EXPORT_PREFIX) {
+                (&mut brcnts, BRCNT_EXPORT_PREFIX)
+            } else {
+                continue;
+            };
+        let Some(id_str) = name.strip_prefix(prefix) else {
+            continue;
+        };
+        let Ok(id) = id_str.parse::<u32>() else {
+            continue;
+        };
+        let Some(global) = instance.get_global(&mut *store, &name) else {
+            continue;
+        };
+        // SAFETY-REVIEW: brval/brcnt globals are i32 by construction
+        // (instrument.rs allocates them as `ValType::I32`). Any other
+        // type at runtime is a tampering signal; skip and continue.
+        #[allow(clippy::wildcard_enum_match_arm)]
+        if let Val::I32(v) = global.get(&mut *store) {
+            target.insert(id, v);
+        }
+    }
+    Ok((brvals, brcnts))
 }
 
 fn run_via_harness(options: &RunOptions<'_>, harness_cmd: &str) -> Result<()> {

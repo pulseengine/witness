@@ -7,6 +7,124 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-04-26
+
+### What v0.6.1 closes
+
+v0.6.0 shipped the consumer side (schema, reporter, verdict-suite oracles)
+and explicitly deferred the runtime instrumentation to v0.6.1. v0.6.1 is
+that runtime path: real per-row condition capture during `witness run`,
+real `RunRecord.decisions` populated from execution rather than hand-
+curated, real end-to-end demonstrable MC/DC on the canonical leap_year
+verdict.
+
+### Added — per-row instrumentation
+
+- **Per-condition exported globals**: each `BrIf` / `IfThen` / `IfElse`
+  branch now allocates two additional globals alongside its existing
+  `__witness_counter_<id>`:
+  - `__witness_brval_<id>` (i32) — the condition's evaluated value
+    (0 or 1) when reached this row, or `1` for fired arms.
+  - `__witness_brcnt_<id>` (i32) — count of evaluations this row;
+    non-zero means evaluated, zero means short-circuited (absent
+    from `DecisionRow.evaluated`). `BrTable*` branches keep
+    counter-only instrumentation per DEC-015.
+- **`__witness_row_reset` exported function**: emitted by every
+  instrumentation pass. Zeros all `brval` / `brcnt` globals so the
+  next row's captures don't leak prior state.
+
+### Added — runner row-by-row capture
+
+- `witness run` (embedded wasmtime path) now, for each `--invoke`:
+  1. Calls `__witness_row_reset` to clear per-row state.
+  2. Invokes the export, capturing the return value as the row's
+     decision outcome (when the export returns an `i32`).
+  3. Reads the per-row `brval` / `brcnt` globals.
+  4. For each `Decision` in the manifest, builds a `DecisionRow`
+     populated with the per-condition values evaluated this row.
+- `RunRecord.decisions` is now populated from execution; the
+  `mcdc_report` reporter consumes it directly with no manual curation.
+
+### End-to-end demonstrable on `verdicts/leap_year`
+
+Building the leap_year verdict, instrumenting it, running all 4 row
+exports, and asking for the MC/DC report produces:
+
+```
+$ witness instrument verdicts/leap_year/verdict_leap_year.wasm -o leap.wasm
+$ witness run leap.wasm --invoke run_row_0 ... --invoke run_row_3 -o run.json
+$ witness report --input run.json --format mcdc
+module: leap.wasm
+decisions: 1/1 full MC/DC; conditions: 2 proved, 0 gap, 0 dead
+
+decision #0 lib.rs:46: FullMcdc
+  truth table:
+    row 0: {c0=T} -> F
+    row 1: {c0=F, c1=T} -> T
+    row 2: {c0=F, c1=F} -> F
+    row 3: {c0=F, c1=F} -> T
+  conditions:
+    c0 (branch 0): proved via rows 0+1 (masking)
+    c1 (branch 1): proved via rows 1+2 (unique-cause)
+```
+
+Two conditions, both proved with cited row pairs, full MC/DC at the
+Wasm bytecode level.
+
+### Why some verdicts report zero decisions
+
+The leap_year decision `(year%4==0 && year%100!=0) || year%400==0`
+lowered to two `br_if` instructions plus inline arithmetic for the
+third condition. That's why the report shows two conditions rather
+than three: the third was elided by rustc's optimizer into the
+fall-through computation. This is exactly the v0.2 paper's coverage-
+lifting thesis — post-rustc Wasm coverage measures *what the
+optimizer left as branches*, not the source-level condition count.
+
+For verdicts whose conditions are all side-effect-free comparisons
+(e.g. `a && b` over pure booleans), rustc may lower `&&` to a single
+`i32.and` instruction and eliminate branches entirely. `range_overlap`
+and similar verdicts produce zero `BrIf` entries in the manifest as a
+result. The reporter correctly reports zero decisions — that is the
+honest measurement at this point. Source-level MC/DC for these
+predicates is the rustc-mcdc tool's territory; witness covers what
+survives lowering. The "overdo stance" (DEC-005) — adopt both, do
+not pick one.
+
+The remaining verdicts (`triangle`, `state_guard`, `mixed_or_and`,
+`safety_envelope`, `parser_dispatch`) have varying numbers of
+surviving branches depending on rustc's lowering choices for their
+specific shapes. Their `TRUTH-TABLE.md` files document the
+hand-derived source-level MC/DC; the witness report shows the
+Wasm-level MC/DC. The discrepancy between the two is itself
+evidence of how aggressive the optimizer's elision is — useful
+data for the v0.7 work on inlined-subroutine handling and decision
+reconstruction extension.
+
+### Implements / Verifies
+
+- Implements: REQ-034 (on-Wasm trace-buffer instrumentation; v0.6.1
+  uses per-row globals as the simplest correct primitive instead of
+  the linear-memory trace buffer recommended by Agent A — both
+  satisfy the requirement, the per-row globals are simpler when each
+  row invokes the predicate exactly once).
+- Implements: FEAT-015 (the runtime side of the v0.6 redo).
+- Verifies: leap_year verdict end-to-end pipeline produces the
+  expected Wasm-level MC/DC report (1 decision, 2 conditions, full
+  MC/DC under masking).
+
+### Notes for v0.6.2
+
+- Investigate why state_guard / triangle / mixed_or_and decisions
+  don't always reconstruct under DWARF-based grouping despite having
+  surviving br_ifs. Likely fix: relax the `(function, source_file,
+  source_line)` grouping criterion to handle inlined-subroutine line
+  attribution.
+- Consider whether the per-row-globals primitive should evolve toward
+  the linear-memory trace buffer (Agent A's recommendation) once
+  v0.7's scaling work surfaces hot-loop overflow patterns.
+- Per-target br_table MC/DC reconstruction (DEC-015 deferral).
+
 ## [0.6.0] — 2026-04-25
 
 ### What v0.6 is — and what it is not
