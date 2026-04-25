@@ -34,6 +34,7 @@
 //!   "coverage on optimized Wasm" a valid stand-in for "coverage on
 //!   pre-optimization Wasm" (v0.4).
 
+pub mod decisions;
 pub mod error;
 pub mod instrument;
 pub mod report;

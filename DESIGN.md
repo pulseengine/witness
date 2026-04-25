@@ -274,13 +274,24 @@ adopted because the measurement points have different blind spots — the
 (Per the overdo-alignment C7 constraint — what v0.2 *will* clear vs.
 *won't*.)
 
-- ✅ MC/DC for source decisions of any size when DWARF is present
-- ✅ Strict per-`br_if` fallback when DWARF is absent
-- ✅ Per-target `br_table` counting (DWARF-driven)
 - ✅ Subprocess `--harness` escape hatch for non-wasmtime runtimes
+- ✅ Per-target `br_table` counting (helper-function-call pattern)
+- ✅ No artificial condition-count cap (positioning win vs LLVM/rustc-mcdc)
+- ✅ Manifest schema for Decisions (`decisions: Vec<Decision>` field;
+   `byte_offset: Option<u32>` on `BranchEntry`)
+- ✅ Strict per-`br_if` fallback when DWARF is absent (the manifest's
+   `decisions` field is empty)
 - ✅ Coverage-lifting writeup with stated soundness assumption
+   (`docs/paper/v0.2-mcdc-wasm.md`, 8.2k words)
+- ◐ DWARF-grounded reconstruction algorithm — **v0.2.0 ships the stub**
+   (`src/decisions.rs::reconstruct_decisions` returns `Ok(vec![])`); the
+   full algorithm body lands in v0.2.1. The schema is locked so v0.2.0
+   manifests forward-compat with v0.2.1 reconstructed output.
 - ◐ Soundness *proof* of lifting — depends on rustc+LLVM optimisation
-   preservation; v0.2 ships the assumption-stated variant
+   preservation; v0.2 ships the assumption-stated variant (DEC-010)
+- ❌ Per-target `br_table` DWARF labelling (the helper counts targets
+   correctly but `target_index → match_arm_label` mapping needs the
+   reconstruction algorithm; lands with v0.2.1)
 - ❌ Component-model coverage (still v0.4)
 - ❌ rivet evidence-format integration (still v0.3)
 - ❌ sigil in-toto predicate emission (still v0.3)

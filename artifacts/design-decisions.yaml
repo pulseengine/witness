@@ -168,6 +168,38 @@ artifacts:
       - type: satisfies
         target: REQ-006
 
+  - id: DEC-012
+    type: design-decision
+    title: v0.2.0 ships the Decisions schema; reconstruction algorithm lands in v0.2.1
+    status: draft
+    description: >
+      v0.2.0 ships the Manifest schema additions for DWARF-grounded MC/DC
+      (BranchEntry.byte_offset, Manifest.decisions: Vec<Decision>) and a
+      stub `decisions::reconstruct_decisions` that returns an empty list.
+      The reconstruction algorithm body lands in v0.2.1.
+    rationale: >
+      The schema is the durable interface — once a Manifest is written,
+      hosts (rivet, CI) parse it forever. Locking schema in v0.2.0 means
+      v0.2.1's reconstruction output is forward-compatible without a
+      schema bump. The reconstruction algorithm itself is the most
+      complex piece of v0.2 (DWARF parsing, line-info correlation, edge
+      cases for macro expansion and inlining) and would block the
+      release indefinitely if treated as v0.2.0-blocking. The strict
+      per-br_if fallback (already shipped in v0.1) remains the default
+      until v0.2.1 fills the stub.
+    alternatives: >
+      Block v0.2.0 on the full algorithm — rejected as scope creep that
+      would defer all of v0.2's other deliverables (subprocess harness,
+      per-target br_table, paper). Skip the schema in v0.2.0 and bump
+      again in v0.2.1 — rejected because hosts would need to handle two
+      schema versions.
+    tags: [v0.2, scope]
+    links:
+      - type: satisfies
+        target: REQ-005
+      - type: refines
+        target: DEC-006
+
   - id: DEC-007
     type: design-decision
     title: Reject the LLVM 6-condition cap; support unbounded MC/DC decisions

@@ -423,6 +423,7 @@ mod tests {
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
             branches: entries,
+            decisions: vec![],
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -477,6 +478,7 @@ mod tests {
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
             branches: entries,
+            decisions: vec![],
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -525,6 +527,7 @@ mod tests {
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
             branches: entries,
+            decisions: vec![],
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -608,6 +611,7 @@ EOF"#;
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
             branches: entries,
+            decisions: vec![],
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -670,6 +674,7 @@ EOF"#;
             witness_version: "test".to_string(),
             module_source: "fake".to_string(),
             branches: vec![],
+            decisions: vec![],
         };
         let manifest_path = dir.path().join("manifest.json");
         let module_path = dir.path().join("prog.wasm");

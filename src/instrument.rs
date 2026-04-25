@@ -97,8 +97,33 @@ pub struct BranchEntry {
     /// covers. `None` for non-`br_table` kinds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_index: Option<u32>,
+    /// Byte offset of the original source instruction in the
+    /// pre-instrumentation Wasm (from walrus `InstrLocId`). Required for
+    /// DWARF correlation in v0.2. `None` when the source location is
+    /// unavailable (e.g. instruction synthesised, not loaded from a
+    /// `.wasm` file).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_offset: Option<u32>,
     /// Walrus `InstrSeqId` encoded as a debug string — diagnostic only.
     pub seq_debug: String,
+}
+
+/// Group of `BranchEntry` ids treated as a single source-level decision
+/// after DWARF reconstruction. v0.2 emits these for `br_if` sequences that
+/// share a source line + lexical decision marker. Empty list means the
+/// fallback strict-per-`br_if` interpretation applies.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Decision {
+    pub id: u32,
+    /// The branch ids that constitute this decision's conditions, ordered
+    /// by their position in the `br_if` sequence (first to last).
+    pub conditions: Vec<u32>,
+    /// Source file path from DWARF, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_file: Option<String>,
+    /// Source line from DWARF, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_line: Option<u32>,
 }
 
 /// Manifest written alongside the instrumented Wasm.
@@ -108,6 +133,11 @@ pub struct Manifest {
     pub witness_version: String,
     pub module_source: String,
     pub branches: Vec<BranchEntry>,
+    /// Source-level decisions reconstructed from `branches` via DWARF.
+    /// Empty when DWARF is absent or reconstruction declined to group.
+    /// Hosts that don't care about MC/DC can ignore this field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decisions: Vec<Decision>,
 }
 
 impl Manifest {
@@ -129,7 +159,11 @@ impl Manifest {
 /// Instrument the Wasm module at `input`, writing the instrumented module
 /// to `output` and a branch manifest alongside it.
 pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
-    let mut module = Module::from_file(input).map_err(|source| Error::ParseModule {
+    let original_bytes = std::fs::read(input).map_err(|source| Error::ReadModule {
+        path: input.to_path_buf(),
+        source,
+    })?;
+    let mut module = Module::from_buffer(&original_bytes).map_err(|source| Error::ParseModule {
         path: input.to_path_buf(),
         source,
     })?;
@@ -142,11 +176,17 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
         source,
     })?;
 
+    // v0.2: attempt DWARF-grounded decision reconstruction. v0.2.0 ships
+    // the stub (always empty); v0.2.1 fills in the algorithm. Empty list
+    // means hosts use the strict per-br_if fallback.
+    let decisions = crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
+
     let manifest = Manifest {
         schema_version: MANIFEST_SCHEMA_VERSION.to_string(),
         witness_version: env!("CARGO_PKG_VERSION").to_string(),
         module_source: input.to_string_lossy().into_owned(),
         branches: entries,
+        decisions,
     };
     let manifest_path = Manifest::path_for(output);
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(Error::Serde)?;
@@ -181,6 +221,7 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
                 kind: branch.kind,
                 instr_index: branch.instr_index,
                 target_index: branch.target_index,
+                byte_offset: branch.byte_offset,
                 seq_debug: format!("{:?}", branch.seq_id),
             });
         }
@@ -386,6 +427,10 @@ struct BranchSite {
     /// For `BrTableTarget` sites only: which target index this counter
     /// covers. `None` for non-`br_table` kinds and for `BrTableDefault`.
     target_index: Option<u32>,
+    /// Original wasm bytecode offset of the source instruction, when
+    /// available (walrus `InstrLocId.data()`). `None` for synthetic
+    /// instructions or modules built without source-map data.
+    byte_offset: Option<u32>,
 }
 
 struct FunctionScan {
@@ -417,8 +462,13 @@ fn collect_scans(module: &Module) -> Vec<FunctionScan> {
 
 fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<BranchSite>) {
     let seq = func.block(seq_id);
-    for (index, (instr, _loc)) in seq.instrs.iter().enumerate() {
+    for (index, (instr, loc)) in seq.instrs.iter().enumerate() {
         let i = u32::try_from(index).unwrap_or(u32::MAX);
+        let byte_offset = if loc.is_default() {
+            None
+        } else {
+            Some(loc.data())
+        };
         // SAFETY-REVIEW: walrus has 50+ Instr variants; only those
         // containing nested InstrSeqIds need handling (Block, Loop,
         // IfElse), and branch-count candidates (BrIf, BrTable). Listing
@@ -431,6 +481,7 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
                 instr_index: i,
                 kind: BranchKind::BrIf,
                 target_index: None,
+                byte_offset,
             }),
             Instr::IfElse(IfElse {
                 consequent,
@@ -441,19 +492,19 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
                     instr_index: i,
                     kind: BranchKind::IfThen,
                     target_index: None,
+                    byte_offset,
                 });
                 out.push(BranchSite {
                     seq_id,
                     instr_index: i,
                     kind: BranchKind::IfElse,
                     target_index: None,
+                    byte_offset,
                 });
                 walk_collect(func, *consequent, out);
                 walk_collect(func, *alternative, out);
             }
             Instr::BrTable(bt) => {
-                // Per-target counters: one per explicit target plus one
-                // for the default arm (DEC-008 + REQ-013).
                 let n = u32::try_from(bt.blocks.len()).unwrap_or(u32::MAX);
                 for t in 0..n {
                     out.push(BranchSite {
@@ -461,6 +512,7 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
                         instr_index: i,
                         kind: BranchKind::BrTableTarget,
                         target_index: Some(t),
+                        byte_offset,
                     });
                 }
                 out.push(BranchSite {
@@ -468,6 +520,7 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
                     instr_index: i,
                     kind: BranchKind::BrTableDefault,
                     target_index: None,
+                    byte_offset,
                 });
             }
             Instr::Block(b) => walk_collect(func, b.seq, out),
