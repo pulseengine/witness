@@ -182,9 +182,7 @@ impl McdcReport {
                     .as_ref()
                     .map(|f| format!(" {f}"))
                     .unwrap_or_default(),
-                d.source_line
-                    .map(|l| format!(":{l}"))
-                    .unwrap_or_default(),
+                d.source_line.map(|l| format!(":{l}")).unwrap_or_default(),
                 d.status,
             ));
             out.push_str("  truth table:\n");
@@ -200,7 +198,10 @@ impl McdcReport {
                     Some(false) => "F",
                     None => "?",
                 };
-                out.push_str(&format!("    row {}: {{{}}} -> {}\n", r.row_id, cells, outcome));
+                out.push_str(&format!(
+                    "    row {}: {{{}}} -> {}\n",
+                    r.row_id, cells, outcome
+                ));
             }
             out.push_str("  conditions:\n");
             for c in &d.conditions {
@@ -214,17 +215,12 @@ impl McdcReport {
                         ));
                     }
                     ConditionStatus::Gap => {
-                        out.push_str(&format!(
-                            "    c{} (branch {}): GAP",
-                            c.index, c.branch_id
-                        ));
+                        out.push_str(&format!("    c{} (branch {}): GAP", c.index, c.branch_id));
                         if let Some(gap) = &c.gap_closure {
                             let cells = gap
                                 .evaluated
                                 .iter()
-                                .map(|(i, v)| {
-                                    format!("c{i}={}", if *v { "T" } else { "F" })
-                                })
+                                .map(|(i, v)| format!("c{i}={}", if *v { "T" } else { "F" }))
                                 .collect::<Vec<_>>()
                                 .join(", ");
                             out.push_str(&format!(
@@ -290,10 +286,7 @@ fn analyse_decision(d: &DecisionRecord) -> DecisionVerdict {
     let n = d.condition_branch_ids.len();
     for (idx, &branch_id) in d.condition_branch_ids.iter().enumerate() {
         let i = u32::try_from(idx).unwrap_or(u32::MAX);
-        let condition_evaluated_anywhere = d
-            .rows
-            .iter()
-            .any(|r| r.evaluated.contains_key(&i));
+        let condition_evaluated_anywhere = d.rows.iter().any(|r| r.evaluated.contains_key(&i));
         if !condition_evaluated_anywhere {
             conditions.push(ConditionVerdict {
                 index: i,
@@ -588,7 +581,10 @@ mod tests {
             rows: vec![],
         };
         let report = McdcReport::from_record(&record_with_decision(d));
-        assert!(matches!(report.decisions[0].status, DecisionStatus::Unreached));
+        assert!(matches!(
+            report.decisions[0].status,
+            DecisionStatus::Unreached
+        ));
         for c in &report.decisions[0].conditions {
             assert!(matches!(c.status, ConditionStatus::Dead));
         }
@@ -608,7 +604,11 @@ mod tests {
             ],
         };
         let report = McdcReport::from_record(&record_with_decision(d));
-        let c1 = report.decisions[0].conditions.iter().find(|c| c.index == 1).unwrap();
+        let c1 = report.decisions[0]
+            .conditions
+            .iter()
+            .find(|c| c.index == 1)
+            .unwrap();
         assert!(matches!(c1.status, ConditionStatus::Dead));
     }
 
