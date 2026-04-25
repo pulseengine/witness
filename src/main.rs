@@ -90,6 +90,52 @@ enum Command {
         #[arg(short, long, default_value = "witness-merged.json")]
         output: PathBuf,
     },
+
+    /// Emit an in-toto Statement (unwrapped) carrying the coverage as a
+    /// `https://pulseengine.eu/witness-coverage/v1` predicate. Sigil
+    /// wraps and signs the statement; witness produces the body.
+    Predicate {
+        /// Path to a run JSON (typically the output of `witness merge`).
+        #[arg(long)]
+        run: PathBuf,
+        /// Path to the instrumented Wasm module (its digest is the
+        /// Statement's subject).
+        #[arg(long)]
+        module: PathBuf,
+        /// Optional: path to the original (pre-instrumentation) module;
+        /// its digest is recorded in the predicate body.
+        #[arg(long)]
+        original: Option<PathBuf>,
+        /// Optional: harness command, recorded in the measurement metadata.
+        #[arg(long)]
+        harness: Option<String>,
+        /// Output path for the JSON Statement.
+        #[arg(short, long, default_value = "witness-predicate.json")]
+        output: PathBuf,
+    },
+
+    /// Emit rivet-shape coverage evidence YAML, partitioned by a
+    /// branch→artefact mapping. Output is consumable by rivet's
+    /// `CoverageStore` (landing in the rivet upstream PR coordinated
+    /// with this v0.3 release).
+    RivetEvidence {
+        /// Path to a run JSON (typically the output of `witness merge`).
+        #[arg(long)]
+        run: PathBuf,
+        /// Path to the requirement-map YAML (mappings of branch ids to
+        /// rivet artefact ids). See docs/research/rivet-evidence-consumer.md.
+        #[arg(long = "requirement-map")]
+        requirement_map: PathBuf,
+        /// Optional environment label for the run-metadata block.
+        #[arg(long)]
+        environment: Option<String>,
+        /// Optional commit SHA for the run-metadata block.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Output path for the YAML evidence file.
+        #[arg(short, long, default_value = "witness-coverage-evidence.yaml")]
+        output: PathBuf,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -140,6 +186,41 @@ fn main() -> Result<()> {
         }
         Command::Merge { inputs, output } => {
             witness::run::merge_files(&inputs, &output)?;
+        }
+        Command::Predicate {
+            run,
+            module,
+            original,
+            harness,
+            output,
+        } => {
+            let report = witness::report::from_run_file(&run)?;
+            let stmt = witness::predicate::build_statement(
+                &report,
+                &module,
+                original.as_deref(),
+                harness.as_deref(),
+            )?;
+            witness::predicate::save_statement(&stmt, &output)?;
+        }
+        Command::RivetEvidence {
+            run,
+            requirement_map,
+            environment,
+            commit,
+            output,
+        } => {
+            let record = witness::run::RunRecord::load(&run)?;
+            let map = witness::rivet_evidence::RequirementMap::load(&requirement_map)?;
+            let flat = map.flatten()?;
+            let file = witness::rivet_evidence::build_evidence(
+                &record,
+                &flat,
+                "witness rivet-evidence",
+                environment.as_deref(),
+                commit.as_deref(),
+            )?;
+            witness::rivet_evidence::save_evidence(&file, &output)?;
         }
     }
 

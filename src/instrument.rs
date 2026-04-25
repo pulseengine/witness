@@ -66,7 +66,7 @@ pub const COUNTER_EXPORT_PREFIX: &str = "__witness_counter_";
 pub const BRTABLE_HELPER_PREFIX: &str = "__witness_brtable_";
 
 /// Kind of branch a counter is counting.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum BranchKind {
     /// A `br_if` — counter fires when the branch is taken.

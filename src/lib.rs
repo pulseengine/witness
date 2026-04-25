@@ -37,7 +37,9 @@
 pub mod decisions;
 pub mod error;
 pub mod instrument;
+pub mod predicate;
 pub mod report;
+pub mod rivet_evidence;
 pub mod run;
 
 pub use error::{Error, Result};
