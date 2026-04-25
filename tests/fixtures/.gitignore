@@ -1,0 +1,17 @@
+# Built fixture artifacts — rebuilt in CI before integration tests run.
+# We don't commit .wasm files; the .rs source is the source of truth.
+
+# Per-fixture cargo target dirs.
+**/target/
+
+# The stable-named output of build.sh.
+**/sample.wasm
+
+# Any other built wasm — defensive, matches incidental output paths.
+*.wasm
+
+# Cargo lockfiles for fixture crates aren't useful (they pin against rustc's
+# resolver state for *this fixture only*; the witness lockfile is the one
+# that matters for the tool itself). The fixture has zero deps so a lockfile
+# would be empty anyway.
+**/Cargo.lock

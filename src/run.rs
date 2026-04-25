@@ -81,6 +81,100 @@ impl RunRecord {
     }
 }
 
+/// Merge multiple `RunRecord`s into one by summing per-branch counters.
+///
+/// All inputs must share the same:
+/// - `schema_version` (so v0.1 and v0.2 records cannot mix)
+/// - `module_path` (only runs against the same instrumented module compose)
+/// - branch list (same length, same `(id, function_index, instr_index, kind)`
+///   tuple per position)
+///
+/// `invoked` lists are concatenated in input order; the resulting
+/// `RunRecord.witness_version` matches the current witness version (the
+/// merge tool advertises itself, not any single input run).
+///
+/// This is the foundation for v0.3's rivet integration: real test suites
+/// produce multiple `witness run` outputs (one per test binary or
+/// harness invocation) and rivet wants one coverage claim per
+/// requirement.
+pub fn merge_records(records: &[RunRecord]) -> Result<RunRecord> {
+    let head = records
+        .first()
+        .ok_or_else(|| Error::Runtime(anyhow::anyhow!("merge_records called with no inputs")))?;
+
+    for (i, r) in records.iter().enumerate().skip(1) {
+        if r.schema_version != head.schema_version {
+            return Err(Error::Runtime(anyhow::anyhow!(
+                "schema mismatch at input {i}: expected `{}`, got `{}`",
+                head.schema_version,
+                r.schema_version
+            )));
+        }
+        if r.module_path != head.module_path {
+            return Err(Error::Runtime(anyhow::anyhow!(
+                "module_path mismatch at input {i}: expected `{}`, got `{}`",
+                head.module_path,
+                r.module_path
+            )));
+        }
+        if r.branches.len() != head.branches.len() {
+            return Err(Error::Runtime(anyhow::anyhow!(
+                "branch count mismatch at input {i}: expected {}, got {}",
+                head.branches.len(),
+                r.branches.len()
+            )));
+        }
+        for (j, (a, b)) in head.branches.iter().zip(r.branches.iter()).enumerate() {
+            let same = a.id == b.id
+                && a.function_index == b.function_index
+                && a.instr_index == b.instr_index
+                && a.kind == b.kind;
+            if !same {
+                return Err(Error::Runtime(anyhow::anyhow!(
+                    "branch entry {j} differs between input 0 and input {i} \
+                     (id/function_index/instr_index/kind must match)"
+                )));
+            }
+        }
+    }
+
+    let mut merged_branches: Vec<BranchHit> = head.branches.clone();
+    for r in records.iter().skip(1) {
+        for (acc, b) in merged_branches.iter_mut().zip(r.branches.iter()) {
+            acc.hits = acc.hits.saturating_add(b.hits);
+        }
+    }
+
+    let mut invoked: Vec<String> = Vec::new();
+    for r in records {
+        invoked.extend(r.invoked.iter().cloned());
+    }
+
+    Ok(RunRecord {
+        schema_version: head.schema_version.clone(),
+        witness_version: env!("CARGO_PKG_VERSION").to_string(),
+        module_path: head.module_path.clone(),
+        invoked,
+        branches: merged_branches,
+    })
+}
+
+/// Read N run JSON files and write the merged result to `output`.
+/// CLI-facing wrapper around [`merge_records`].
+pub fn merge_files(inputs: &[PathBuf], output: &Path) -> Result<()> {
+    if inputs.is_empty() {
+        return Err(Error::Runtime(anyhow::anyhow!(
+            "merge requires at least one input run JSON"
+        )));
+    }
+    let records: Vec<RunRecord> = inputs
+        .iter()
+        .map(|p| RunRecord::load(p))
+        .collect::<Result<Vec<_>>>()?;
+    let merged = merge_records(&records)?;
+    merged.save(output)
+}
+
 /// Options for `run_module`. Constructed by the CLI layer; exposed as a
 /// struct so library callers can drive witness programmatically.
 pub struct RunOptions<'a> {
@@ -664,6 +758,77 @@ EOF"#;
             .map(|b| b.hits)
             .sum();
         assert_eq!(default_hits, 1, "default counter fires on selector=5");
+    }
+
+    fn make_record(module_path: &str, hits_seq: &[u64]) -> RunRecord {
+        let branches: Vec<BranchHit> = hits_seq
+            .iter()
+            .enumerate()
+            .map(|(i, &h)| BranchHit {
+                id: u32::try_from(i).unwrap(),
+                function_index: 0,
+                function_name: None,
+                kind: BranchKind::BrIf,
+                instr_index: u32::try_from(i).unwrap(),
+                hits: h,
+            })
+            .collect();
+        RunRecord {
+            schema_version: "2".to_string(),
+            witness_version: "test".to_string(),
+            module_path: module_path.to_string(),
+            invoked: vec!["fn1".to_string()],
+            branches,
+        }
+    }
+
+    #[test]
+    fn merge_sums_counters() {
+        let a = make_record("m.wasm", &[1, 0, 3]);
+        let b = make_record("m.wasm", &[0, 5, 2]);
+        let merged = merge_records(&[a, b]).unwrap();
+        assert_eq!(merged.branches.len(), 3);
+        assert_eq!(merged.branches[0].hits, 1);
+        assert_eq!(merged.branches[1].hits, 5);
+        assert_eq!(merged.branches[2].hits, 5);
+        assert_eq!(merged.invoked, vec!["fn1".to_string(), "fn1".to_string()]);
+    }
+
+    #[test]
+    fn merge_rejects_module_mismatch() {
+        let a = make_record("m1.wasm", &[1]);
+        let b = make_record("m2.wasm", &[1]);
+        let result = merge_records(&[a, b]);
+        assert!(matches!(result, Err(Error::Runtime(_))));
+    }
+
+    #[test]
+    fn merge_rejects_branch_count_mismatch() {
+        let a = make_record("m.wasm", &[1, 2]);
+        let b = make_record("m.wasm", &[1, 2, 3]);
+        let result = merge_records(&[a, b]);
+        assert!(matches!(result, Err(Error::Runtime(_))));
+    }
+
+    #[test]
+    fn merge_rejects_empty() {
+        let result = merge_records(&[]);
+        assert!(matches!(result, Err(Error::Runtime(_))));
+    }
+
+    #[test]
+    fn merge_files_round_trip() {
+        let dir = tempdir().unwrap();
+        let a = dir.path().join("a.json");
+        let b = dir.path().join("b.json");
+        let out = dir.path().join("merged.json");
+        make_record("m.wasm", &[2, 0]).save(&a).unwrap();
+        make_record("m.wasm", &[0, 3]).save(&b).unwrap();
+        merge_files(&[a, b], &out).unwrap();
+        let merged = RunRecord::load(&out).unwrap();
+        assert_eq!(merged.branches[0].hits, 2);
+        assert_eq!(merged.branches[1].hits, 3);
+        assert_eq!(merged.witness_version, env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

@@ -1,0 +1,38 @@
+[package]
+name = "witness-sample-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "End-to-end test fixture for witness — a tiny Rust crate that compiles to Wasm and exercises every instrumentation pattern (br_if, if/else, br_table). Not part of the witness public API."
+license = "Apache-2.0 OR MIT"
+
+# This crate is intentionally NOT part of the witness Cargo workspace. It is
+# built standalone for the wasm32 target by `build.sh` (or the CI step that
+# runs before `cargo test --test integration_e2e`). Treating it as a workspace
+# member would force every host-target build of witness to also build this
+# fixture, which is not what we want.
+[workspace]
+
+[lib]
+# `cdylib` is the Wasm equivalent of "produce a loadable artifact, not an
+# rlib". The exported `extern "C"` functions become Wasm exports.
+crate-type = ["cdylib"]
+
+[profile.release]
+# Debug symbols are fine — the fixture's binary size is not a concern, and
+# DWARF will help v0.2 reconstruction tests later.
+debug = true
+# Don't strip — we want the source-mapped offsets walrus reads via
+# `InstrLocId.data()` for `byte_offset` in the manifest.
+strip = false
+# Single codegen unit keeps the lowering deterministic enough for byte-level
+# round-trip tests on a fixed rustc version. CI pins the rustc version in
+# rust-toolchain.toml; if the rustc version changes, regenerate fixtures.
+codegen-units = 1
+# No LTO — keeps the lowering close to MIR-as-emitted, which is what we want
+# the witness instrumentation to see. Aggressive LTO could collapse the
+# match/if patterns we are trying to exercise.
+lto = false
+# `panic = "abort"` because `wasm32-unknown-unknown` has no unwinder.
+panic = "abort"
+opt-level = 1

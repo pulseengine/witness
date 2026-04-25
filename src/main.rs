@@ -76,6 +76,20 @@ enum Command {
         #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
         format: ReportFormat,
     },
+
+    /// Merge multiple run JSON files into one by summing per-branch counters.
+    ///
+    /// Inputs must share the same instrumented module (same `module_path`,
+    /// same branch list). `invoked` lists are concatenated in input order.
+    /// Use this to combine runs from multiple test binaries or harness
+    /// invocations before producing one coverage report.
+    Merge {
+        /// Run JSON files to merge.
+        inputs: Vec<PathBuf>,
+        /// Output path for the merged run JSON.
+        #[arg(short, long, default_value = "witness-merged.json")]
+        output: PathBuf,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -123,6 +137,9 @@ fn main() -> Result<()> {
                 ReportFormat::Text => println!("{}", report.to_text()),
                 ReportFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
             }
+        }
+        Command::Merge { inputs, output } => {
+            witness::run::merge_files(&inputs, &output)?;
         }
     }
 

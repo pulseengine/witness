@@ -55,6 +55,16 @@ witness report --input witness-run.json
 witness report --input witness-run.json --format json
 ```
 
+For a worked example end-to-end, see
+[`tests/fixtures/sample-rust-crate/`](tests/fixtures/sample-rust-crate/) —
+a tiny `no_std` Rust crate that compiles to Wasm and exercises every
+instrumentation pattern (`br_if`, `if/else`, `br_table`). Build it with
+`./tests/fixtures/sample-rust-crate/build.sh`, then run
+`cargo test --test integration_e2e` to see the round-trip
+instrument→run→assert flow against compiler output (not just hand-written
+WAT). The fixture's `README.md` documents the entry-point conventions
+witness uses for `--invoke`.
+
 ## Where it fits
 
 witness is one piece of a composed pipeline. Each tool owns a narrow mechanical
