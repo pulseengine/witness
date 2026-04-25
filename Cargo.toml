@@ -82,6 +82,11 @@ sha2 = "0.10"
 # YAML emission for the rivet evidence format (rivet_evidence.rs).
 serde_yaml = "0.9"
 
+# DWARF parsing for v0.4 decision reconstruction (decisions.rs).
+gimli = { version = "0.31", default-features = false, features = ["read", "std"] }
+# Walk Wasm custom sections to extract DWARF.
+wasmparser = "0.240"
+
 [dev-dependencies]
 # Parse inline Wasm text for tests.
 wat = "1"

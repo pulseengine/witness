@@ -5,3 +5,7 @@ Cargo.lock.bak
 *.tmp
 .claude/
 .rivet/
+
+# Blog post HTML mirrors — fetched ad-hoc by research agents; not source.
+docs/research/blog-mirror/
+

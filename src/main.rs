@@ -114,6 +114,23 @@ enum Command {
         output: PathBuf,
     },
 
+    /// Compute the coverage / branch-set delta between two manifests
+    /// or run records. Used by the `witness-delta.yml` PR workflow.
+    Diff {
+        /// Base snapshot (manifest or run JSON).
+        #[arg(long)]
+        base: PathBuf,
+        /// Head snapshot (manifest or run JSON).
+        #[arg(long)]
+        head: PathBuf,
+        /// Output path for the JSON delta document.
+        #[arg(short, long, default_value = "witness-delta.json")]
+        output: PathBuf,
+        /// Output format: json (default) or text.
+        #[arg(long, value_enum, default_value_t = DiffFormat::Json)]
+        format: DiffFormat,
+    },
+
     /// Emit rivet-shape coverage evidence YAML, partitioned by a
     /// branch→artefact mapping. Output is consumable by rivet's
     /// `CoverageStore` (landing in the rivet upstream PR coordinated
@@ -144,6 +161,14 @@ enum ReportFormat {
     Text,
     /// Machine-readable JSON for tools (rivet, CI).
     Json,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum DiffFormat {
+    /// Machine-readable JSON.
+    Json,
+    /// Human-readable text (used as the PR-comment body).
+    Text,
 }
 
 fn main() -> Result<()> {
@@ -202,6 +227,28 @@ fn main() -> Result<()> {
                 harness.as_deref(),
             )?;
             witness::predicate::save_statement(&stmt, &output)?;
+        }
+        Command::Diff {
+            base,
+            head,
+            output,
+            format,
+        } => {
+            let delta = witness::diff::diff(&base, &head)?;
+            // SAFETY-REVIEW: CLI prints to stdout for human consumers.
+            #[allow(clippy::print_stdout)]
+            match format {
+                DiffFormat::Json => {
+                    let json = serde_json::to_string_pretty(&delta)?;
+                    std::fs::write(&output, &json)?;
+                    println!("{json}");
+                }
+                DiffFormat::Text => {
+                    let text = witness::diff::delta_to_text(&delta);
+                    std::fs::write(&output, &text)?;
+                    println!("{text}");
+                }
+            }
         }
         Command::RivetEvidence {
             run,

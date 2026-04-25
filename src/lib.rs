@@ -35,6 +35,7 @@
 //!   pre-optimization Wasm" (v0.4).
 
 pub mod decisions;
+pub mod diff;
 pub mod error;
 pub mod instrument;
 pub mod predicate;
