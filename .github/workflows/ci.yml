@@ -212,3 +212,39 @@ jobs:
           name: witness-core-wasm
           path: target/wasm32-wasip2/release/witness_core.wasm
           if-no-files-found: warn
+
+  verdict-suite:
+    name: Verdict suite — end-to-end MC/DC on the canonical 7
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build witness binary
+        run: cargo build --release -p witness
+      - name: Run verdict suite
+        run: |
+          chmod +x verdicts/run-suite.sh
+          ./verdicts/run-suite.sh build/verdict-evidence
+      - name: Regression gate — verdicts that should produce decisions
+        run: |
+          set -euo pipefail
+          # These verdicts must produce non-empty decisions for v0.6.2+ to
+          # be considered green. The two zero-decision verdicts
+          # (range_overlap, mixed_or_and) get fully optimised to bitwise
+          # arithmetic by rustc and are intentionally not in this gate.
+          for v in leap_year triangle state_guard safety_envelope parser_dispatch; do
+            n=$(python3 -c "import json; print(len(json.load(open('build/verdict-evidence/$v/run.json'))['decisions']))")
+            if [ "$n" -lt 1 ]; then
+              echo "REGRESSION: $v has 0 decisions; expected >= 1" >&2
+              exit 1
+            fi
+            echo "ok: $v has $n decision(s)"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verdict-evidence
+          path: build/verdict-evidence/

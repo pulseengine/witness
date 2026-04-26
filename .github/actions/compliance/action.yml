@@ -83,6 +83,22 @@ runs:
         find . -name "*.witness.json" -not -path "*/target/*" -type f \
           -exec cp {} "$OUTPUT_DIR/manifests/" \; 2>/dev/null || true
 
+    - name: Run verdict suite (v0.6.3+)
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+        # Need wasm32-unknown-unknown to build the verdict crates as
+        # core modules (wasm32-wasip2 produces Components which walrus
+        # can't currently rewrite).
+        rustup target add wasm32-unknown-unknown
+        if [ -x verdicts/run-suite.sh ]; then
+          ./verdicts/run-suite.sh "$OUTPUT_DIR/verdict-evidence" || true
+        else
+          echo "warn: verdicts/run-suite.sh missing; skipping verdict bundle" >&2
+        fi
+
     - name: Write README
       shell: bash
       env:
@@ -98,10 +114,21 @@ runs:
           coverage-report.txt    - human-readable summary (when present)
           predicates/            - in-toto Statements (unsigned, ready for sigil)
           manifests/             - branch manifests (.witness.json)
+          verdict-evidence/      - per-verdict end-to-end evidence (v0.6.3+):
+            <name>/source.wasm           pre-instrumentation Wasm
+            <name>/instrumented.wasm     post-instrumentation Wasm
+            <name>/manifest.json         branches + reconstructed decisions
+            <name>/run.json              per-row condition vectors (v3 schema)
+            <name>/report.txt            MC/DC truth tables + verdicts (text)
+            <name>/report.json           MC/DC report (JSON, schema v1)
+            <name>/predicate.json        in-toto Statement (unsigned)
+            <name>/lcov.info, overview.txt  LCOV (when DWARF surfaces)
+          SUMMARY.txt            - one-line-per-verdict status table
 
         Schemas:
           https://pulseengine.eu/witness-coverage/v1            (predicate)
           https://pulseengine.eu/witness-rivet-evidence/v1     (rivet evidence)
+          https://pulseengine.eu/witness-mcdc/v1               (MC/DC report)
         EOF
 
     - name: Create archive

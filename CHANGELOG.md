@@ -7,6 +7,97 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-04-26
+
+### What v0.6.3 closes
+
+v0.6.0 promised real per-verdict signed evidence in the release archive
+(REQ-033) but shipped a structural placeholder: empty `predicates/`
+and `manifests/` directories. v0.6.1 made the per-row instrumentation
+work end-to-end; v0.6.2 made 5 of 7 verdicts produce reports. v0.6.3
+finally **populates the compliance bundle** with that evidence and
+adds a CI regression gate so the suite stays green across rustc
+upgrades.
+
+### Added — `verdicts/run-suite.sh`
+
+End-to-end driver script. Invoked locally (`./verdicts/run-suite.sh
+some-out-dir`) and from the compliance action. For each of the seven
+verdicts:
+
+1. Builds with `wasm32-unknown-unknown` (core module — walrus can
+   rewrite; `wasm32-wasip2` produces Components walrus doesn't yet
+   handle).
+2. Instruments with the v0.6.1 per-row primitive.
+3. Runs every `run_row_<n>` export.
+4. Emits text + JSON MC/DC reports.
+5. Builds the unwrapped in-toto Statement (signing is v0.6.4 once
+   release-key management is wired in).
+6. Emits LCOV + sibling overview when DWARF surfaces decisions.
+
+A `SUMMARY.txt` rolls up branches / decisions / full-MC/DC counts:
+
+```
+verdict              branches   decisions    full-mcdc
+-------              --------   ---------    ---------
+leap_year            2          1            1/1
+range_overlap        0          0            0/0
+triangle             2          1            1/1
+state_guard          3          1            1/1
+mixed_or_and         0          0            0/0
+safety_envelope      4          1            1/1
+parser_dispatch      33         7            1/7
+```
+
+### Added — populated compliance bundle
+
+`.github/actions/compliance` now invokes `verdicts/run-suite.sh` and
+nests the output under `compliance/verdict-evidence/<name>/`. Each
+release's compliance archive contains:
+
+- The seven verdict directories with their full instrument-run-report
+  chain.
+- `SUMMARY.txt` at the top of the bundle.
+- The original (now non-empty) `predicates/` and `manifests/`
+  directories.
+
+Closes REQ-033 ("compliance bundle populated with real evidence") in
+substance, not just structurally.
+
+### Added — `verdict-suite` CI regression gate
+
+New `verdict-suite` job in `ci.yml`:
+
+- Builds witness in release mode.
+- Adds `wasm32-unknown-unknown` target.
+- Runs the suite script.
+- **Asserts** that `leap_year`, `triangle`, `state_guard`,
+  `safety_envelope`, and `parser_dispatch` each produce >= 1
+  reconstructed decision. A regression (e.g. a future rustc that
+  fully optimises one of these verdicts to bitwise) fails CI on main.
+- Uploads `verdict-evidence/` as an artefact.
+
+`range_overlap` and `mixed_or_and` are deliberately excluded from the
+gate — their pure-boolean conditions are expected to be fully
+optimised to `i32.and` and produce zero branches at the Wasm level.
+
+### Notes for v0.6.4
+
+- DSSE-sign each verdict's predicate with a release-time key. Pulls
+  `wsc-attestation` into the action, manages the key via GitHub
+  Secrets.
+- Add a `verdict-suite-delta` PR-level CI job that diffs the
+  `decisions / conditions / full-mcdc` counts vs `main` and posts the
+  delta to the PR conversation. Useful for catching subtle optimiser
+  regressions earlier than the regression gate fires.
+
+### Implements / Verifies
+
+- Implements: REQ-033 (compliance bundle populated with real
+  per-verdict evidence).
+- Verifies: the verdict-suite CI gate exists and fails closed when
+  any of the five "should-have-decisions" verdicts regresses to zero.
+
 ## [0.6.2] — 2026-04-26
 
 ### What v0.6.2 closes
