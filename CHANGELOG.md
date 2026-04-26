@@ -7,6 +7,113 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-04-26
+
+### What v0.7.2 closes (write side)
+
+v0.7.0 hit the limitation Agent A's research warned about: per-row
+globals can capture only the last value per condition per row, so
+loop-bearing programs (httparse) end up with `0/N full MC/DC`
+because every iteration's evaluated map collapses into the last
+iteration's. v0.7.2 ships the **write side** of the linear-memory
+trace buffer that lifts this limitation.
+
+The runner-side parser that converts trace records into per-iteration
+`DecisionRow` entries is the v0.7.3 follow-up.
+
+### Added — trace memory, helper exports
+
+Each instrumented module now exports a 16-page (1 MiB) trace memory
+plus three helper functions:
+
+- `__witness_trace`: 16-page exported memory. Header at offsets 0-15
+  (cursor, capacity, overflow_flag, reserved); records starting at
+  offset 16.
+- `__witness_trace_reset()`: zeros cursor + overflow_flag, sets
+  capacity. The runner calls this between row invocations.
+- `__witness_trace_row_marker(row_id: i32)`: writes a row-marker
+  record. Reserved for v0.7.3+ when iteration boundaries get
+  emitted at row transitions.
+- `__witness_trace_record(branch_id: i32, value: i32)`: internal
+  helper called by per-br_if instrumentation. Writes a 4-byte
+  record `(branch_id u16, value u8, kind=0 u8)` to trace memory at
+  cursor, advances cursor.
+
+### Added — per-br_if trace-record writes
+
+`rewrite_brif` was extended to emit `i32.const branch_id;
+local.get tmp; call __witness_trace_record` after the brval/brcnt
+sequence. Stack-neutral (consumes 2, pushes 0); the v0.5 invariant
+that the tee'd condition stays on the stack for the if-counter-inc
+that follows is preserved.
+
+### Added — runner reads the trace watermark
+
+`witness run` now reads the trace memory header after each row
+invocation and reports the bytes-used watermark in
+`RunRecord.invoked` as `__witness_trace_bytes=N`. Sets
+`trace_health.ambiguous_rows = true` when any trace activity is
+seen — flag for the reporter that v0.7.3's per-iteration parser
+should be applied to this run.
+
+### Verified end-to-end
+
+```
+$ witness instrument verdicts/leap_year/verdict_leap_year.wasm -o lyt.wasm
+$ witness run lyt.wasm --invoke run_row_0..3 -o lyt.run.json
+trace_health: {'overflow': False, 'rows': 4, 'ambiguous_rows': True}
+trace: __witness_trace_bytes=28      → 7 records / 4 rows / 2 br_ifs each ≈ 1.75 r/row
+
+$ witness instrument verdicts/httparse/verdict_httparse.wasm -o hp.wasm
+$ witness run hp.wasm --invoke run_row_0..14 -o hp.run.json
+trace_health: {'overflow': False, 'rows': 15, 'ambiguous_rows': True}
+trace: __witness_trace_bytes=6328     → 1582 records across 15 rows
+```
+
+httparse's **1582 records** across 15 rows is exactly the
+per-iteration data per-row globals could not capture. v0.7.3 parses
+this into per-iteration DecisionRow entries; the MC/DC reporter
+then finds proving pairs that the per-row-globals collapse hid.
+
+### Implementation notes
+
+- Helper-function approach (not inline). Each per-br_if site is
+  3 instructions (const + local.get + call) instead of ~15 inline
+  instructions. Trade-off: function-call overhead per branch in
+  exchange for smaller module size + simpler stack-typing review.
+  v0.7.x can switch to inline if profiling shows the call dominates.
+- Module file size growth ≈ 100 bytes for the trace infrastructure
+  (memory + 3 helpers) + 12 bytes per `BrIf` site (3 instructions
+  ≈ 4 bytes each). httparse's 481 br_ifs add ~5.7 KB of
+  instrumentation; the bulk of `verdict_httparse.wasm`'s 677 KB
+  is httparse itself.
+- Multiple-memory support required at the runtime side. wasmtime
+  42 supports it natively (the wasi-preview2 import set already
+  uses multiple memories). Older runtimes that don't support
+  `multi_memory` will reject witness-instrumented modules; the
+  runtime check is upstream of any witness-specific failure.
+
+### Notes for v0.7.3
+
+- Runner-side trace parser: read the trace memory after each row,
+  walk the records, group by decision (via manifest's branch→
+  decision map), split into iterations (next condition_idx
+  appearing equal-or-less-than the previous starts a new
+  iteration), emit one DecisionRow per iteration. Outcome stays the
+  function return value (per-decision outcome capture is a
+  separate v0.7.x track).
+- MC/DC reporter changes: handle the case where one row produces
+  multiple iterations of the same decision. Each iteration is a
+  candidate for pair-finding.
+
+### Implements / Verifies
+
+- Implements: REQ-034 (substance — first half: trace-buffer
+  primitive on the write side).
+- Verifies: leap_year produces 7 records, httparse produces 1582
+  records — trace memory is being written by per-br_if
+  instrumentation as designed.
+
 ## [0.7.1] — 2026-04-26
 
 ### What v0.7.1 closes

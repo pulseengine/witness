@@ -47,9 +47,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walrus::ir::{
     BinaryOp, Binop, BrIf, Const, GlobalGet, GlobalSet, IfElse, Instr, InstrSeqId, InstrSeqType,
-    LocalGet, LocalTee, Value,
+    LoadKind, LocalGet, LocalTee, MemArg, Store, StoreKind, Value,
 };
-use walrus::{ConstExpr, FunctionBuilder, FunctionId, GlobalId, LocalId, Module, ValType};
+use walrus::{
+    ConstExpr, FunctionBuilder, FunctionId, GlobalId, LocalId, MemoryId, Module, ValType,
+};
 
 /// Manifest schema version. v0.1 pinned to "1"; v0.2 bumps to "2" for
 /// per-target `br_table` entries (`target_index` field). Old v0.1 manifests
@@ -83,6 +85,59 @@ pub const BRCNT_EXPORT_PREFIX: &str = "__witness_brcnt_";
 /// invocations to zero all `BRVAL` / `BRCNT` globals so the next row's
 /// captures don't leak prior state.
 pub const ROW_RESET_EXPORT: &str = "__witness_row_reset";
+
+/// v0.7.2 — exported memory carrying the per-iteration trace buffer.
+/// Each `br_if` instrumentation appends a 4-byte record to this memory
+/// at offset `cursor` (where `cursor` is stored at byte offset 0 of
+/// the memory itself). Lifts the per-row-globals limitation that
+/// caps loop-bearing programs (e.g. httparse) at 0/N full MC/DC,
+/// because per-iteration condition vectors are preserved.
+///
+/// Memory layout:
+///   offset 0:    u32 cursor (next write offset, in bytes)
+///   offset 4:    u32 capacity (in bytes; runner can read to know when overflow looms)
+///   offset 8:    u32 overflow_flag (set by the writer when records would exceed capacity)
+///   offset 12:   u32 reserved
+///   offset 16+:  records
+///
+/// Each record (4 bytes, little-endian):
+///   bytes 0..2:  u16 branch_id (cap u16; v0.7.2 modules with > 65535 branches
+///                 are flagged in the manifest schema as v4 with widened records)
+///   byte  2:     u8 value (0 or 1)
+///   byte  3:     u8 record_kind (0 = condition, 1 = row-marker, 2 = decision-outcome)
+pub const TRACE_MEMORY_EXPORT: &str = "__witness_trace";
+
+/// Trace memory header size in bytes (cursor + capacity + overflow + reserved).
+pub const TRACE_HEADER_BYTES: u32 = 16;
+
+/// Trace record size in bytes. Power of two so cursor advance is a
+/// single `i32.add 4`.
+pub const TRACE_RECORD_BYTES: u32 = 4;
+
+/// Default trace memory size in pages (1 page = 64 KiB). 16 pages =
+/// 1 MiB = 262128 records max (after subtracting the 16-byte header
+/// from one full page worth = 16384 records minus header overhead).
+/// Configurable via the `WITNESS_TRACE_PAGES` env var the host
+/// honours when growing the memory; v0.7.2 ships fixed-size.
+pub const TRACE_DEFAULT_PAGES: u32 = 16;
+
+/// v0.7.2 — exported helper function: zero the trace cursor +
+/// overflow_flag (does not memset the record region; stale data
+/// past the new cursor is invisible to the reader and overwritten
+/// by next writes). Cheap.
+pub const TRACE_RESET_EXPORT: &str = "__witness_trace_reset";
+
+/// v0.7.2 — exported helper function: append a row-marker record
+/// `(row_id_lo as branch_id slot, 0, kind=1)`. Called by the runner
+/// between row invocations.
+pub const TRACE_ROW_MARKER_EXPORT: &str = "__witness_trace_row_marker";
+
+/// v0.7.2 — internal helper function called by per-br_if
+/// instrumentation. Takes `(branch_id: i32, value: i32)` and appends
+/// a 4-byte record `(branch_id u16, value u8, kind=0 u8)` to the
+/// trace memory at cursor, then advances cursor by 4. Not exported —
+/// only the instrumented module's br_if sites call it.
+const TRACE_RECORD_HELPER_NAME: &str = "__witness_trace_record";
 
 /// Kind of branch a counter is counting.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -291,6 +346,12 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
     // with module.funcs mutations.
     let helpers = build_brtable_helpers(module, &scans, &counter_globals)?;
 
+    // v0.7.2: build the trace memory + reset/row-marker helpers + the
+    // trace_record helper. Built BEFORE the rewrite loop so its
+    // FunctionId is stable when rewrite_brif emits a Call.
+    let trace_mem = build_trace_infra(module)?;
+    let trace_record_helper = build_trace_record_helper(module, trace_mem)?;
+
     let mut cursor: usize = 0;
     for scan in scans.into_iter() {
         let len = scan.branches.len();
@@ -317,6 +378,7 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
             &brcnt_slice,
             scan_offset,
             &helpers,
+            trace_record_helper,
         )?;
         cursor = end;
     }
@@ -325,6 +387,266 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
     build_row_reset(module, &brval_globals, &brcnt_globals)?;
 
     Ok(entries)
+}
+
+/// Build the `__witness_trace_record(branch_id: i32, value: i32) -> ()`
+/// helper that per-br_if instrumentation calls.
+fn build_trace_record_helper(module: &mut Module, mem: MemoryId) -> Result<FunctionId> {
+    let i32_ty = ValType::I32;
+    let mut builder = FunctionBuilder::new(&mut module.types, &[i32_ty, i32_ty], &[]);
+    let branch_id_local = module.locals.add(i32_ty);
+    let value_local = module.locals.add(i32_ty);
+    {
+        let mut body = builder.func_body();
+        // --- record write at cursor ---
+        // stack: [cursor]
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Load(walrus::ir::Load {
+            memory: mem,
+            kind: LoadKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        // packed = (value << 16) | (branch_id & 0xFFFF). kind=0 so high
+        // byte stays zero.
+        body.instr(Instr::LocalGet(LocalGet { local: value_local }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(16),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Shl,
+        }));
+        body.instr(Instr::LocalGet(LocalGet {
+            local: branch_id_local,
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0xFFFF),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32And,
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Or,
+        }));
+        // stack: [cursor, packed]
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        // --- advance cursor: *(0 + 0) = old_cursor + 4 ---
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Load(walrus::ir::Load {
+            memory: mem,
+            kind: LoadKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(i32::try_from(TRACE_RECORD_BYTES).unwrap_or(4)),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Add,
+        }));
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+    }
+    let func_id = builder.finish(vec![branch_id_local, value_local], &mut module.funcs);
+    // Internal helper — give it a name in the name section but don't
+    // export it. The instrumented br_if sites call it by FunctionId.
+    module.funcs.get_mut(func_id).name = Some(TRACE_RECORD_HELPER_NAME.to_string());
+    Ok(func_id)
+}
+
+/// v0.7.2 — add the `__witness_trace` exported memory and the
+/// `__witness_trace_reset` / `__witness_trace_row_marker` helper
+/// functions. The memory is initialised with capacity in its
+/// header (writer-side rolls forward; host-side reads cursor +
+/// overflow_flag to know what's been written).
+///
+/// Returns the MemoryId so callers can pass it to the per-br_if
+/// rewrite path that emits trace-record writes.
+fn build_trace_infra(module: &mut Module) -> Result<MemoryId> {
+    let mem = module.memories.add_local(
+        false,
+        false,
+        TRACE_DEFAULT_PAGES.into(),
+        Some(TRACE_DEFAULT_PAGES.into()),
+        None,
+    );
+    module.exports.add(TRACE_MEMORY_EXPORT, mem);
+
+    // __witness_trace_reset(): zero cursor + overflow_flag (offsets 0, 8).
+    // Capacity field at offset 4 is set once at module-init time —
+    // we write it from the reset helper too so the host can always
+    // read a meaningful value after the first reset call.
+    let mut reset = FunctionBuilder::new(&mut module.types, &[], &[]);
+    {
+        let mut body = reset.func_body();
+        // cursor = TRACE_HEADER_BYTES (records start after header)
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(i32::try_from(TRACE_HEADER_BYTES).unwrap_or(0)),
+        }));
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        // capacity = (TRACE_DEFAULT_PAGES * 64KiB) - TRACE_HEADER_BYTES
+        let capacity_bytes: u32 = TRACE_DEFAULT_PAGES
+            .saturating_mul(65536)
+            .saturating_sub(TRACE_HEADER_BYTES);
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(i32::try_from(capacity_bytes).unwrap_or(0)),
+        }));
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 4,
+            },
+        }));
+        // overflow_flag = 0
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 8,
+            },
+        }));
+    }
+    let reset_id = reset.finish(vec![], &mut module.funcs);
+    module.exports.add(TRACE_RESET_EXPORT, reset_id);
+
+    // __witness_trace_row_marker(row_id: i32) -> (): append a record
+    // (branch_id slot = row_id_lo, value = 0, kind = 1).
+    //
+    // Stack-only implementation — walrus's FunctionBuilder doesn't
+    // auto-register non-arg locals, so we keep the cursor on stack
+    // by reading it twice (write-record path, then advance-cursor
+    // path). Two loads at offset 0 is a couple of instructions over
+    // a one-load+tee+get version but avoids the local-declaration
+    // pitfall.
+    let i32_ty = ValType::I32;
+    let mut marker = FunctionBuilder::new(&mut module.types, &[i32_ty], &[]);
+    let row_id_local = module.locals.add(i32_ty);
+    {
+        let mut body = marker.func_body();
+        // --- record write at cursor ---
+        // stack: [cursor]
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Load(walrus::ir::Load {
+            memory: mem,
+            kind: LoadKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        // packed value: (kind=1 << 24) | (row_id & 0xFFFF)
+        body.instr(Instr::LocalGet(LocalGet {
+            local: row_id_local,
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0xFFFF),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32And,
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0x01_00_00_00),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Or,
+        }));
+        // stack: [cursor, packed]
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        // stack: [] after store consumes both
+
+        // --- advance cursor: *(mem + 0) = cursor + 4 ---
+        // Stack must end at: [addr=0, value=new_cursor], then i32.store consumes both.
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        // stack: [0]
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Load(walrus::ir::Load {
+            memory: mem,
+            kind: LoadKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        // stack: [0, cursor]
+        body.instr(Instr::Const(Const {
+            value: Value::I32(i32::try_from(TRACE_RECORD_BYTES).unwrap_or(4)),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Add,
+        }));
+        // stack: [0, new_cursor]
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+    }
+    let marker_id = marker.finish(vec![row_id_local], &mut module.funcs);
+    module.exports.add(TRACE_ROW_MARKER_EXPORT, marker_id);
+
+    Ok(mem)
 }
 
 /// Build the `__witness_row_reset()` exported function that zeroes every
@@ -638,6 +960,7 @@ fn rewrite_function(
     brcnts: &[Option<GlobalId>],
     counter_offset: usize,
     helpers: &HashMap<usize, FunctionId>,
+    trace_record_helper: FunctionId,
 ) -> Result<()> {
     let has_brif = sites.iter().any(|s| s.kind == BranchKind::BrIf);
     let brif_tmp: Option<LocalId> = if has_brif {
@@ -714,7 +1037,18 @@ fn rewrite_function(
                 let tmp = brif_tmp.ok_or_else(|| {
                     Error::Instrument("br_if site without brif_tmp local".to_string())
                 })?;
-                rewrite_brif(func, seq_id, at, counter, brval, brcnt, tmp);
+                let absolute_branch_id =
+                    u32::try_from(counter_offset.saturating_add(idx_in_sites)).unwrap_or(u32::MAX);
+                rewrite_brif(
+                    func,
+                    seq_id,
+                    at,
+                    counter,
+                    brval,
+                    brcnt,
+                    tmp,
+                    Some((trace_record_helper, absolute_branch_id)),
+                );
             }
             PeekKind::IfElse => {
                 let then_idx = group
@@ -788,6 +1122,7 @@ fn rewrite_brif(
     brval: Option<GlobalId>,
     brcnt: Option<GlobalId>,
     tmp: LocalId,
+    trace: Option<(FunctionId, u32)>,
 ) {
     // SAFETY-REVIEW: caller has already peeked at `(seq_id, index)` and
     // confirmed it is a `BrIf`; any other variant reaching here is a logic
@@ -826,6 +1161,18 @@ fn rewrite_brif(
             op: BinaryOp::I32Add,
         }));
         replacement.push(Instr::GlobalSet(GlobalSet { global: bc }));
+    }
+    // v0.7.2 trace-record-call: i32.const branch_id; local.get tmp;
+    // call __witness_trace_record. Stack-neutral (consumes 2, pushes
+    // 0). Preserves the v0.5 invariant that the tee'd cond is still
+    // on the stack for the if-counter-inc that follows.
+    if let Some((helper, branch_id)) = trace {
+        let bid = i32::try_from(branch_id).unwrap_or(i32::MAX);
+        replacement.push(Instr::Const(Const {
+            value: Value::I32(bid),
+        }));
+        replacement.push(Instr::LocalGet(LocalGet { local: tmp }));
+        replacement.push(Instr::Call(walrus::ir::Call { func: helper }));
     }
     // v0.5 counter-on-taken pattern. The tee'd value is still on the
     // stack from `local.tee tmp` (and the brval/brcnt sequences are

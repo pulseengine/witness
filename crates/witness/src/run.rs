@@ -25,6 +25,7 @@ use witness_core::Result;
 use witness_core::error::Error;
 use witness_core::instrument::{
     BRCNT_EXPORT_PREFIX, BRVAL_EXPORT_PREFIX, COUNTER_EXPORT_PREFIX, Manifest, ROW_RESET_EXPORT,
+    TRACE_HEADER_BYTES, TRACE_MEMORY_EXPORT, TRACE_RESET_EXPORT,
 };
 use witness_core::run_record::{
     BranchHit, DecisionRecord, DecisionRow, HarnessSnapshot, RunRecord, TraceHealth,
@@ -90,14 +91,26 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     // globals, run the export, capture its return value as the decision
     // outcome, and read the per-condition (brval, brcnt) pairs.
     let row_reset = instance.get_func(&mut store, ROW_RESET_EXPORT);
+    // v0.7.2: trace-buffer reset/inspection. If the module exports the
+    // trace memory + reset helper (= post-v0.7.2 instrumentation), call
+    // reset before each row and read the cursor watermark after.
+    let trace_reset = instance.get_func(&mut store, TRACE_RESET_EXPORT);
+    let trace_memory = instance.get_memory(&mut store, TRACE_MEMORY_EXPORT);
     let mut rows_per_decision: BTreeMap<u32, Vec<DecisionRow>> = BTreeMap::new();
     for d in &manifest.decisions {
         rows_per_decision.insert(d.id, Vec::new());
     }
+    let mut trace_bytes_total: u64 = 0;
+    let mut trace_overflow_seen = false;
 
     for (row_index, name) in options.invoke.iter().enumerate() {
         if let Some(reset) = row_reset {
             reset
+                .call(&mut store, &[], &mut [])
+                .map_err(|e| Error::Runtime(e.into()))?;
+        }
+        if let Some(treset) = trace_reset {
+            treset
                 .call(&mut store, &[], &mut [])
                 .map_err(|e| Error::Runtime(e.into()))?;
         }
@@ -123,6 +136,28 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         });
 
         let (brvals, brcnts) = read_per_row_globals(&mut store, &instance)?;
+
+        // v0.7.2: read the trace memory header to learn how many record
+        // bytes were written this row. The full per-iteration row
+        // parser lands in v0.7.3; v0.7.2 just exposes the watermark in
+        // RunRecord.trace_health so users can see writes are happening.
+        if let Some(mem) = trace_memory {
+            let data = mem.data(&mut store);
+            // SAFETY-REVIEW: the length check guards the indexes; the
+            // trace memory's first 12 bytes are the cursor + capacity
+            // + overflow_flag header populated by __witness_trace_reset.
+            #[allow(clippy::indexing_slicing)]
+            if data.len() >= 12 {
+                let cursor = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let overflow = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+                let bytes_this_row = cursor.saturating_sub(TRACE_HEADER_BYTES);
+                trace_bytes_total = trace_bytes_total.saturating_add(u64::from(bytes_this_row));
+                if overflow != 0 {
+                    trace_overflow_seen = true;
+                }
+            }
+        }
+
         let row_id = u32::try_from(row_index).unwrap_or(u32::MAX);
         for d in &manifest.decisions {
             let mut evaluated: BTreeMap<u32, bool> = BTreeMap::new();
@@ -163,10 +198,22 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     let row_total = u64::try_from(options.invoke.len()).unwrap_or(u64::MAX);
     record.decisions = decisions;
     record.trace_health = TraceHealth {
-        overflow: false,
+        overflow: trace_overflow_seen,
         rows: row_total,
-        ambiguous_rows: false,
+        // v0.7.2: ambiguous_rows now means "trace memory recorded data
+        // beyond what the per-row globals could capture — likely loops".
+        // v0.7.3 will replace this with the actual per-iteration row
+        // emission. For now, the watermark itself is the signal.
+        ambiguous_rows: trace_bytes_total > 0,
     };
+    // v0.7.2: append trace-memory bytes-used as a structured note in
+    // the invoked list so it's visible in the run JSON until the
+    // schema gets a dedicated field in v0.7.3.
+    if trace_bytes_total > 0 {
+        record
+            .invoked
+            .push(format!("__witness_trace_bytes={trace_bytes_total}"));
+    }
     record.save(options.output)
 }
 
