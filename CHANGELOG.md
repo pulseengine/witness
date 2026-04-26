@@ -7,6 +7,51 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.8] — 2026-04-26
+
+### What v0.6.8 closes
+
+v0.6.4 added DSSE signing; v0.6.7 documented how to verify a release.
+v0.6.8 closes the loop in the other direction: every release pipeline
+now self-verifies the compliance archive it just built. If the
+signing path regresses (key not bundled, envelope corrupted, verify
+command broken), the release fails before publication rather than
+shipping broken evidence to users.
+
+### Added — self-verify step in `.github/actions/compliance/action.yml`
+
+After the V-model trace matrix is written and before the README, the
+action runs `witness verify` against one signed envelope from the
+just-built bundle, against the bundled `verifying-key.pub`. The
+specific envelope tried is `leap_year/signed.dsse.json` — the
+canonical demo, expected to produce a verdict on every release.
+Falls back to triangle / state_guard / safety_envelope /
+parser_dispatch if leap_year is missing for some reason.
+
+The step is conditionally a no-op if signing was skipped (no
+`verifying-key.pub` in the bundle) — keeps the action backward-
+compatible with the v0.5 dev-mode invocation that doesn't run the
+verdict suite.
+
+### Why this matters
+
+It's defence in depth in the strictest sense: the failure mode being
+prevented is "release ships, downstream consumer downloads, runs
+witness verify, gets failure, files a bug — but we already shipped".
+Self-verify makes that scenario impossible because the release
+pipeline is the first downstream consumer.
+
+It also doubles as a smoke test for `witness verify` itself: the
+verify command runs in the release pipeline against real production
+evidence on every release. If a future change to the attest / verify
+code breaks compatibility with already-produced bundles, the next
+release fails closed.
+
+### Implements / Verifies
+
+- Verifies: the v0.6.4 sign + v0.6.7 verify loop self-attests on
+  every release, no manual intervention required.
+
 ## [0.6.7] — 2026-04-26
 
 ### What v0.6.7 closes

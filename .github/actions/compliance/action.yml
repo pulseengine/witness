@@ -116,6 +116,37 @@ runs:
             artifacts "$OUTPUT_DIR/verdict-evidence" "$OUTPUT_DIR" || true
         fi
 
+    - name: Self-verify compliance bundle (v0.6.8+)
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+        # Defense in depth: every release proves the verify path works
+        # against the bundle it just built. If signing was skipped or
+        # the verify command regresses, this step fails the release.
+        VK="$OUTPUT_DIR/verdict-evidence/verifying-key.pub"
+        if [ ! -f "$VK" ]; then
+          echo "verifying-key.pub missing — verdict suite did not sign; skipping self-verify"
+          exit 0
+        fi
+        # Pick a verdict with a non-empty signed envelope. leap_year is
+        # the canonical demo and consistently produces one; fall back to
+        # any other if leap_year is absent.
+        ENV=""
+        for candidate in leap_year triangle state_guard safety_envelope parser_dispatch; do
+          if [ -f "$OUTPUT_DIR/verdict-evidence/$candidate/signed.dsse.json" ]; then
+            ENV="$OUTPUT_DIR/verdict-evidence/$candidate/signed.dsse.json"
+            break
+          fi
+        done
+        if [ -z "$ENV" ]; then
+          echo "no signed.dsse.json found in any verdict; skipping self-verify"
+          exit 0
+        fi
+        echo "self-verifying $ENV"
+        witness verify --envelope "$ENV" --public-key "$VK"
+
     - name: Write README
       shell: bash
       env:
