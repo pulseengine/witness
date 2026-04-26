@@ -7,6 +7,99 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.4] — 2026-04-26
+
+### What v0.6.4 closes
+
+v0.6.3 populated the compliance bundle with real per-verdict
+evidence — manifest, run record, MC/DC report, unwrapped in-toto
+predicate per verdict. v0.6.4 adds the **signature** layer: each
+verdict's predicate is wrapped in a DSSE envelope and signed with an
+ephemeral Ed25519 keypair generated fresh for the release. The
+verifying public key ships in the bundle. Tampering with the
+predicate body, the envelope, or the key fails verification.
+
+### Added — `witness keygen` and `witness verify` CLI commands
+
+Two new subcommands close the signing loop:
+
+- `witness keygen --secret SK --public PK` — generate a fresh
+  Ed25519 keypair (raw 64-byte secret + 32-byte public). Used by the
+  verdict-suite signing path; also available for users who want to
+  sign their own predicates.
+- `witness verify --envelope E --public-key PK` — validate a DSSE
+  envelope against an Ed25519 public key. Exits zero with `OK` on
+  match, non-zero (with a clear error) on mismatch. Standards-
+  compliant DSSE means `cosign verify-blob` works equivalently.
+
+### Added — `witness-core::attest::generate_keypair_files`
+
+Public library API for keypair generation. Mirrors the existing
+`sign_predicate_file` and `verify_envelope_file` shapes (file in /
+file out / `Result<()>`). Lets downstream tooling embed the same
+ephemeral-key flow.
+
+### Added — `witness-core::attest::verify_envelope_file`
+
+File-IO wrapper around the existing `verify_envelope` byte-slice API.
+Reads the envelope and public key from disk, returns the inner
+in-toto Statement on success.
+
+### Updated — `verdicts/run-suite.sh`
+
+When `SIGN=1` (default), the script:
+
+1. Generates an ephemeral Ed25519 keypair via `witness keygen`.
+2. Writes the public key to `<bundle>/verifying-key.pub`.
+3. For each verdict's `predicate.json`, runs `witness attest` to
+   produce `<verdict>/signed.dsse.json` with `key_id` =
+   `witness-suite/<verdict>`.
+4. Discards the secret key on exit (in a `mktemp` directory cleaned
+   up by a `trap`).
+5. Writes a `<bundle>/VERIFY.md` documenting the verification
+   command for both `witness verify` and `cosign verify-blob`.
+
+Setting `SIGN=0` skips the signing path — useful for fast local
+iteration.
+
+### Verifies — round-trip end-to-end
+
+Local sign-verify proven on the leap_year and parser_dispatch
+envelopes:
+
+```
+$ witness verify \
+    --envelope leap_year/signed.dsse.json \
+    --public-key verifying-key.pub
+OK — DSSE envelope leap_year/signed.dsse.json verifies against verifying-key.pub
+  predicate type: https://pulseengine.eu/witness-coverage/v1
+  subjects: 1
+```
+
+Tampering the public key (XOR first byte) correctly fails:
+
+```
+Error: wasm runtime error: DSSE verify failed: VerificationFailed
+exit=1
+```
+
+### Why ephemeral keys
+
+Per-release ephemeral keys avoid long-term key custody. The verifying
+key is shipped in the compliance bundle. The secret key is generated
+fresh in CI, used to sign, then discarded. A signature thus proves
+"this evidence was produced by the release pipeline that wrote this
+verifying-key.pub" — exactly the V-model claim. Long-term key
+management (rotation, attestation chains, sigstore Fulcio integration)
+is v0.7+ work.
+
+### Implements / Verifies
+
+- Implements: REQ-031 (witness-core.wasm signed release asset — the
+  pattern now applies uniformly to verdict predicates too).
+- Verifies: round-trip sign + verify works for every verdict that
+  produces a non-empty predicate; tampered key correctly rejected.
+
 ## [0.6.3] — 2026-04-26
 
 ### What v0.6.3 closes

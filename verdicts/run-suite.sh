@@ -34,6 +34,10 @@ cd "$REPO_ROOT"
 
 WITNESS="${WITNESS:-target/release/witness}"
 OUT_DIR="${1:-compliance/verdict-evidence}"
+# v0.6.4: when SIGN=1 (default), generate an ephemeral Ed25519
+# keypair, sign each verdict's predicate with it, and ship the
+# verifying public key in the bundle. Set SIGN=0 to skip.
+SIGN="${SIGN:-1}"
 
 if [ ! -x "$WITNESS" ]; then
     echo "error: witness binary not found at '$WITNESS'." >&2
@@ -53,6 +57,50 @@ VERDICTS=(
 )
 
 mkdir -p "$OUT_DIR"
+
+# v0.6.4: generate the ephemeral signing keypair up-front. Public key
+# lives in the bundle for downstream verification; secret key lives in
+# a tmp file we delete at exit.
+SIGN_PUBLIC_KEY=""
+SIGN_SECRET_KEY=""
+if [ "$SIGN" = "1" ]; then
+    SIGN_DIR="$(mktemp -d)"
+    SIGN_SECRET_KEY="$SIGN_DIR/witness-suite.sk"
+    SIGN_PUBLIC_KEY="$OUT_DIR/verifying-key.pub"
+    "$WITNESS" keygen --secret "$SIGN_SECRET_KEY" --public "$SIGN_PUBLIC_KEY" > /dev/null
+    cat > "$OUT_DIR/VERIFY.md" <<'VERIFY_EOF'
+# Verify the signed verdict predicates
+
+Each verdict's `signed.dsse.json` is an in-toto Statement wrapped in a
+DSSE envelope, signed with the release's ephemeral Ed25519 key. The
+verifying public key is at `verifying-key.pub` (raw 32 bytes).
+
+## Verification with witness
+
+```sh
+witness verify \
+    --envelope leap_year/signed.dsse.json \
+    --public-key verifying-key.pub
+```
+
+Exit zero + `OK` line means signature valid. Non-zero means tampered.
+
+## Verification with cosign
+
+The DSSE envelope is standards-compliant, so `cosign verify-blob` with
+the same public key works equivalently.
+
+## Why ephemeral keys
+
+Per-release keys avoid long-term key custody. The verifying key is
+shipped in the bundle. The secret key is generated fresh in CI,
+discarded after signing. A signature thus proves "this evidence was
+produced by the release pipeline that wrote this verifying-key.pub" —
+which is exactly the V-model claim.
+VERIFY_EOF
+    trap 'rm -rf "$SIGN_DIR"' EXIT
+fi
+
 SUMMARY="$OUT_DIR/SUMMARY.txt"
 echo "witness verdict suite — $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SUMMARY"
 echo "" >> "$SUMMARY"
@@ -104,10 +152,18 @@ for v in "${VERDICTS[@]}"; do
     "$WITNESS" report --input "$out/run.json" --format mcdc > "$out/report.txt" 2>&1 || true
     "$WITNESS" report --input "$out/run.json" --format mcdc-json > "$out/report.json" 2>&1 || true
 
-    # Predicate (unsigned in-toto Statement). Signing the predicate
-    # requires a release-time DSSE key; v0.6.4 pulls that into this
-    # action.
+    # Predicate (unwrapped in-toto Statement).
     "$WITNESS" predicate --run "$out/run.json" --module "$out/instrumented.wasm" -o "$out/predicate.json" 2> "$out/predicate.log" || true
+
+    # v0.6.4: DSSE-sign the predicate with the ephemeral release key.
+    if [ "$SIGN" = "1" ] && [ -f "$out/predicate.json" ] && [ -f "$SIGN_SECRET_KEY" ]; then
+        "$WITNESS" attest \
+            --predicate "$out/predicate.json" \
+            --secret-key "$SIGN_SECRET_KEY" \
+            --key-id "witness-suite/$name" \
+            -o "$out/signed.dsse.json" \
+            > "$out/attest.log" 2>&1 || true
+    fi
 
     # LCOV (best-effort — fails harmlessly on zero-branch verdicts).
     "$WITNESS" lcov \

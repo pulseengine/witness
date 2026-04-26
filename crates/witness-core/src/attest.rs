@@ -62,6 +62,30 @@ pub fn sign_predicate_file(
     std::fs::write(output, envelope_bytes).map_err(Error::Io)
 }
 
+/// Generate a fresh Ed25519 keypair and write the secret + public key
+/// to `secret_path` (64 bytes) and `public_path` (32 bytes) respectively.
+///
+/// Used by the v0.6.4 verdict-suite signing path: the compliance
+/// action generates an ephemeral keypair per release, signs every
+/// verdict predicate with it, and ships the public key alongside the
+/// signed envelopes. The secret key is intentionally short-lived
+/// (per-release) so there's no long-term key custody concern.
+pub fn generate_keypair_files(secret_path: &Path, public_path: &Path) -> Result<()> {
+    let kp = ed25519_compact::KeyPair::generate();
+    std::fs::write(secret_path, kp.sk.as_ref()).map_err(Error::Io)?;
+    std::fs::write(public_path, kp.pk.as_ref()).map_err(Error::Io)?;
+    Ok(())
+}
+
+/// File-IO wrapper around [`verify_envelope`]: read the envelope and
+/// public key from disk, return the inner Statement on success or a
+/// runtime error if the signature does not validate.
+pub fn verify_envelope_file(envelope_path: &Path, public_key_path: &Path) -> Result<Statement> {
+    let envelope_bytes = std::fs::read(envelope_path).map_err(Error::Io)?;
+    let public_key_bytes = std::fs::read(public_key_path).map_err(Error::Io)?;
+    verify_envelope(&envelope_bytes, &public_key_bytes)
+}
+
 /// Verify a DSSE envelope produced by [`sign_statement`] against the
 /// matching Ed25519 public key. Returns the inner Statement on success.
 pub fn verify_envelope(envelope_bytes: &[u8], public_key_bytes: &[u8]) -> Result<Statement> {

@@ -151,6 +151,30 @@ enum Command {
         output: PathBuf,
     },
 
+    /// Generate a fresh Ed25519 keypair (raw 64-byte secret + 32-byte
+    /// public). v0.6.4 — used by the verdict-suite signing path which
+    /// generates an ephemeral key per release.
+    Keygen {
+        /// Output path for the secret key (64 bytes).
+        #[arg(long)]
+        secret: PathBuf,
+        /// Output path for the public key (32 bytes).
+        #[arg(long)]
+        public: PathBuf,
+    },
+
+    /// Verify a DSSE envelope (from `witness attest`) against the
+    /// matching Ed25519 public key. Exits non-zero on signature failure.
+    /// v0.6.4 — closes the verification side of the signed-evidence loop.
+    Verify {
+        /// Path to the DSSE envelope JSON.
+        #[arg(long)]
+        envelope: PathBuf,
+        /// Path to the Ed25519 public key (32 bytes).
+        #[arg(long)]
+        public_key: PathBuf,
+    },
+
     /// Emit LCOV from a run JSON for codecov ingestion.
     /// DWARF-correlated decisions emit BRDA records; uncorrelated
     /// branches go in a sibling overview text file (per
@@ -319,6 +343,30 @@ fn main() -> Result<()> {
                 &output,
                 key_id.as_deref(),
             )?;
+        }
+        Command::Keygen { secret, public } => {
+            witness_core::attest::generate_keypair_files(&secret, &public)?;
+            #[allow(clippy::print_stdout)]
+            {
+                println!("wrote secret key: {}", secret.display());
+                println!("wrote public key: {}", public.display());
+            }
+        }
+        Command::Verify {
+            envelope,
+            public_key,
+        } => {
+            let stmt = witness_core::attest::verify_envelope_file(&envelope, &public_key)?;
+            #[allow(clippy::print_stdout)]
+            {
+                println!(
+                    "OK — DSSE envelope {} verifies against {}",
+                    envelope.display(),
+                    public_key.display(),
+                );
+                println!("  predicate type: {}", stmt.predicate_type);
+                println!("  subjects: {}", stmt.subject.len());
+            }
         }
         Command::Lcov {
             run,
