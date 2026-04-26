@@ -6,7 +6,10 @@ on:
       - "src/**"
       - "tests/**"
       - "Cargo.toml"
+      - "crates/**"
+      - "verdicts/**"
       - ".github/workflows/witness-delta.yml"
+      - ".github/actions/compliance/**"
 
 permissions:
   pull-requests: write
@@ -80,6 +83,90 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: witness-delta-pr-${{ github.event.pull_request.number }}
+          path: delta-out/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # v0.6.6 — verdict-suite delta. Builds the suite against base and head
+  # of the PR, walks the report.json files, and posts a per-verdict
+  # comparison table as a PR comment. continue-on-error: true so suite
+  # failures don't block merge — the comment is the signal.
+  verdict-suite-delta:
+    name: Verdict suite delta
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: head
+          fetch-depth: 0
+      - uses: actions/checkout@v5
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: head
+
+      - name: Build witness (head)
+        working-directory: head
+        run: cargo build --release -p witness
+
+      - name: Build witness (base)
+        working-directory: base
+        run: cargo build --release -p witness 2>/dev/null || echo "base build failed; treating as no-base"
+
+      - name: Run verdict suite (head)
+        run: |
+          set -uo pipefail
+          if [ -x head/verdicts/run-suite.sh ]; then
+            ( cd head && SIGN=0 ./verdicts/run-suite.sh ../delta-head 2>&1 | tail -25 || true )
+          fi
+
+      - name: Run verdict suite (base, if present)
+        run: |
+          set -uo pipefail
+          if [ -x base/verdicts/run-suite.sh ] && [ -f base/target/release/witness ]; then
+            ( cd base && SIGN=0 ./verdicts/run-suite.sh ../delta-base 2>&1 | tail -25 || true )
+          else
+            echo "base does not have verdict suite (probably pre-v0.6.3); skipping base side"
+          fi
+
+      - name: Compute verdict-suite delta
+        run: |
+          set -euo pipefail
+          mkdir -p delta-out
+          python3 head/.github/workflows/scripts/verdict_delta.py \
+            delta-base delta-head delta-out/verdict-delta.md \
+            || echo "delta script unavailable; skipping comment body"
+
+      - name: Post comment
+        if: ${{ hashFiles('delta-out/verdict-delta.md') != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('delta-out/verdict-delta.md', 'utf8');
+            const marker = '<!-- witness-verdict-delta -->';
+            const fullBody = `${marker}\n${body}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.data.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: fullBody });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: fullBody });
+            }
+
+      - name: Upload verdict-delta artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: witness-verdict-delta-pr-${{ github.event.pull_request.number }}
           path: delta-out/
           retention-days: 14
           if-no-files-found: warn

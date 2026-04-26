@@ -7,6 +7,68 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.6] — 2026-04-26
+
+### What v0.6.6 closes
+
+The v0.6.3 release added a verdict-suite regression gate to CI on
+main, but a PR-time view of "did this PR regress the suite?" was
+missing. v0.6.5's verdict-suite-delta note flagged this as a
+v0.6.6 candidate; v0.6.6 ships it.
+
+### Added — `verdict-suite-delta` job in `.github/workflows/witness-delta.yml`
+
+Triggers on PRs touching `crates/`, `verdicts/`, `Cargo.toml`, or
+either of the two delta-related files. Steps:
+
+1. Checks out the base (main) and head (PR) revisions side by side.
+2. Builds witness in release mode against each.
+3. Runs `verdicts/run-suite.sh` against both with `SIGN=0` (PR
+   delta does not need signed envelopes — that's the release
+   pipeline's job).
+4. Walks both `delta-head/` and `delta-base/` directory trees,
+   reads each verdict's `report.json`, builds a per-verdict
+   comparison table with columns:
+   - base full/total decisions
+   - head full/total decisions
+   - head conditions (proved / gap / dead)
+   - status: improvement / unchanged / regression / new
+5. Posts the table as a PR comment, replacing any prior comment
+   tagged with the `<!-- witness-verdict-delta -->` marker.
+6. Uploads the delta directory as an artefact for inspection.
+
+The job runs `continue-on-error: true` so a verdict-suite failure
+doesn't block PR merging — the comment is the signal, not the
+status check. A regression is flagged in **bold** in the comment
+body so reviewers can't miss it.
+
+### Updated — paths-filter on the delta workflow
+
+The original filter only triggered on `src/`, `tests/`, and
+`Cargo.toml`. v0.6.6 expands to include `crates/`, `verdicts/`, and
+the action workflows themselves. PRs that touch the verdict suite
+or the compliance pipeline now correctly fire the delta job.
+
+### Notes for v0.7
+
+- The same comparison logic could fire weekly against `main` to
+  catch *upstream* regressions (e.g. a rustc upgrade that changes
+  optimiser behaviour and silently moves a verdict from full-MC/DC
+  to partial). That's a v0.7 ergonomics item alongside the
+  scaling-roadmap work.
+- The signing path (v0.6.4) and the trace matrix (v0.6.5) are
+  release-time only. A v0.7 candidate is to surface the trace
+  matrix on PR delta too — a single HTML artefact a reviewer can
+  open to see the cross-references for the PR's branch state.
+
+### Implements / Verifies
+
+- Implements: REQ-022 (coverage-delta PR workflow) — extended from
+  v0.4's manifest-only delta to include the verdict-suite roll-up.
+- Verifies: comment-bot logic uses the existing
+  `actions/github-script@v7` pattern; comment marker dedupes on
+  re-runs.
+
 ## [0.6.5] — 2026-04-26
 
 ### What v0.6.5 closes
