@@ -24,8 +24,8 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 use witness_core::Result;
 use witness_core::error::Error;
 use witness_core::instrument::{
-    BRCNT_EXPORT_PREFIX, BRVAL_EXPORT_PREFIX, COUNTER_EXPORT_PREFIX, Manifest, ROW_RESET_EXPORT,
-    TRACE_HEADER_BYTES, TRACE_MEMORY_EXPORT, TRACE_RESET_EXPORT,
+    BRCNT_EXPORT_PREFIX, BRVAL_EXPORT_PREFIX, COUNTER_EXPORT_PREFIX, ChainKind, Manifest,
+    ROW_RESET_EXPORT, TRACE_HEADER_BYTES, TRACE_MEMORY_EXPORT, TRACE_RESET_EXPORT,
 };
 use witness_core::run_record::{
     BranchHit, DecisionRecord, DecisionRow, HarnessSnapshot, RunRecord, TraceHealth,
@@ -130,6 +130,15 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                 .push(d.id);
         }
     }
+    // v0.8: per-decision chain_kind lookup. Used by parse_trace_records
+    // to derive outcomes from condition values for And/Or chains
+    // (where outcome = value of the LAST evaluated condition under
+    // short-circuit semantics).
+    let chain_kinds: HashMap<u32, ChainKind> = manifest
+        .decisions
+        .iter()
+        .map(|d| (d.id, d.chain_kind))
+        .collect();
 
     for name in &options.invoke {
         if let Some(reset) = row_reset {
@@ -193,6 +202,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                         cursor,
                         &branch_to_decision,
                         &function_to_decisions,
+                        &chain_kinds,
                     );
                 }
             }
@@ -297,12 +307,35 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
 type IterationEntry = (BTreeMap<u32, bool>, Option<bool>);
 type IterationsByDecision = BTreeMap<u32, Vec<IterationEntry>>;
 
+/// v0.8 — derive a decision's outcome from its iteration's condition
+/// values, using the wasm-classified chain direction.
+///
+/// Under Rust short-circuit semantics:
+/// - For an `&&` chain, the iteration's outcome equals the LAST
+///   evaluated condition's value: F means short-circuit (outcome=F),
+///   T (when last=N-1) means all-T-fall-through (outcome=T).
+/// - For an `||` chain, symmetrically: T means short-circuit
+///   (outcome=T), F (when last=N-1) means all-F-fall-through
+///   (outcome=F).
+/// - For Mixed/Unknown: can't derive; caller falls back to function-
+///   return outcome.
+fn derive_outcome(
+    chain_kind: ChainKind,
+    evaluated: &BTreeMap<u32, bool>,
+) -> Option<bool> {
+    match chain_kind {
+        ChainKind::And | ChainKind::Or => evaluated.values().next_back().copied(),
+        ChainKind::Mixed | ChainKind::Unknown => None,
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn parse_trace_records(
     data: &[u8],
     cursor: u32,
     branch_to_decision: &HashMap<u32, (u32, u32)>,
     function_to_decisions: &HashMap<u32, Vec<u32>>,
+    chain_kinds: &HashMap<u32, ChainKind>,
 ) -> IterationsByDecision {
     use witness_core::instrument::{TRACE_HEADER_BYTES, TRACE_RECORD_BYTES};
     let mut current: BTreeMap<u32, BTreeMap<u32, bool>> = BTreeMap::new();
@@ -338,7 +371,12 @@ fn parse_trace_records(
                 let entry = current.entry(dec_id).or_default();
                 if entry.contains_key(&cond_idx) {
                     let finished = std::mem::take(entry);
-                    completed.entry(dec_id).or_default().push((finished, None));
+                    // v0.8: derive outcome from chain direction when
+                    // possible — captures inlined-decision outcomes
+                    // that the per-function-call path can't.
+                    let kind = chain_kinds.get(&dec_id).copied().unwrap_or_default();
+                    let derived = derive_outcome(kind, &finished);
+                    completed.entry(dec_id).or_default().push((finished, derived));
                 }
                 current.entry(dec_id).or_default().insert(cond_idx, value);
             }
@@ -354,10 +392,15 @@ fn parse_trace_records(
                     if let Some(iter_map) = current.remove(&dec_id)
                         && !iter_map.is_empty()
                     {
+                        // v0.8: prefer chain-derived outcome over
+                        // function-return when chain_kind is And/Or
+                        // (more accurate for inlined decisions).
+                        let kind = chain_kinds.get(&dec_id).copied().unwrap_or_default();
+                        let outcome = derive_outcome(kind, &iter_map).or(Some(value));
                         completed
                             .entry(dec_id)
                             .or_default()
-                            .push((iter_map, Some(value)));
+                            .push((iter_map, outcome));
                     }
                 }
             }
@@ -367,11 +410,13 @@ fn parse_trace_records(
         }
     }
 
-    // Flush trailing in-progress iterations (no outcome — function
-    // never returned, e.g. trapped or never reached its return).
+    // Flush trailing in-progress iterations (no kind=2 outcome — but
+    // we may still derive one from chain direction).
     for (dec_id, iter_map) in current {
         if !iter_map.is_empty() {
-            completed.entry(dec_id).or_default().push((iter_map, None));
+            let kind = chain_kinds.get(&dec_id).copied().unwrap_or_default();
+            let derived = derive_outcome(kind, &iter_map);
+            completed.entry(dec_id).or_default().push((iter_map, derived));
         }
     }
 

@@ -29,6 +29,21 @@ truth table by eye). `parser_dispatch` is the real-world anchor —
 deliberately *not* synthetic, so the suite isn't open to "yes but it
 only works on toys" criticism.
 
+## Real-application fixtures
+
+Beyond the seven canonical compound-decision shapes, the suite also
+ships four real-application fixtures whose decision graphs are too
+large for a hand-derived truth table. Each fixture's `TRUTH-TABLE.md`
+documents source-author intent (decision sites, row classes, expected
+outcomes) rather than per-row condition vectors:
+
+| Verdict | Source under instrumentation | Rows | Purpose |
+|---|---|---|---|
+| `httparse` | RFC 7230 HTTP/1.x parser (httparse 1.10) | 40 | reachability + dead-condition picture across a real HTTP parser |
+| `nom_numbers` | parser-combinator library (nom 7, no_std) | 28 | nom combinator reconstruction + inlined `checked_mul` / `checked_add` carry chains |
+| `state_machine` | TLS 1.3 handshake transition guard | 27 | deep AND chain with inner ANDs (the canonical security-protocol shape) |
+| `json_lite` | hand-rolled subset JSON parser | 28 | tree-shaped `if`/`while` byte-level parser; covers whitespace, escapes, structural errors |
+
 ## How a verdict folder is read by a human
 
 1. Open `V-MODEL.md` — see which requirement the verdict satisfies, which

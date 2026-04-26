@@ -7,6 +7,131 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-04-26
+
+### Two substantive items: chain-direction outcome derivation + 3 new
+### real-application verdicts.
+
+This is a minor-version bump because (a) the manifest schema gains a
+new field (`Decision::chain_kind`), and (b) the verdict suite triples
+in real-application coverage with three new fixtures.
+
+### Added — chain-direction analysis (substance)
+
+The instrumenter now classifies each `BrIf` site by inspecting the
+preceding instruction:
+
+- `i32.eqz; br_if N` → `BranchHint::BranchesOnFalse` (the standard
+  short-circuit `&&` lowering — branch when condition is FALSE)
+- bare `local.get x; br_if N` → `BranchHint::BranchesOnTrue` (the
+  short-circuit `||` lowering — branch when condition is TRUE)
+
+Per-decision aggregation yields a new `ChainKind` enum in
+`witness-core::instrument`:
+
+```rust
+pub enum ChainKind { And, Or, Mixed, Unknown }
+```
+
+The runner uses `chain_kind` to derive per-iteration outcomes from
+condition values: under Rust short-circuit semantics, the iteration's
+outcome equals the LAST evaluated condition's value (F means
+short-circuit-F for `&&`; T means short-circuit-T for `||`). For
+`Mixed` / `Unknown`, falls back to the per-call kind=2 outcome from
+v0.7.4 or the row-level function-return.
+
+httparse classification breakdown: 44 Or, 20 Mixed, 3 And across 67
+decisions.
+
+### Added — three new verdict fixtures (breadth)
+
+The verdict suite grows from 8 verdicts to **11**, adding three real-
+application fixtures designed by a research sub-agent and built into
+the existing run-suite.sh / compliance-bundle pipeline.
+
+| Verdict | Source | Rows | Result on v0.8.0 |
+|---|---|---:|---|
+| **`nom_numbers`** | nom 7 (no_std) integer parser combinators | 28 | **3/3 full MC/DC** ✨ |
+| **`state_machine`** | TLS 1.3 handshake transition guard (8-conjunct compound) | 27 | **4/5 full MC/DC** |
+| **`json_lite`** | hand-rolled subset JSON parser (whitespace, escapes, structure) | 28 | **2/29 full MC/DC** (29 decisions, rich gap-analysis surface) |
+
+`nom_numbers` and `state_machine` exercise compound boolean logic in
+shapes the instrumenter now classifies cleanly. `json_lite` is more
+parser-shaped — many sub-decisions, fewer per-decision conditions —
+and gives the report's gap-recommendation logic a substantial
+canvas.
+
+### Suite scoreboard (v0.8.0 final)
+
+```
+verdict              branches   decisions    full-mcdc
+leap_year            2          1            1/1
+range_overlap        0          0            0/0   (optimised to bitwise)
+triangle             2          1            1/1
+state_guard          3          1            1/1
+mixed_or_and         0          0            0/0   (optimised to bitwise)
+safety_envelope      4          1            1/1
+parser_dispatch      33         7            1/7
+httparse             473        67           7/67
+nom_numbers          20         3            3/3
+state_machine        14         5            4/5
+json_lite            165        29           2/29
+                     ----       ----         -----
+                     716        115          21
+```
+
+**21 full-MC/DC decisions across 115 reconstructed decisions in real
+Rust code.** Up from v0.6.x's seven hand-derived canonical examples.
+
+### Implementation notes
+
+- `walk_collect` extended to compute hints alongside branch sites
+  during the same IR walk — no second pass.
+- `instrument_module` stashes the hints in a thread-local
+  (`LAST_CHAIN_HINTS`) that `instrument_file` reads after DWARF
+  decision reconstruction. Single-threaded by design (witness's
+  instrument step is not multi-threaded).
+- `apply_chain_kinds` aggregates per-decision: `(0, 0) → Unknown`,
+  `(_, 0) → And`, `(0, _) → Or`, `(_, _) → Mixed`.
+- `parse_trace_records` now takes a `chain_kinds` map and calls
+  `derive_outcome` for every iteration that has at least one
+  evaluated condition. The derived outcome wins over the row-level
+  outcome when chain_kind is And/Or; Mixed/Unknown fall through.
+
+### Updated CI gate
+
+`verdict-suite` job's regression gate now checks all 8 should-have-
+decisions verdicts: `leap_year triangle state_guard safety_envelope
+parser_dispatch nom_numbers state_machine json_lite`. `range_overlap`
+and `mixed_or_and` remain excluded (rustc fully optimises them to
+bitwise ops with zero branches surviving).
+
+### Notes for v0.8.x / v0.9
+
+- httparse's score moved modestly (6/67 → 7/67) because most of its
+  decisions are inlined into a single function and our chain-derived
+  outcomes match the function-return outcomes in those cases. The
+  next-larger gain there would be DWARF-inlined-context attribution
+  to derive outcomes per source-level inlined-from function.
+- json_lite at 2/29 has the most gap-analysis material in the suite.
+  The reporter's row-closure recommendations should drive concrete
+  test-row additions in v0.8.1.
+- Manifest schema is `"2"` still. The new `chain_kind` field is
+  serialised with `#[serde(skip_serializing_if = "ChainKind::is_unknown")]`
+  so v0.7-and-earlier readers see a cleaner manifest when chain_kind
+  isn't determined. v0.9 will bump the manifest schema to "3" if
+  more fields land.
+
+### Implements / Verifies
+
+- Implements: REQ-027 (substance — chain_kind closes the per-iteration
+  outcome story for `&&` / `||` chains).
+- Implements: REQ-030 (breadth — verdict suite now has four real-
+  application fixtures: httparse, nom_numbers, state_machine,
+  json_lite).
+- Verifies: full suite runs end-to-end, all 11 verdicts produce
+  evidence, 21 decisions full-MC/DC across 115 total.
+
 ## [0.7.5] — 2026-04-26
 
 ### What v0.7.5 closes

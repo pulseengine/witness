@@ -1,0 +1,21 @@
+[package]
+name = "verdict-json-lite"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Witness verdict: hand-rolled subset JSON parser. Compound predicates across whitespace skipping, value classification, escape handling, and structural validation."
+license = "Apache-2.0 OR MIT"
+
+# Standalone — not part of the witness workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+debug = true
+strip = false
+codegen-units = 1
+lto = false
+panic = "abort"
+opt-level = 1

@@ -248,7 +248,7 @@ jobs:
           # v0.7.0 added httparse — expected to produce 50+ decisions
           # across the parser + inlined stdlib. The exact count varies
           # with rustc version so the gate just asserts >= 30.
-          for v in leap_year triangle state_guard safety_envelope parser_dispatch; do
+          for v in leap_year triangle state_guard safety_envelope parser_dispatch nom_numbers state_machine json_lite; do
             n=$(python3 -c "import json; print(len(json.load(open('build/verdict-evidence/$v/run.json'))['decisions']))")
             if [ "$n" -lt 1 ]; then
               echo "REGRESSION: $v has 0 decisions; expected >= 1" >&2

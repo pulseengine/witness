@@ -292,6 +292,11 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
                         Some(file.to_string())
                     },
                     source_line: Some(cluster_min),
+                    // v0.8: chain_kind is filled in by a later pass that
+                    // inspects the wasm at each br_if site. Default
+                    // ChainKind::Unknown here keeps decisions.rs free of
+                    // walrus dependencies.
+                    chain_kind: crate::instrument::ChainKind::default(),
                 });
                 *next_decision_id = next_decision_id.saturating_add(1);
             }

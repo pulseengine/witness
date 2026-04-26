@@ -225,6 +225,7 @@ mod tests {
                 conditions: vec![0, 1],
                 source_file: Some("src/lib.rs".to_string()),
                 source_line: Some(42),
+                chain_kind: crate::instrument::ChainKind::default(),
             }],
         }
     }

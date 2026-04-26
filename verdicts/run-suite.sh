@@ -62,6 +62,9 @@ VERDICTS=(
     safety_envelope:6
     parser_dispatch:6
     httparse:40
+    nom_numbers:28
+    state_machine:27
+    json_lite:28
 )
 
 mkdir -p "$OUT_DIR"

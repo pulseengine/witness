@@ -198,6 +198,49 @@ pub struct Decision {
     /// Source line from DWARF, when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_line: Option<u32>,
+    /// v0.8 — wasm-level chain direction classification, used by the
+    /// reporter to derive per-iteration outcomes from condition values
+    /// when the function-return-value path can't (e.g. because rustc
+    /// inlined the source-level function and the per-call outcome
+    /// belongs to a different logical scope).
+    #[serde(default, skip_serializing_if = "ChainKind::is_unknown")]
+    pub chain_kind: ChainKind,
+}
+
+/// v0.8 — classification of a decision's br_if chain at wasm level.
+///
+/// Detected by inspecting each `br_if` site's "branches when" semantics:
+/// - `local.get x; br_if N` (no eqz) — branches when condition is TRUE.
+///   Typical of `||` chains where any T short-circuits the chain.
+/// - `local.get x; i32.eqz; br_if N` — branches when condition is FALSE.
+///   Typical of `&&` chains where any F short-circuits the chain.
+///
+/// If every br_if in the decision uses the same pattern, the decision
+/// is uniformly classified. Mixed patterns produce `Mixed`. Inability
+/// to inspect the site (e.g. compressed/optimised IR) yields `Unknown`.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChainKind {
+    /// Every br_if branches on FALSE → `&&` chain. Outcome under
+    /// short-circuit: if any condition is F, outcome=F; if all
+    /// evaluated conditions are T, outcome=T.
+    And,
+    /// Every br_if branches on TRUE → `||` chain. Outcome under
+    /// short-circuit: if any condition is T, outcome=T; if all
+    /// evaluated conditions are F, outcome=F.
+    Or,
+    /// Mixed pattern — outcome can't be derived from condition
+    /// values alone. The reporter falls back to function-return.
+    Mixed,
+    /// Unable to classify (default, also v0.7-and-earlier behaviour).
+    #[default]
+    Unknown,
+}
+
+impl ChainKind {
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, ChainKind::Unknown)
+    }
 }
 
 /// Manifest written alongside the instrumented Wasm.
@@ -253,7 +296,10 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
     // v0.2: attempt DWARF-grounded decision reconstruction. v0.2.0 ships
     // the stub (always empty); v0.2.1 fills in the algorithm. Empty list
     // means hosts use the strict per-br_if fallback.
-    let decisions = crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
+    let mut decisions = crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
+    // v0.8: classify each decision's chain direction (And/Or/Mixed/Unknown)
+    // using the per-branch hints captured during instrument_module.
+    apply_chain_kinds(&mut decisions);
 
     let manifest = Manifest {
         schema_version: MANIFEST_SCHEMA_VERSION.to_string(),
@@ -284,10 +330,18 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
     let mut counter_globals: Vec<GlobalId> = Vec::new();
     let mut brval_globals: Vec<Option<GlobalId>> = Vec::new();
     let mut brcnt_globals: Vec<Option<GlobalId>> = Vec::new();
+    // v0.8: collect chain hints keyed by the absolute branch_id (= index
+    // into `entries`). Consumed by `chain_hints_for_branches` after the
+    // function returns.
+    let mut chain_hints: HashMap<u32, BranchHint> = HashMap::new();
     for scan in &scans {
-        for branch in &scan.branches {
+        for (idx_in_scan, branch) in scan.branches.iter().enumerate() {
             let id = u32::try_from(entries.len())
                 .map_err(|_| Error::Instrument("branch count exceeds u32::MAX".to_string()))?;
+            // v0.8: propagate the per-branch hint to the absolute id space.
+            if let Some(&hint) = scan.hints.get(&idx_in_scan) {
+                chain_hints.insert(id, hint);
+            }
             let counter = module.globals.add_local(
                 ValType::I32,
                 true,
@@ -402,7 +456,57 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
         .collect();
     instrument_function_outcomes(module, trace_outcome_helper, &target_funcs)?;
 
+    // v0.8: stash the chain hints in a module-level "side-channel" so
+    // `instrument_file` can pick them up when post-processing decisions.
+    // Stored as a custom section name-value pair on the manifest path
+    // would be cleaner long-term; for v0.8 first pass we use a thread-
+    // local because instrument_module is single-threaded by design.
+    LAST_CHAIN_HINTS.with(|cell| {
+        *cell.borrow_mut() = chain_hints;
+    });
+
     Ok(entries)
+}
+
+thread_local! {
+    /// v0.8 chain hints stash. Set by `instrument_module`; read by
+    /// `instrument_file` to apply chain_kind to decisions after DWARF
+    /// reconstruction. Single-threaded by design — instrumenting from
+    /// multiple threads against the same module is unsupported.
+    static LAST_CHAIN_HINTS: std::cell::RefCell<HashMap<u32, BranchHint>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+/// v0.8 — apply chain_kind to each Decision based on the per-branch
+/// hints collected during `instrument_module`. Each decision's kind is
+/// derived from aggregating its conditions' hints:
+/// - all `BranchesOnFalse` → `ChainKind::And`
+/// - all `BranchesOnTrue` → `ChainKind::Or`
+/// - mixed → `ChainKind::Mixed`
+/// - empty (no hint matches) → `ChainKind::Unknown`
+pub fn apply_chain_kinds(decisions: &mut [Decision]) {
+    let hints = LAST_CHAIN_HINTS.with(|cell| cell.borrow().clone());
+    for d in decisions {
+        let mut on_false = 0usize;
+        let mut on_true = 0usize;
+        for &cond_id in &d.conditions {
+            match hints.get(&cond_id) {
+                Some(BranchHint::BranchesOnFalse) => {
+                    on_false = on_false.saturating_add(1);
+                }
+                Some(BranchHint::BranchesOnTrue) => {
+                    on_true = on_true.saturating_add(1);
+                }
+                None => {}
+            }
+        }
+        d.chain_kind = match (on_false, on_true) {
+            (0, 0) => ChainKind::Unknown,
+            (_, 0) => ChainKind::And,
+            (0, _) => ChainKind::Or,
+            _ => ChainKind::Mixed,
+        };
+    }
 }
 
 /// Build `__witness_trace_outcome(function_idx: i32, value: i32) -> ()`.
@@ -1086,6 +1190,20 @@ fn counter_inc_into(seq: &mut walrus::InstrSeqBuilder<'_>, counter: GlobalId) {
     seq.instr(Instr::GlobalSet(GlobalSet { global: counter }));
 }
 
+/// v0.8 — per-br_if classification hint.
+///
+/// Detected at instrument time by inspecting the instruction
+/// immediately preceding the `br_if` in the source IR. The
+/// `i32.eqz; br_if N` pattern is the standard Rust short-circuit
+/// AND lowering (branch when condition is FALSE). Bare
+/// `br_if N` (or after the value was already on the stack via
+/// `local.get` / arithmetic) is the OR pattern (branch when TRUE).
+#[derive(Debug, Clone, Copy)]
+enum BranchHint {
+    BranchesOnFalse,
+    BranchesOnTrue,
+}
+
 struct BranchSite {
     seq_id: InstrSeqId,
     instr_index: u32,
@@ -1104,13 +1222,20 @@ struct FunctionScan {
     function_index: u32,
     function_name: Option<String>,
     branches: Vec<BranchSite>,
+    /// v0.8 — per-branch chain hint (BranchesOnFalse / BranchesOnTrue),
+    /// keyed by the branch's position within `branches` (= the same
+    /// index used by the rewriter when looking up counters/brval/brcnt).
+    /// Computed during `walk_collect`; consumed by `apply_chain_kinds`
+    /// after DWARF decision reconstruction.
+    hints: HashMap<usize, BranchHint>,
 }
 
 fn collect_scans(module: &Module) -> Vec<FunctionScan> {
     let mut out = Vec::new();
     for (index, (fid, lf)) in module.funcs.iter_local().enumerate() {
         let mut sites = Vec::new();
-        walk_collect(lf, lf.entry_block(), &mut sites);
+        let mut hints = HashMap::new();
+        walk_collect(lf, lf.entry_block(), &mut sites, &mut hints);
         if sites.is_empty() {
             continue;
         }
@@ -1121,12 +1246,18 @@ fn collect_scans(module: &Module) -> Vec<FunctionScan> {
             function_index,
             function_name,
             branches: sites,
+            hints,
         });
     }
     out
 }
 
-fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<BranchSite>) {
+fn walk_collect(
+    func: &walrus::LocalFunction,
+    seq_id: InstrSeqId,
+    out: &mut Vec<BranchSite>,
+    hints: &mut HashMap<usize, BranchHint>,
+) {
     let seq = func.block(seq_id);
     for (index, (instr, loc)) in seq.instrs.iter().enumerate() {
         let i = u32::try_from(index).unwrap_or(u32::MAX);
@@ -1142,13 +1273,39 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
         // minor-version bump.
         #[allow(clippy::wildcard_enum_match_arm)]
         match instr {
-            Instr::BrIf(_) => out.push(BranchSite {
-                seq_id,
-                instr_index: i,
-                kind: BranchKind::BrIf,
-                target_index: None,
-                byte_offset,
-            }),
+            Instr::BrIf(_) => {
+                // v0.8: detect `i32.eqz; br_if N` vs bare `br_if N`.
+                // The hint is keyed by the BranchSite's index in `out`
+                // (which becomes the branch_id in entries[]).
+                let hint = if index > 0 {
+                    // SAFETY-REVIEW: index > 0 implies in-bounds for
+                    // index-1 access. saturating_sub is no-op here
+                    // since index >= 1, but satisfies the
+                    // arithmetic_side_effects lint.
+                    #[allow(clippy::indexing_slicing)]
+                    let prev = &seq.instrs[index.saturating_sub(1)].0;
+                    if matches!(
+                        prev,
+                        Instr::Unop(walrus::ir::Unop {
+                            op: walrus::ir::UnaryOp::I32Eqz,
+                        })
+                    ) {
+                        BranchHint::BranchesOnFalse
+                    } else {
+                        BranchHint::BranchesOnTrue
+                    }
+                } else {
+                    BranchHint::BranchesOnTrue
+                };
+                hints.insert(out.len(), hint);
+                out.push(BranchSite {
+                    seq_id,
+                    instr_index: i,
+                    kind: BranchKind::BrIf,
+                    target_index: None,
+                    byte_offset,
+                });
+            }
             Instr::IfElse(IfElse {
                 consequent,
                 alternative,
@@ -1167,8 +1324,8 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
                     target_index: None,
                     byte_offset,
                 });
-                walk_collect(func, *consequent, out);
-                walk_collect(func, *alternative, out);
+                walk_collect(func, *consequent, out, hints);
+                walk_collect(func, *alternative, out, hints);
             }
             Instr::BrTable(bt) => {
                 let n = u32::try_from(bt.blocks.len()).unwrap_or(u32::MAX);
@@ -1189,8 +1346,8 @@ fn walk_collect(func: &walrus::LocalFunction, seq_id: InstrSeqId, out: &mut Vec<
                     byte_offset,
                 });
             }
-            Instr::Block(b) => walk_collect(func, b.seq, out),
-            Instr::Loop(l) => walk_collect(func, l.seq, out),
+            Instr::Block(b) => walk_collect(func, b.seq, out, hints),
+            Instr::Loop(l) => walk_collect(func, l.seq, out, hints),
             _ => {}
         }
     }
