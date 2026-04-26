@@ -229,6 +229,11 @@ enum ReportFormat {
     Mcdc,
     /// Machine-readable MC/DC JSON, schema https://pulseengine.eu/witness-mcdc/v1 (v0.6).
     McdcJson,
+    /// Per-file MC/DC roll-up table (v0.7.1) — usable on httparse-scale runs
+    /// where the per-decision detail report is unreadable.
+    McdcRollup,
+    /// Per-file MC/DC roll-up as JSON (v0.7.1).
+    McdcRollupJson,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -287,6 +292,14 @@ fn main() -> Result<()> {
                 ReportFormat::McdcJson => {
                     let report = witness_core::mcdc_report::from_run_file(&input)?;
                     println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                ReportFormat::McdcRollup => {
+                    let rollup = witness_core::mcdc_report::rollup_from_run_file(&input)?;
+                    println!("{}", rollup.to_text());
+                }
+                ReportFormat::McdcRollupJson => {
+                    let rollup = witness_core::mcdc_report::rollup_from_run_file(&input)?;
+                    println!("{}", serde_json::to_string_pretty(&rollup)?);
                 }
             }
         }

@@ -7,6 +7,72 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-04-26
+
+### What v0.7.1 closes
+
+v0.7.0's httparse demo proved witness scales to a real Rust crate
+(70 decisions, 481 br_ifs) but the per-decision report at that
+size — 1519 lines — is unreadable. v0.7.1 adds module-rollup
+report mode: 13 lines instead of 1519, per-file decisions/
+conditions table sorted by decision count.
+
+### Added — `witness report --format mcdc-rollup` and `mcdc-rollup-json`
+
+```
+$ witness report --input httparse.run.json --format mcdc-rollup
+module: httparse.wasm
+overall: 0/70 full MC/DC; conditions: 9 proved, 55 gap, 122 dead (186 total)
+
+source file                               decisions  full mcdc     proved        gap       dead
+---------------------------------------- ---------- ---------- ---------- ---------- ----------
+lib.rs                                           18          0          1         18         25
+iter.rs                                          16          0          1         16         28
+macros.rs                                        10          0          3         13         15
+count.rs                                          6          0          0          0         12
+mod.rs                                            6          0          1          1         16
+num.rs                                            3          0          0          0         10
+validations.rs                                    3          0          2          3          4
+const_ptr.rs                                      2          0          0          2          2
+swar.rs                                           2          0          1          2          2
+converts.rs                                       1          0          0          0          2
+index.rs                                          1          0          0          0          2
+panic.rs                                          1          0          0          0          2
+result.rs                                         1          0          0          0          2
+```
+
+The user reads this as: "lib.rs has 18 decisions; 1 condition is
+independently witnessed, 18 have gaps a new test row would close,
+25 are dead (never reached by the suite)". One-line-per-file, the
+most-decision-rich files at the top.
+
+JSON variant emits the same structure for tooling consumption,
+schema URL `https://pulseengine.eu/witness-mcdc/v1/rollup`.
+
+### Implementation
+
+- New `McdcRollup` and `FileRollup` structs in
+  `witness-core::mcdc_report`.
+- `McdcRollup::from_report(&McdcReport)` walks decisions, buckets by
+  `source_file`, sums per-bucket condition tallies. Sorts by
+  decision-count descending.
+- New `mcdc_report::rollup_from_run_file(path)` convenience.
+- CLI: two new variants in the `ReportFormat` enum.
+- Long file paths (e.g. inlined-stdlib paths in httparse) get
+  `…suffix` truncation in the text output to keep the table
+  column-aligned at 40 chars.
+
+### Notes for v0.7.2
+
+- The per-row-globals limitation that caps httparse's full-MC/DC
+  count at 0/70 is still in effect. v0.7.2 plans the trace-buffer
+  primitive switch.
+
+### Implements / Verifies
+
+- Implements: REQ-029-substance — the report is now actually
+  reviewable at scale, where v0.7.0's per-decision text was not.
+
 ## [0.7.0] — 2026-04-26
 
 ### What v0.7.0 closes

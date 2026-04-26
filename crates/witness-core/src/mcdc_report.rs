@@ -248,6 +248,143 @@ pub fn from_run_file(path: &Path) -> Result<McdcReport> {
     Ok(McdcReport::from_record(&record))
 }
 
+// ---------------------------------------------------------------------------
+// v0.7.1 — module-rollup report
+// ---------------------------------------------------------------------------
+
+/// Per-file MC/DC summary suitable for httparse-scale outputs where the
+/// per-decision detail report (1500+ lines) is unreadable. Groups
+/// decisions by `source_file` and reports decision / condition tallies
+/// per file plus an overall total.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct McdcRollup {
+    pub schema: String,
+    pub witness_version: String,
+    pub module: String,
+    pub overall: McdcOverall,
+    pub by_file: Vec<FileRollup>,
+    pub trace_health: TraceHealth,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FileRollup {
+    pub source_file: String,
+    pub decisions_total: u32,
+    pub decisions_full_mcdc: u32,
+    pub conditions_total: u32,
+    pub conditions_proved: u32,
+    pub conditions_gap: u32,
+    pub conditions_dead: u32,
+}
+
+impl McdcRollup {
+    pub fn from_report(r: &McdcReport) -> Self {
+        let mut by_file_map: BTreeMap<String, FileRollup> = BTreeMap::new();
+        for d in &r.decisions {
+            let key = d
+                .source_file
+                .clone()
+                .unwrap_or_else(|| "(no source-file)".to_string());
+            let entry = by_file_map.entry(key.clone()).or_insert(FileRollup {
+                source_file: key,
+                decisions_total: 0,
+                decisions_full_mcdc: 0,
+                conditions_total: 0,
+                conditions_proved: 0,
+                conditions_gap: 0,
+                conditions_dead: 0,
+            });
+            entry.decisions_total = entry.decisions_total.saturating_add(1);
+            if matches!(d.status, DecisionStatus::FullMcdc) {
+                entry.decisions_full_mcdc = entry.decisions_full_mcdc.saturating_add(1);
+            }
+            for c in &d.conditions {
+                entry.conditions_total = entry.conditions_total.saturating_add(1);
+                match c.status {
+                    ConditionStatus::Proved => {
+                        entry.conditions_proved = entry.conditions_proved.saturating_add(1);
+                    }
+                    ConditionStatus::Gap => {
+                        entry.conditions_gap = entry.conditions_gap.saturating_add(1);
+                    }
+                    ConditionStatus::Dead => {
+                        entry.conditions_dead = entry.conditions_dead.saturating_add(1);
+                    }
+                }
+            }
+        }
+        // Sort by decisions_total descending — the user's most-important
+        // file (most decisions) lands at the top.
+        let mut by_file: Vec<FileRollup> = by_file_map.into_values().collect();
+        // Sort by decisions_total descending — the user's most-important
+        // file (most decisions) lands at the top. Negate the key for descending.
+        by_file.sort_by_key(|f| std::cmp::Reverse(f.decisions_total));
+
+        McdcRollup {
+            schema: format!("{MCDC_SCHEMA_URL}/rollup"),
+            witness_version: r.witness_version.clone(),
+            module: r.module.clone(),
+            overall: r.overall.clone(),
+            by_file,
+            trace_health: r.trace_health.clone(),
+        }
+    }
+
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("module: {}\n", self.module));
+        out.push_str(&format!(
+            "overall: {}/{} full MC/DC; conditions: {} proved, {} gap, {} dead ({} total)\n",
+            self.overall.decisions_full_mcdc,
+            self.overall.decisions_total,
+            self.overall.conditions_proved,
+            self.overall.conditions_gap,
+            self.overall.conditions_dead,
+            self.overall.conditions_total,
+        ));
+        if self.trace_health.overflow {
+            out.push_str("WARNING: trace overflow detected — verdicts may be incomplete\n");
+        }
+        out.push('\n');
+        out.push_str(&format!(
+            "{:<40} {:>10} {:>10} {:>10} {:>10} {:>10}\n",
+            "source file", "decisions", "full mcdc", "proved", "gap", "dead",
+        ));
+        out.push_str(&format!(
+            "{:-<40} {:->10} {:->10} {:->10} {:->10} {:->10}\n",
+            "", "", "", "", "", "",
+        ));
+        for f in &self.by_file {
+            out.push_str(&format!(
+                "{:<40} {:>10} {:>10} {:>10} {:>10} {:>10}\n",
+                truncate_left(&f.source_file, 40),
+                f.decisions_total,
+                f.decisions_full_mcdc,
+                f.conditions_proved,
+                f.conditions_gap,
+                f.conditions_dead,
+            ));
+        }
+        out
+    }
+}
+
+fn truncate_left(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        // Keep the rightmost max-1 chars and prepend an ellipsis.
+        let suffix: String = s.chars().rev().take(max.saturating_sub(1)).collect();
+        let suffix: String = suffix.chars().rev().collect();
+        format!("…{suffix}")
+    }
+}
+
+pub fn rollup_from_run_file(path: &Path) -> Result<McdcRollup> {
+    let report = from_run_file(path)?;
+    Ok(McdcRollup::from_report(&report))
+}
+
 fn analyse_decision(d: &DecisionRecord) -> DecisionVerdict {
     let truth_table: Vec<RowView> = d
         .rows
