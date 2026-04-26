@@ -151,3 +151,170 @@ pub extern "C" fn run_row_14() -> i32 {
     // 5xx with custom reason.
     parse_response(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 30\r\n\r\n")
 }
+
+// ---------------------------------------------------------------------------
+// v0.7.5 — expanded test rows for richer MC/DC coverage. Each row
+// targets a different code path in httparse / inlined stdlib code.
+// ---------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_15() -> i32 {
+    // PUT request with body separator.
+    parse_request(b"PUT /api/items/1 HTTP/1.1\r\nContent-Length: 0\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_16() -> i32 {
+    // DELETE request — exercises method-classification branches.
+    parse_request(b"DELETE /api/users/42 HTTP/1.1\r\nHost: x\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_17() -> i32 {
+    // Many short headers — exercises the iter loop's bound checks.
+    parse_request(
+        b"GET / HTTP/1.1\r\n\
+        A: 1\r\nB: 2\r\nC: 3\r\nD: 4\r\nE: 5\r\nF: 6\r\nG: 7\r\nH: 8\r\n\r\n",
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_18() -> i32 {
+    // Request with body bytes after header terminator (httparse parses
+    // up to and including \r\n\r\n; body bytes ignored at this level).
+    parse_request(b"POST /upload HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_19() -> i32 {
+    // HTTP/1.0 — exercises version comparison branches.
+    parse_request(b"GET /old HTTP/1.0\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_20() -> i32 {
+    // Bad version number.
+    parse_request(b"GET / HTTP/9.9\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_21() -> i32 {
+    // Mixed-case method (httparse is case-sensitive — should fail).
+    parse_request(b"get / HTTP/1.1\r\nHost: x\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_22() -> i32 {
+    // Empty header value.
+    parse_request(b"GET / HTTP/1.1\r\nX-Empty:\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_23() -> i32 {
+    // Header without space after colon (whitespace-tolerant per RFC).
+    parse_request(b"GET / HTTP/1.1\r\nHost:example.com\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_24() -> i32 {
+    // Header value containing colons (legal in URIs).
+    parse_request(
+        b"GET / HTTP/1.1\r\nReferer: https://example.com:8080/path\r\n\r\n",
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_25() -> i32 {
+    // Single LF instead of CRLF (some lenient parsers accept).
+    parse_request(b"GET / HTTP/1.1\nHost: x\n\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_26() -> i32 {
+    // Status with multi-word reason phrase.
+    parse_response(b"HTTP/1.1 418 I'm a teapot\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_27() -> i32 {
+    // 3xx status (redirect).
+    parse_response(
+        b"HTTP/1.1 301 Moved Permanently\r\nLocation: /new-path\r\n\r\n",
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_28() -> i32 {
+    // 2xx with no headers.
+    parse_response(b"HTTP/1.1 204 No Content\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_29() -> i32 {
+    // 4xx with detailed reason.
+    parse_response(b"HTTP/1.1 422 Unprocessable Entity\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_30() -> i32 {
+    // Single byte (truncated request).
+    parse_request(b"G")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_31() -> i32 {
+    // Just a method, no URI.
+    parse_request(b"GET")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_32() -> i32 {
+    // Request with one byte beyond final \r\n\r\n (boundary byte).
+    parse_request(b"GET / HTTP/1.1\r\n\r\nX")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_33() -> i32 {
+    // Maximum reasonable header count near our 16-slot fixture cap.
+    parse_request(
+        b"GET / HTTP/1.1\r\n\
+        H1: a\r\nH2: b\r\nH3: c\r\nH4: d\r\nH5: e\r\nH6: f\r\nH7: g\r\nH8: h\r\n\
+        H9: i\r\nHA: j\r\nHB: k\r\nHC: l\r\nHD: m\r\nHE: n\r\nHF: o\r\n\r\n",
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_34() -> i32 {
+    // Numeric path with query string.
+    parse_request(b"GET /404 HTTP/1.1\r\nAccept: */*\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_35() -> i32 {
+    // High-byte (UTF-8 in path; httparse parses bytes).
+    parse_request(b"GET /\xe2\x98\x83 HTTP/1.1\r\nHost: x\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_36() -> i32 {
+    // Method longer than the canonical 7-char ones.
+    parse_request(b"PROPFIND /resource HTTP/1.1\r\nHost: webdav.example.com\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_37() -> i32 {
+    // CR alone (malformed line ending — httparse expects CRLF).
+    parse_request(b"GET / HTTP/1.1\rHost: x\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_38() -> i32 {
+    // Status with no reason phrase + no header.
+    parse_response(b"HTTP/1.1 200\r\n\r\n")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_39() -> i32 {
+    // 1xx informational + custom header.
+    parse_response(b"HTTP/1.1 102 Processing\r\nX-Hint: please-wait\r\n\r\n")
+}

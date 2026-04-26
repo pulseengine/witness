@@ -61,7 +61,7 @@ VERDICTS=(
     mixed_or_and:5
     safety_envelope:6
     parser_dispatch:6
-    httparse:15
+    httparse:40
 )
 
 mkdir -p "$OUT_DIR"

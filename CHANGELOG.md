@@ -7,6 +7,93 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.5] — 2026-04-26
+
+### What v0.7.5 closes
+
+httparse's MC/DC numbers were bottlenecked by **insufficient test
+coverage** — only 15 rows, mostly happy-path requests. v0.7.5 adds
+25 more rows targeting edge cases (truncated requests, malformed
+methods, non-canonical line endings, large header counts, UTF-8
+in paths, WebDAV methods, all status code classes, multi-word
+reason phrases). With 40 rows, the witness pipeline finds
+substantially more proving pairs.
+
+### Result on httparse
+
+| Metric | v0.7.4 (15 rows) | **v0.7.5 (40 rows)** |
+|---|---:|---:|
+| Full MC/DC | 1/70 | **6/67** |
+| Conditions proved | 12 | **28** |
+| Gap | 52 | 46 |
+| Dead | 122 | 108 |
+
+Best improvements:
+
+- **`swar.rs`** (SIMD byte search) went from 0/2 full to **2/4
+  full MC/DC** — the new test rows with longer inputs and
+  byte-pattern variations exercised the SWAR loop's branches.
+- **`lib.rs`** went from 0/18 to **2/14 full MC/DC** (decision
+  count drops slightly because some decision shapes now group
+  differently with broader DWARF coverage).
+- **`result.rs`**: 1/2 full MC/DC, both conditions proved.
+- **`iter.rs`** (iterator helpers): 1 full MC/DC, 6 proved.
+
+### Added test rows (rows 15-39)
+
+| Row | Targets |
+|---|---|
+| 15 | PUT method |
+| 16 | DELETE method |
+| 17 | Many short headers (8 distinct) |
+| 18 | Body bytes after header terminator |
+| 19 | HTTP/1.0 (version branch) |
+| 20 | Bad version number |
+| 21 | Lowercase method (case-sensitivity) |
+| 22 | Empty header value |
+| 23 | No space after colon |
+| 24 | Header with embedded colons |
+| 25 | LF instead of CRLF |
+| 26 | Multi-word reason phrase (418 I'm a teapot) |
+| 27 | 3xx redirect |
+| 28 | 2xx with no headers (204) |
+| 29 | 4xx with detailed reason (422) |
+| 30 | Single-byte truncated request |
+| 31 | Method only, no URI |
+| 32 | Boundary byte after \r\n\r\n |
+| 33 | 15 headers near 16-slot cap |
+| 34 | Numeric path |
+| 35 | UTF-8 byte in path |
+| 36 | Long method (PROPFIND, WebDAV) |
+| 37 | CR alone (malformed line ending) |
+| 38 | Status without reason phrase |
+| 39 | 1xx informational + custom header |
+
+### Updated CI gate
+
+`verdict-suite` job now also asserts `httparse.conditions_proved >= 20`
+(in addition to the existing `decisions >= 30` floor). Below either
+threshold is a regression in instrumentation, decisions
+reconstruction, or pair-finding.
+
+### Notes for v0.7.6 / v0.8
+
+- The 108 dead conditions are still a substantial chunk. A v0.7.6
+  could add even more rows targeting specific dead conditions
+  (looking at the gap-closure recommendations the report emits).
+- v0.8 chain-direction analysis (per-decision outcome derivation
+  from condition values) remains the larger architectural fix that
+  would meaningfully move the needle on inlined code without needing
+  ever-more-test-rows.
+
+### Implements / Verifies
+
+- Implements: REQ-030 (verdict suite as canonical evidence — bigger
+  is better evidence).
+- Verifies: 6× improvement in full-MC/DC count, 2.3× improvement in
+  proved-condition count, with no instrumentation or reporter
+  changes — purely from richer test coverage.
+
 ## [0.7.4] — 2026-04-26
 
 ### What v0.7.4 closes (the architecture)
