@@ -1,0 +1,32 @@
+// witness — MC/DC reporter as a Wasm Component.
+//
+// Exposes the v0.6 MC/DC reporter as a callable Component-Model
+// interface so downstream consumers can compose witness-core into a
+// `wac plug` graph or invoke it via `wasmtime serve` without
+// rebuilding the workspace.
+//
+// Schema URLs and predicate types referenced by the API:
+//   https://pulseengine.eu/witness-mcdc/v1   (report JSON)
+
+package pulseengine:witness@0.7.0;
+
+interface reporter {
+    /// Take a serialised RunRecord JSON (schema "3" or older) and
+    /// produce the human-readable MC/DC truth-table report. Returns
+    /// an error string if the input is malformed.
+    report-text: func(run-json: string) -> result<string, string>;
+
+    /// Same input, return the machine-readable MC/DC JSON report
+    /// (schema URL https://pulseengine.eu/witness-mcdc/v1).
+    report-json: func(run-json: string) -> result<string, string>;
+
+    /// Verify a DSSE-signed in-toto Statement against an Ed25519
+    /// public key. `envelope-json` is the DSSE envelope; `public-key`
+    /// is the raw 32-byte Ed25519 verifying key. Returns a one-line
+    /// summary on success ("OK — schema X, N subjects").
+    verify-envelope: func(envelope-json: string, public-key: list<u8>) -> result<string, string>;
+}
+
+world component {
+    export reporter;
+}

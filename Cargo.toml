@@ -4,9 +4,17 @@ members = [
     "crates/witness-core",
     "crates/witness",
 ]
+# Note: `crates/witness-component` is a standalone single-crate workspace
+# (same pattern as verdicts/*). Reason: wit-bindgen-generated FFI
+# bindings reference Component-Model linker symbols that only resolve
+# under wasm32-wasip2; including witness-component as a parent-workspace
+# member breaks `cargo build --workspace` on host platforms. Build
+# witness-component explicitly via:
+#   (cd crates/witness-component && cargo build --release --target wasm32-wasip2)
+# or the release.yml `wasm-component` job, which does exactly that.
 
 [workspace.package]
-version = "0.6.9"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.91"
 license = "Apache-2.0 OR MIT"

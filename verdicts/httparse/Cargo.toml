@@ -1,0 +1,23 @@
+[package]
+name = "verdict-httparse"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Witness v0.7 demo — drives the httparse crate (RFC 7230 HTTP/1.x parser) with representative test rows and lets witness measure MC/DC at the Wasm bytecode level."
+license = "Apache-2.0 OR MIT"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+httparse = { version = "1.10", default-features = false }
+
+[profile.release]
+debug = true
+strip = false
+codegen-units = 1
+lto = false
+panic = "abort"
+opt-level = 1

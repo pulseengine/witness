@@ -46,6 +46,13 @@ if [ ! -x "$WITNESS" ]; then
 fi
 
 # (verdict-name : invoke-row-count) pairs in suite-natural order.
+# v0.7.0 added httparse — a real-application fixture that drives the
+# httparse RFC 7230 parser with 15 representative request/response
+# shapes. Witness reconstructs ~70 decisions across httparse + inlined
+# stdlib code. MC/DC pairs are sparse (most rows succeed, so outcomes
+# don't differ across rows) — the report value is the reachability /
+# dead-condition picture, not full coverage. Documented in the v0.7.0
+# CHANGELOG entry.
 VERDICTS=(
     leap_year:4
     range_overlap:3
@@ -54,6 +61,7 @@ VERDICTS=(
     mixed_or_and:5
     safety_envelope:6
     parser_dispatch:6
+    httparse:15
 )
 
 mkdir -p "$OUT_DIR"

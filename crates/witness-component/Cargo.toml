@@ -1,0 +1,29 @@
+[package]
+name = "witness-component"
+description = "witness — MC/DC reporter as a Wasm Component (wasm32-wasip2). Exposes the v0.7 reporter via a WIT interface so downstream consumers can compose or invoke without rebuilding the workspace."
+version = "0.7.0"
+edition = "2024"
+rust-version = "1.91"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/pulseengine/witness"
+homepage = "https://pulseengine.eu"
+authors = ["Ralf Anton Beier"]
+keywords = ["wasm", "webassembly", "component", "mcdc", "coverage"]
+categories = ["development-tools::testing", "wasm"]
+
+# Standalone workspace — see parent Cargo.toml for the why.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+witness-core = { path = "../witness-core" }
+serde_json = "1"
+wit-bindgen = "0.49"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"

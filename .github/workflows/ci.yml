@@ -197,7 +197,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   wasm-component:
-    name: Build witness-core for wasm32-wasip2
+    name: Build witness-component (Component Model wasm) — v0.7.0+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -205,12 +205,21 @@ jobs:
         with:
           targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@v2
-      - name: Build witness-core (wasm32-wasip2)
-        run: cargo build -p witness-core --release --target wasm32-wasip2
+      - name: Build witness-component (wasm32-wasip2)
+        working-directory: crates/witness-component
+        run: cargo build --release --target wasm32-wasip2
+      - name: Inspect emitted component
+        run: |
+          set -euo pipefail
+          # wasm-tools is widely available as a binary; install via cargo
+          # if the runner doesn't have it. Quick because release cache.
+          cargo install wasm-tools --quiet || true
+          wasm-tools validate crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm
+          wasm-tools component wit crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm | head -25
       - uses: actions/upload-artifact@v4
         with:
-          name: witness-core-wasm
-          path: target/wasm32-wasip2/release/witness_core.wasm
+          name: witness-component-wasm
+          path: crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm
           if-no-files-found: warn
 
   verdict-suite:
@@ -236,6 +245,9 @@ jobs:
           # be considered green. The two zero-decision verdicts
           # (range_overlap, mixed_or_and) get fully optimised to bitwise
           # arithmetic by rustc and are intentionally not in this gate.
+          # v0.7.0 added httparse — expected to produce 50+ decisions
+          # across the parser + inlined stdlib. The exact count varies
+          # with rustc version so the gate just asserts >= 30.
           for v in leap_year triangle state_guard safety_envelope parser_dispatch; do
             n=$(python3 -c "import json; print(len(json.load(open('build/verdict-evidence/$v/run.json'))['decisions']))")
             if [ "$n" -lt 1 ]; then
@@ -244,6 +256,12 @@ jobs:
             fi
             echo "ok: $v has $n decision(s)"
           done
+          h=$(python3 -c "import json; print(len(json.load(open('build/verdict-evidence/httparse/run.json'))['decisions']))" 2>/dev/null || echo 0)
+          if [ "$h" -lt 30 ]; then
+            echo "REGRESSION: httparse has $h decisions; expected >= 30" >&2
+            exit 1
+          fi
+          echo "ok: httparse has $h decision(s)"
       - uses: actions/upload-artifact@v4
         with:
           name: verdict-evidence

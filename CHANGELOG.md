@@ -7,6 +7,125 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-26
+
+### What v0.7.0 closes
+
+Two substantive items: (a) the v0.5–v0.6 release pipeline shipped a
+13 KB `witness-core.wasm` build smoke-test as if it were a usable
+component — it had no `extern "C"` exports and no WIT interface, so
+linker dead-code-elimination threw away the entire library; (b) the
+v0.6.x verdict suite covered seven canonical compound-decision
+shapes but no real-application demo. v0.7.0 closes both.
+
+### Added — `crates/witness-component`
+
+A new workspace member that builds witness-core's MC/DC reporter as
+a **real Component Model component** for `wasm32-wasip2`. WIT
+interface at `crates/witness-component/wit/world.wit`:
+
+```wit
+package pulseengine:witness@0.7.0;
+
+interface reporter {
+    report-text: func(run-json: string) -> result<string, string>;
+    report-json: func(run-json: string) -> result<string, string>;
+    verify-envelope: func(envelope-json: string, public-key: list<u8>)
+        -> result<string, string>;
+}
+
+world component { export reporter; }
+```
+
+`wasm-tools component wit` confirms the exports land
+(`pulseengine:witness/reporter@0.7.0`). The emitted artefact is
+**~400 KB** vs the v0.5–v0.6 13 KB stub — a 30× size jump that's
+witness-core's actual code being kept by the linker because the
+WIT interface gives it reachable entry points.
+
+### Replaced — release asset name
+
+- v0.5 / v0.6: `witness-core-vX.Y.Z-wasm32-wasip2.wasm` (13 KB stub).
+- **v0.7.0+**: `witness-component-vX.Y.Z-wasm32-wasip2.wasm` (~400 KB
+  real component).
+
+Asset-name change makes the format change visible to downstream
+consumers tracking release artefacts. The release notes call it out
+explicitly.
+
+### Added — `verdicts/httparse` real-application fixture
+
+A new verdict crate that depends on the `httparse` crate (RFC 7230
+HTTP/1.x parser) and exposes 15 `run_row_<n>` exports driving the
+parser with representative request and response shapes. Witness
+reconstructs **~70 decisions across 481 br_ifs** spanning
+`httparse/lib.rs`, `httparse/iter.rs`, `httparse/macros.rs`, and
+inlined stdlib code (`core/src/iter`, `core/str`, `swar.rs`, etc.).
+
+This is "witness on a real Rust crate" — the verdict suite's 7
+existing canonical shapes are still useful for verifying the
+reporter's correctness, but httparse demonstrates witness on
+something with a real test surface.
+
+#### What httparse reveals — and the per-row-globals limitation
+
+Running the suite on httparse reveals that **0 of 70 decisions
+achieve full MC/DC** under our 15 test rows. The cause is a known
+limitation of the v0.6.1 per-row-globals primitive:
+
+- httparse's parsing loops hit each `br_if` *multiple times per
+  test row* (once per iteration).
+- Our `__witness_brval_<id>` global captures only the LAST value
+  per row.
+- So the recorded `evaluated[i]` for each condition is the value at
+  loop termination, identical across rows that traverse similar
+  loop paths.
+- Pair-finding can't find independent-effect proofs because the
+  toggling-condition rows produce identical `evaluated` maps.
+
+**This is exactly the loop-case Agent A's research warned about**
+and recommended the linear-memory trace buffer as the long-term
+fix (`docs/research/v06-instrumentation-primitive.md` §2.5, §7.1).
+v0.7.0 documents the limitation clearly; v0.7.x or v0.8 ships the
+trace-buffer primitive that lifts it.
+
+For now, the httparse report is still useful as a **reachability /
+dead-condition picture**: which decisions in the parser are
+exercised by which test rows, which conditions never fire across
+the suite, which gaps a new test row would close.
+
+### Updated — verdict-suite regression gate
+
+CI's `verdict-suite` job adds httparse to the assertion list:
+expected ≥ 30 decisions reconstructed (the count varies by rustc
+version; 30 is a generous floor). leap_year + triangle + state_guard
++ safety_envelope + parser_dispatch each still asserted ≥ 1.
+
+### Implements / Verifies
+
+- Closes the witness-core wasm overclaim from v0.5/v0.6 by shipping
+  a real Component Model component (REQ-031 substance, not just
+  packaging).
+- Adds httparse as the v0.9 destination workload anchor (per
+  `docs/research/v07-scaling-roadmap.md` recommendation).
+- Verifies: `wasm-tools validate` + `wasm-tools component wit` on
+  the emitted `witness_component.wasm`; verdict suite with httparse
+  produces 70 decisions / 481 branches / 1050 row records.
+
+### Notes for v0.7.x
+
+- **Module-rollup MC/DC report mode** for usability at httparse
+  scale (1519-line per-decision report → per-file roll-up). v0.7.1.
+- **Trace-buffer instrumentation primitive** to lift the per-row-
+  globals limitation on loop-bearing code. v0.7.x or v0.8.
+- **Per-decision outcome capture** (currently the function return
+  value is applied uniformly to every decision; a sub-decision's
+  actual outcome may differ from the top-level return). Likely
+  v0.7.x alongside the trace buffer.
+- **Component verification harness** — wasmtime-driven integration
+  test that loads `witness_component.wasm`, calls `reporter:report-
+  text`, asserts the output. v0.7.1.
+
 ## [0.6.9] — 2026-04-26
 
 ### What v0.6.9 closes

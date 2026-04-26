@@ -14,3 +14,8 @@ verdicts/*/target/
 verdicts/*/Cargo.lock
 verdicts/*/*.wasm
 
+# witness-component is a standalone workspace (see parent Cargo.toml).
+# Its target/ and Cargo.lock are build artefacts.
+crates/witness-component/target/
+crates/witness-component/Cargo.lock
+

@@ -111,7 +111,7 @@ jobs:
           path: ${{ steps.evidence.outputs.archive-path }}
 
   wasm-component:
-    name: Build witness-core.wasm component
+    name: Build witness-component (real Component Model wasm) — v0.7.0+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -122,15 +122,21 @@ jobs:
         with:
           key: release-wasm32-wasip2
 
-      - name: Build witness-core for wasm32-wasip2
-        run: cargo build --release --target wasm32-wasip2 -p witness-core
+      - name: Build witness-component for wasm32-wasip2
+        # witness-component is its own standalone workspace (see
+        # crates/witness-component/Cargo.toml) so the parent workspace
+        # can build host-only without dragging wit-bindgen FFI symbols
+        # into the host linker.
+        working-directory: crates/witness-component
+        run: cargo build --release --target wasm32-wasip2
 
       - name: Stage wasm asset
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          ASSET="witness-core-${VERSION}-wasm32-wasip2.wasm"
-          cp target/wasm32-wasip2/release/witness_core.wasm "$ASSET"
+          ASSET="witness-component-${VERSION}-wasm32-wasip2.wasm"
+          cp crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm "$ASSET"
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+          echo "::notice::witness-component built ($(wc -c < $ASSET) bytes); replaces v0.5–v0.6's 13 KB witness-core.wasm stub which had no callable exports"
 
       - uses: actions/upload-artifact@v4
         with:
