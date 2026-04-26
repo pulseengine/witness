@@ -7,6 +7,52 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.7] — 2026-04-26
+
+### What v0.6.7 closes
+
+The v0.6.x series shipped a complete signed-evidence pipeline across
+six versions, but the README was still pinned to v0.1.0 — visitors
+landed on the repo and saw none of it. v0.6.7 fixes that: the README
+features a "Show me the proof — verify a release in 60 seconds"
+recipe walking through download → extract → verify → see truth
+tables.
+
+### Updated — README.md
+
+- **Status** section replaced with a v0.6.x ratchet table summarising
+  what each sub-release added.
+- **Show me the proof** section before the usage block. Walks through
+  `gh release download`, extract, `cat SUMMARY.txt`, `witness verify`.
+  Includes a directory tree of the bundle so users know what each
+  file is for.
+- **Usage** section updated to demonstrate the v0.6 commands:
+  `witness report --format mcdc`, `keygen`, `attest`, `verify`,
+  `lcov` — replacing the v0.1.0-era examples.
+
+### Verified end-to-end against the production v0.6.4 release
+
+Downloaded v0.6.4's compliance archive from GitHub, extracted, and
+ran `witness verify` against `leap_year/signed.dsse.json` and
+`parser_dispatch/signed.dsse.json` against the bundled
+`verifying-key.pub`. Both verify with `OK`. The published release
+ships exactly what the README documents — no broken promises.
+
+### Notes for v0.6.8 / v0.7
+
+- The `Related work` section in the README still doesn't mention
+  RapiCover (the closest commercial competitor identified by the
+  v0.9 research agent). Worth adding for v0.6.8.
+- The `Where it fits` table predates the v0.6.x ecosystem reality —
+  loom and meld don't yet emit the offset-translation maps witness
+  needs for post-loom / post-meld coverage; that's v0.7+ work
+  pending the upstream issues from v0.5.
+
+### Implements / Verifies
+
+- Ratifies the v0.6.x ladder for repo visitors. No code changes —
+  this release exists to put the showable proof on the front page.
+
 ## [0.6.6] — 2026-04-26
 
 ### What v0.6.6 closes

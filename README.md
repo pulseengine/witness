@@ -23,36 +23,130 @@ is structurally the same move as *"post-rustc Wasm"*.
 
 ## Status
 
-**v0.1.0 shipped 2026-04-24.** Per-`br_if` / per-`if-else` branch coverage,
-embedded wasmtime runner, exported-mutable-globals counter mechanism. v0.2
-adds DWARF-grounded MC/DC reconstruction, per-target `br_table` counting,
-and a subprocess `--harness` escape hatch. See [DESIGN.md](DESIGN.md) for
-the incremental v0.1→v1.0 roadmap. Core tracking issue:
-[pulseengine.eu #29](https://github.com/pulseengine/pulseengine.eu/issues/29).
+**v0.6.x is the current release line** (latest tag — see
+[releases](https://github.com/pulseengine/witness/releases)). The
+v0.6.x sub-versions ratcheted from "consumer-side schema only" up to
+a complete signed-evidence pipeline:
+
+| Version | What it added |
+|---|---|
+| **v0.6.0** | Real MC/DC reporter, schema v3, verdict-suite scaffolding, V-model artefact graph |
+| **v0.6.1** | On-Wasm per-row instrumentation; leap_year verdict end-to-end |
+| **v0.6.2** | Adjacent-line decision clustering — 5 of 7 verdicts produce reports |
+| **v0.6.3** | Populated compliance bundle + verdict-suite CI regression gate |
+| **v0.6.4** | DSSE-signed verdict predicates with ephemeral release keys |
+| **v0.6.5** | V-model traceability matrix in compliance bundle |
+| **v0.6.6** | Verdict-suite delta posted to PRs as a comment |
+
+Earlier versions (v0.1.0–v0.5.0, all shipped between 2026-04-24 and
+2026-04-25): branch coverage, DWARF reconstruction, rivet evidence
+emission, sigil predicate format, workspace split, LCOV emission.
+See [DESIGN.md](DESIGN.md) for the incremental roadmap and
+[`docs/roadmap.md`](docs/roadmap.md) for v0.7+.
 
 Counter values are exposed as exported mutable globals named
-`__witness_counter_<id>`, not via a dump function — any conformant Wasm
-runtime can read coverage with a two-line `instance.get_global` call. No
-cooperation protocol with the module-under-test is required.
+`__witness_counter_<id>` (plus `__witness_brval_<id>` /
+`__witness_brcnt_<id>` from v0.6.1+), not via a dump function — any
+conformant Wasm runtime can read coverage with a two-line
+`instance.get_global` call. No cooperation protocol with the
+module-under-test is required.
+
+## Show me the proof — verify a release in 60 seconds
+
+Every v0.6.4+ release ships a `compliance-evidence.tar.gz` archive
+containing seven verdict directories with end-to-end MC/DC reports
+plus a DSSE-signed in-toto Statement per verdict and an ephemeral
+public key. Verify it:
+
+```sh
+# 1. Download the compliance archive for the latest release.
+gh release download v0.6.6 \
+  --repo pulseengine/witness \
+  --pattern '*compliance-evidence*'
+
+# 2. Extract.
+tar -xzf witness-v0.6.6-compliance-evidence.tar.gz
+
+# 3. See the per-verdict roll-up.
+cat compliance/verdict-evidence/SUMMARY.txt
+
+# 4. Verify a signed predicate against the verifying key.
+witness verify \
+  --envelope compliance/verdict-evidence/leap_year/signed.dsse.json \
+  --public-key compliance/verdict-evidence/verifying-key.pub
+```
+
+The verify command prints `OK — DSSE envelope … verifies against …`
+and exits zero. Tampering with the envelope or the public key fails
+verification with a clear error and a non-zero exit. The `cosign
+verify-blob` command works equivalently — the envelope is
+standards-compliant DSSE.
+
+The `verdict-evidence/` directory contains:
+
+```
+verdict-evidence/
+├── SUMMARY.txt                 # one-line-per-verdict status
+├── verifying-key.pub           # Ed25519 public key (32 bytes)
+├── VERIFY.md                   # verification walkthrough
+├── traceability-matrix.json    # V-model matrix (v0.6.5+)
+├── traceability-matrix.html    # rendered for human review
+└── <verdict-name>/
+    ├── source.wasm             # pre-instrumentation
+    ├── instrumented.wasm       # post-instrumentation
+    ├── manifest.json           # branches + reconstructed decisions
+    ├── run.json                # per-row condition vectors (v3 schema)
+    ├── report.txt              # MC/DC truth tables (text)
+    ├── report.json             # MC/DC report (schema /witness-mcdc/v1)
+    ├── predicate.json          # in-toto Statement (unsigned)
+    ├── signed.dsse.json        # DSSE envelope (signed)
+    └── lcov.info, overview.txt # codecov-ingestible LCOV
+```
+
+The seven verdicts cover canonical compound-decision shapes from
+2-condition AND through 5-condition mixed AND/OR plus a real-world
+URL-authority validator that surfaces decisions in the Rust standard
+library's `memchr`. See each verdict's
+[`TRUTH-TABLE.md`](verdicts/) for the source-level truth table and,
+where the Wasm-level reality differs, a "post-rustc Wasm-level
+reality" section explaining the v0.2 paper's coverage-lifting
+argument in concrete form.
 
 ## Usage
 
 ```sh
-# Instrument a Wasm module with branch counters.
+# Instrument a Wasm module with branch counters + per-row capture.
 witness instrument app.wasm -o app.instrumented.wasm
 
-# Default: embedded wasmtime runner. Invoke one or more no-argument
-# exports; witness reads counter globals after they return.
-witness run app.instrumented.wasm --invoke run_tests
+# Default: embedded wasmtime runner. Each --invoke is one row; witness
+# reads counter + per-row globals after each return.
+witness run app.instrumented.wasm \
+  --invoke run_row_0 --invoke run_row_1 --invoke run_row_2
 
-# Subprocess harness mode (v0.2). The harness reads WITNESS_MODULE /
-# WITNESS_MANIFEST and writes a counter snapshot to WITNESS_OUTPUT
-# before exiting.
+# Subprocess harness mode. The harness reads WITNESS_MODULE /
+# WITNESS_MANIFEST and writes a counter snapshot to WITNESS_OUTPUT.
 witness run app.instrumented.wasm --harness "node tests/runner.mjs"
 
-# Produce a coverage report (text or JSON).
+# Branch-coverage report (text / JSON).
 witness report --input witness-run.json
 witness report --input witness-run.json --format json
+
+# v0.6+ MC/DC report — truth tables, independent-effect citations,
+# gap-closure recommendations.
+witness report --input witness-run.json --format mcdc
+witness report --input witness-run.json --format mcdc-json
+
+# v0.6+ in-toto coverage predicate + DSSE signing + verification.
+witness predicate --run witness-run.json --module app.instrumented.wasm \
+  -o predicate.json
+witness keygen --secret release.sk --public release.pub
+witness attest --predicate predicate.json --secret-key release.sk \
+  -o predicate.dsse.json
+witness verify --envelope predicate.dsse.json --public-key release.pub
+
+# LCOV emission for codecov.
+witness lcov --run witness-run.json --manifest app.instrumented.wasm.witness.json \
+  -o lcov.info
 ```
 
 For a worked example end-to-end, see
