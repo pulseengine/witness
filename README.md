@@ -25,24 +25,56 @@ is structurally the same move as *"post-rustc Wasm"*.
 
 **v0.6.x is the current release line** (latest tag — see
 [releases](https://github.com/pulseengine/witness/releases)). The
-v0.6.x sub-versions ratcheted from "consumer-side schema only" up to
-a complete signed-evidence pipeline:
+v0.6.x ratcheted from "consumer-side schema only" up to a complete
+signed-evidence pipeline. v0.7.x added the trace-buffer primitive
+that lifts the per-row-globals limit on loop-bearing programs.
+v0.8.0 adds chain-direction analysis + three new real-application
+fixtures.
+
+### Current verdict suite — v0.8.0
+
+```
+verdict              branches  decisions full      proved  gap   dead   rows
+leap_year            2         1         1/1       2       0     0      4
+range_overlap        0         0         0/0       0       0     0      3   (optimised to bitwise)
+triangle             2         1         1/1       2       0     0      4
+state_guard          3         1         1/1       3       0     0      5
+mixed_or_and         0         0         0/0       0       0     0      5   (optimised to bitwise)
+safety_envelope      4         1         1/1       3       0     0      6
+parser_dispatch      33        7         1/7       9       13    5      6
+httparse             473       67        7/67      28      46    108    40
+nom_numbers          20        3         3/3       6       0     0      28
+state_machine        14        5         4/5       11      1     0      27
+json_lite            165       29        2/29      26      31    33     28
+TOTAL                716       115       21/115    90      91    146
+```
+
+**90 conditions proved across 715 br_ifs in real Rust code**, 21 full
+MC/DC decisions, 146 dead conditions flagged with row-closure
+recommendations the report emits inline. The four real-application
+fixtures (httparse, nom_numbers, state_machine, json_lite) account
+for 672/716 branches and 104/115 decisions. The seven canonical
+fixtures (leap_year through parser_dispatch) provide hand-derivable
+oracle truth tables for verifier confidence.
+
+### Version history
 
 | Version | What it added |
 |---|---|
-| **v0.6.0** | Real MC/DC reporter, schema v3, verdict-suite scaffolding, V-model artefact graph |
-| **v0.6.1** | On-Wasm per-row instrumentation; leap_year verdict end-to-end |
-| **v0.6.2** | Adjacent-line decision clustering — 5 of 7 verdicts produce reports |
-| **v0.6.3** | Populated compliance bundle + verdict-suite CI regression gate |
-| **v0.6.4** | DSSE-signed verdict predicates with ephemeral release keys |
-| **v0.6.5** | V-model traceability matrix in compliance bundle |
-| **v0.6.6** | Verdict-suite delta posted to PRs as a comment |
+| **v0.8.0** | Chain-direction analysis (And/Or/Mixed/Unknown) + 3 real-app fixtures (nom_numbers, state_machine, json_lite) |
+| **v0.7.5** | Expanded httparse rows (15→40); 6× full MC/DC, 2.3× proved |
+| **v0.7.4** | Per-function-call decision outcome capture (kind=2 trace records) |
+| **v0.7.3** | Trace-buffer parser → per-iteration `DecisionRow`s |
+| **v0.7.2** | Trace-buffer write side (1582 records on httparse) |
+| **v0.7.1** | Module-rollup report (`--format mcdc-rollup`) |
+| **v0.7.0** | Real Wasm Component (witness-component, ~400 KB) + httparse fixture |
+| **v0.6.7..9** | README quickstart, release-self-verify, SECURITY.md threat model |
+| **v0.6.4..6** | DSSE-signed verdict predicates (ephemeral keys), V-model traceability matrix, PR delta comments |
+| **v0.6.0..3** | MC/DC schema + reporter + verdict-suite scaffolding + populated compliance bundle |
+| v0.1.0–v0.5.0 | Branch coverage, DWARF reconstruction, rivet evidence, sigil predicate format, workspace split, LCOV |
 
-Earlier versions (v0.1.0–v0.5.0, all shipped between 2026-04-24 and
-2026-04-25): branch coverage, DWARF reconstruction, rivet evidence
-emission, sigil predicate format, workspace split, LCOV emission.
-See [DESIGN.md](DESIGN.md) for the incremental roadmap and
-[`docs/roadmap.md`](docs/roadmap.md) for v0.7+.
+See [DESIGN.md](DESIGN.md) for the roadmap and
+[`docs/roadmap.md`](docs/roadmap.md) for v0.9+.
 
 Counter values are exposed as exported mutable globals named
 `__witness_counter_<id>` (plus `__witness_brval_<id>` /
@@ -54,25 +86,25 @@ module-under-test is required.
 ## Show me the proof — verify a release in 60 seconds
 
 Every v0.6.4+ release ships a `compliance-evidence.tar.gz` archive
-containing seven verdict directories with end-to-end MC/DC reports
-plus a DSSE-signed in-toto Statement per verdict and an ephemeral
-public key. Verify it:
+containing the eleven verdict directories with end-to-end MC/DC
+reports, DSSE-signed in-toto Statements per verdict, an ephemeral
+public key, and a V-model traceability matrix. Verify it:
 
 ```sh
 # 1. Download the compliance archive for the latest release.
-gh release download v0.6.6 \
+gh release download v0.8.0 \
   --repo pulseengine/witness \
   --pattern '*compliance-evidence*'
 
 # 2. Extract.
-tar -xzf witness-v0.6.6-compliance-evidence.tar.gz
+tar -xzf witness-v0.8.0-compliance-evidence.tar.gz
 
-# 3. See the per-verdict roll-up.
+# 3. See the per-verdict scoreboard with proved/gap/dead totals.
 cat compliance/verdict-evidence/SUMMARY.txt
 
 # 4. Verify a signed predicate against the verifying key.
 witness verify \
-  --envelope compliance/verdict-evidence/leap_year/signed.dsse.json \
+  --envelope compliance/verdict-evidence/httparse/signed.dsse.json \
   --public-key compliance/verdict-evidence/verifying-key.pub
 ```
 
@@ -103,14 +135,21 @@ verdict-evidence/
     └── lcov.info, overview.txt # codecov-ingestible LCOV
 ```
 
-The seven verdicts cover canonical compound-decision shapes from
-2-condition AND through 5-condition mixed AND/OR plus a real-world
-URL-authority validator that surfaces decisions in the Rust standard
-library's `memchr`. See each verdict's
-[`TRUTH-TABLE.md`](verdicts/) for the source-level truth table and,
-where the Wasm-level reality differs, a "post-rustc Wasm-level
-reality" section explaining the v0.2 paper's coverage-lifting
-argument in concrete form.
+The eleven verdicts split into two groups:
+
+- **Seven canonical compound-decision shapes** with hand-derivable
+  truth tables (leap_year, range_overlap, triangle, state_guard,
+  mixed_or_and, safety_envelope, parser_dispatch). These are the
+  oracle: a reviewer can verify witness's MC/DC report by eye.
+- **Four real-application fixtures** at meaningful scale (httparse,
+  nom_numbers, state_machine, json_lite). 672 instrumented branches,
+  104 reconstructed decisions across real Rust crate code (RFC 7230
+  parser, parser-combinator integer parsing, TLS handshake state
+  machine, JSON parser). Their `TRUTH-TABLE.md` files document
+  source-author intent + the Wasm-level coverage-lifting story
+  (v0.2 paper).
+
+See each verdict's [`TRUTH-TABLE.md`](verdicts/) and `V-MODEL.md`.
 
 ## Usage
 

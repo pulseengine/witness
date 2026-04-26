@@ -115,8 +115,16 @@ fi
 SUMMARY="$OUT_DIR/SUMMARY.txt"
 echo "witness verdict suite — $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SUMMARY"
 echo "" >> "$SUMMARY"
-printf "%-20s %-10s %-12s %-15s\n" "verdict" "branches" "decisions" "full-mcdc" >> "$SUMMARY"
-printf "%-20s %-10s %-12s %-15s\n" "-------" "--------" "---------" "---------" >> "$SUMMARY"
+printf "%-20s %-9s %-9s %-9s %-7s %-7s %-7s %-7s\n" \
+    "verdict" "branches" "decisions" "full" "proved" "gap" "dead" "rows" >> "$SUMMARY"
+printf "%-20s %-9s %-9s %-9s %-7s %-7s %-7s %-7s\n" \
+    "-------" "--------" "---------" "----" "------" "---" "----" "----" >> "$SUMMARY"
+TOTAL_BRANCHES=0
+TOTAL_DECISIONS=0
+TOTAL_FULL=0
+TOTAL_PROVED=0
+TOTAL_GAP=0
+TOTAL_DEAD=0
 
 OVERALL_FAIL=0
 for v in "${VERDICTS[@]}"; do
@@ -185,13 +193,30 @@ for v in "${VERDICTS[@]}"; do
         > "$out/lcov.log" 2>&1 || true
 
     # Suite summary stats from the JSON report.
-    branches=$(python3 -c "import json; d=json.load(open('$out/run.json')); print(len(d.get('branches', [])))" 2>/dev/null || echo "?")
-    decisions=$(python3 -c "import json; d=json.load(open('$out/run.json')); print(len(d.get('decisions', [])))" 2>/dev/null || echo "?")
-    full=$(python3 -c "import json; d=json.load(open('$out/report.json', 'r')); print(d['overall']['decisions_full_mcdc'])" 2>/dev/null || echo "?")
-    total=$(python3 -c "import json; d=json.load(open('$out/report.json', 'r')); print(d['overall']['decisions_total'])" 2>/dev/null || echo "?")
+    branches=$(python3 -c "import json; d=json.load(open('$out/run.json')); print(len(d.get('branches', [])))" 2>/dev/null || echo 0)
+    decisions=$(python3 -c "import json; d=json.load(open('$out/run.json')); print(len(d.get('decisions', [])))" 2>/dev/null || echo 0)
+    full=$(python3 -c "import json; d=json.load(open('$out/report.json', 'r')); print(d['overall']['decisions_full_mcdc'])" 2>/dev/null || echo 0)
+    proved=$(python3 -c "import json; d=json.load(open('$out/report.json', 'r')); print(d['overall']['conditions_proved'])" 2>/dev/null || echo 0)
+    gap=$(python3 -c "import json; d=json.load(open('$out/report.json', 'r')); print(d['overall']['conditions_gap'])" 2>/dev/null || echo 0)
+    dead=$(python3 -c "import json; d=json.load(open('$out/report.json', 'r')); print(d['overall']['conditions_dead'])" 2>/dev/null || echo 0)
 
-    printf "%-20s %-10s %-12s %-15s\n" "$name" "$branches" "$decisions" "$full/$total" >> "$SUMMARY"
+    printf "%-20s %-9s %-9s %-9s %-7s %-7s %-7s %-7s\n" \
+        "$name" "$branches" "$decisions" "$full/$decisions" \
+        "$proved" "$gap" "$dead" "$rows" >> "$SUMMARY"
+
+    TOTAL_BRANCHES=$((TOTAL_BRANCHES + branches))
+    TOTAL_DECISIONS=$((TOTAL_DECISIONS + decisions))
+    TOTAL_FULL=$((TOTAL_FULL + full))
+    TOTAL_PROVED=$((TOTAL_PROVED + proved))
+    TOTAL_GAP=$((TOTAL_GAP + gap))
+    TOTAL_DEAD=$((TOTAL_DEAD + dead))
 done
+
+printf "%-20s %-9s %-9s %-9s %-7s %-7s %-7s\n" \
+    "-------" "--------" "---------" "----" "------" "---" "----" >> "$SUMMARY"
+printf "%-20s %-9s %-9s %-9s %-7s %-7s %-7s\n" \
+    "TOTAL" "$TOTAL_BRANCHES" "$TOTAL_DECISIONS" \
+    "$TOTAL_FULL/$TOTAL_DECISIONS" "$TOTAL_PROVED" "$TOTAL_GAP" "$TOTAL_DEAD" >> "$SUMMARY"
 
 echo "" >> "$SUMMARY"
 echo "Detail per verdict:" >> "$SUMMARY"

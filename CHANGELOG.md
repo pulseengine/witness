@@ -7,6 +7,34 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-04-26
+
+### What v0.8.1 adds
+
+- **`SUMMARY.txt` gains per-condition columns + a TOTAL row.** The
+  compliance bundle's top-level scoreboard now reads:
+  ```
+  verdict              branches  decisions full      proved  gap   dead   rows
+  leap_year            2         1         1/1       2       0     0      4
+  ...
+  json_lite            165       29        2/29      26      31    33     28
+  TOTAL                716       115       21/115    90      91    146
+  ```
+  One look gives the reviewer the headline numbers: 716 branches,
+  115 reconstructed decisions across 11 verdicts, 21 full-MC/DC,
+  **90 conditions proved**, 91 gap, 146 dead. The TOTAL row is the
+  load-bearing demo number.
+- **README scoreboard table** showing the v0.8.0 numbers up front,
+  not buried in the version-history table.
+- **Updated `Show me the proof` quickstart** uses v0.8.0 paths and
+  references httparse instead of leap_year as the verify-target —
+  picks the most-substantive evidence to demonstrate.
+
+### Implements / Verifies
+
+- This is a polish release on top of v0.8.0's substantive work. No
+  instrumentation or reporter changes; CI gates are unchanged.
+
 ## [0.8.0] — 2026-04-26
 
 ### Two substantive items: chain-direction outcome derivation + 3 new
