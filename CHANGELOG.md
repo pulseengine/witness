@@ -7,6 +7,63 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.9] — 2026-04-26
+
+### What v0.6.9 closes
+
+The v0.6.4–v0.6.8 work shipped a complete signed-evidence pipeline,
+but the threat model — what a witness signature proves, what it
+*doesn't*, why ephemeral keys — was scattered across CHANGELOG
+narratives. v0.6.9 consolidates it into a `SECURITY.md` that
+adopters can cite when scoping witness's role in their qualification
+chain.
+
+### Added — `SECURITY.md`
+
+Five sections:
+
+1. **What a signature proves** — predicate body integrity, signer
+   key identity, instrumented-module digest binding.
+2. **What a signature does NOT prove** — no long-term key
+   continuity, no source-binding, no test-suite representativeness,
+   no LLVM lowering soundness (the v0.2 paper's coverage-lifting
+   open problem, deferred to v1.0's Check-It pattern).
+3. **The ephemeral-key approach** — pros and cons, when adopters
+   should layer their own signing chain on top (sigstore Fulcio,
+   HSM/KMS).
+4. **Key sizes and algorithms** — Ed25519, raw 64+32 byte format,
+   PEM/DER deferred to v0.7.
+5. **Reporting security issues** — `security@pulseengine.eu`,
+   security-relevant code paths.
+
+### Why this matters for v0.6.x adopters
+
+Safety-critical adopters need to scope witness in their
+qualification chain. The signature's claims are precise but
+narrow: "this evidence was produced by the release pipeline that
+wrote this verifying-key.pub". Anything broader requires
+composition with surrounding tools (build provenance, sigstore,
+HSM-backed signing). SECURITY.md states that boundary explicitly
+so adopters don't over-claim.
+
+### Closing the v0.6.x ratchet
+
+This is likely the **last v0.6.x sub-version**. The series
+ratcheted from v0.6.0's "consumer side only" through v0.6.8's
+"release self-verifies its own bundle". The v0.7 work — scaling to
+real applications, BrTable per-row MC/DC, visualisation, sigstore
+integration — is substantively different in shape from v0.6.x
+ratchets and warrants its own planning cycle (the existing v07
+research brief at `docs/research/v07-scaling-roadmap.md` is the
+starting point).
+
+Future v0.6.x patch releases remain available for fixes.
+
+### Implements / Verifies
+
+- Documents: the v0.6.4 sign + v0.6.7 verify + v0.6.8 self-verify
+  loop's threat model and scope.
+
 ## [0.6.8] — 2026-04-26
 
 ### What v0.6.8 closes
