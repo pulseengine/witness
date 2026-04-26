@@ -133,3 +133,63 @@ AND's.
   }
 }
 ```
+
+## Post-rustc Wasm-level reality (added in v0.6.5)
+
+The truth table above is the **source author's mental model**: 5
+conditions, hand-derived rows, expected pair structure under masking
+MC/DC. When witness instruments `verdict_parser_dispatch.wasm` and
+runs the 6 rows, the report looks substantively different — and that
+difference is itself useful evidence:
+
+```
+$ witness report --input parser_dispatch.run.json --format mcdc
+decisions: 1/7 full MC/DC; conditions: 7 proved, 15 gap, 5 dead
+```
+
+Witness finds **7 decisions, not 1**, because:
+
+1. **The source-level decision (lib.rs:37) gets surfaced as 4
+   conditions, not 5.** rustc lowered the third operand
+   (`!s.contains(b'@')`) into a separate decision (lib.rs:58, 2
+   conditions, full MC/DC) by inlining the byte-search loop's exit
+   structure. So the source `c3` shows up as decision #1, not as a
+   condition of decision #0.
+
+2. **Each `s.contains(byte)` call inlined `memchr` library code.**
+   `memchr` uses SIMD-driven byte-search loops with their own
+   compound predicates (validity checks, range bounds, alignment
+   guards). Each such inlined call produces a separate Decision in
+   the witness report — five of them across `memchr.rs:31`,
+   `memchr.rs:39`, `memchr.rs:40` (×2), `memchr.rs:107`.
+
+3. **Many of the inlined-`memchr` conditions are dead** under our
+   6-row test suite, because `memchr`'s SIMD path requires inputs
+   long enough to hit the vector-aligned loop. Our test inputs are
+   small (`""`, `"h"`, `"[fe80::]"`); the SIMD branches never
+   activate. Witness correctly reports them as `DEAD`.
+
+This is the v0.2 paper's **coverage-lifting argument** in concrete
+form. The source author intends 5 conditions; the post-rustc Wasm
+exposes 33 br_ifs across 7 decisions. Witness measures what the
+optimizer left as branches, including stdlib internals invoked by
+the user's source. The trade-off:
+
+- **Pro:** witness reports MC/DC over **all the code that actually
+  ran**, not just the user's hand-written predicate. That's the real
+  attack surface for a safety-critical claim.
+- **Pro:** the user can see *exactly* which `memchr` paths their
+  test suite exercises, which is information rustc-mcdc cannot give
+  them (it stops at the source AST and never sees inlined library
+  code).
+- **Con:** the report is harder to read at first because it includes
+  decisions the user didn't write. The user is responsible for
+  deciding which decisions are in scope for their MC/DC claim
+  (typically: only those whose source is part of the qualified
+  domain).
+
+The full reconstructed-decision shape is in the run-record at
+release-time: `compliance/verdict-evidence/parser_dispatch/run.json`
+plus `report.txt`. The signed predicate
+(`signed.dsse.json`, v0.6.4+) attests to the report's contents
+under the release-time Ed25519 key.

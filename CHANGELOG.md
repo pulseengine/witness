@@ -7,6 +7,76 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.5] — 2026-04-26
+
+### What v0.6.5 closes
+
+REQ-032 — every release ships a JSON + HTML traceability matrix
+generated from `artifacts/*.yaml` at release time, bundled into the
+compliance archive. v0.6.0 declared the requirement; v0.6.5 ships
+the implementation.
+
+Plus: parser_dispatch's `TRUTH-TABLE.md` gains a "Post-rustc
+Wasm-level reality" section documenting why the report shows 7
+decisions instead of the source author's intended 1 — the v0.2
+paper's coverage-lifting argument in concrete form.
+
+### Added — `.github/actions/compliance/trace-matrix.py`
+
+Pure-Python (PyYAML only) script that reads the rivet artefact
+graph and the verdict-evidence directory and emits two files:
+
+- `traceability-matrix.json` (schema URL
+  `https://pulseengine.eu/witness-trace-matrix/v1`) carrying
+  totals + per-requirement satisfied-by-feature / supporting-
+  decision lists + per-verdict MC/DC roll-up + signed-envelope
+  flag.
+- `traceability-matrix.html` styled for human review with a
+  verdict-suite table at the top and a requirements table below.
+
+Composite-action wiring installs PyYAML via `apt python3-yaml`
+preferentially, falling back to `pip --break-system-packages` for
+runners that lack the apt package.
+
+### Added — Wasm-level-reality section in `parser_dispatch/TRUTH-TABLE.md`
+
+The source-level table at the top of the file documents the
+predicate as the author wrote it (5 conditions, hand-derived rows,
+under-masking pair structure). The new section at the bottom
+documents what witness's report actually finds:
+
+- 7 decisions (1 in `lib.rs`, 5 across `memchr.rs`, 1 split via
+  inlining of the byte-search exit structure)
+- 33 br_ifs total
+- 5 dead conditions because `memchr`'s SIMD path requires inputs
+  longer than our 6 test rows provide
+
+The discrepancy is the v0.2 paper's coverage-lifting argument made
+concrete: post-rustc Wasm coverage measures what the optimizer
+left, including stdlib internals invoked by user code. The user is
+responsible for scoping which decisions are part of their MC/DC
+claim.
+
+### Compliance bundle now contains
+
+| File | Purpose |
+|---|---|
+| `verdict-evidence/<name>/*` | Per-verdict instrument-run-report-predicate-signed chain (v0.6.3+, v0.6.4 added signing) |
+| `verdict-evidence/SUMMARY.txt` | One-line-per-verdict status table |
+| `verdict-evidence/verifying-key.pub` | Ed25519 public key (v0.6.4+) |
+| `verdict-evidence/VERIFY.md` | Verification walkthrough (v0.6.4+) |
+| `traceability-matrix.json` | V-model matrix machine-readable (v0.6.5+) |
+| `traceability-matrix.html` | V-model matrix human-readable (v0.6.5+) |
+| `predicates/`, `manifests/` | Legacy v0.5 directories (still present for compatibility) |
+| `coverage-report.{json,txt}` | Top-level coverage report (when run-json input is provided) |
+
+### Implements / Verifies
+
+- Implements: REQ-032 (V-model traceability matrix in every release).
+- Verifies: matrix renders against the actual v0.6.4 verdict-evidence
+  bundle locally — 39 requirements, 17 features, 22 design-decisions,
+  7 verdicts (5 with non-zero decisions), all with signed envelopes.
+
 ## [0.6.4] — 2026-04-26
 
 ### What v0.6.4 closes

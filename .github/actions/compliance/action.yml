@@ -99,6 +99,23 @@ runs:
           echo "warn: verdicts/run-suite.sh missing; skipping verdict bundle" >&2
         fi
 
+    - name: Generate V-model traceability matrix (v0.6.5+)
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+        if [ -f .github/actions/compliance/trace-matrix.py ]; then
+          # PyYAML is the only Python dep. Ubuntu runners have it via
+          # `apt install python3-yaml`; fall back to pip with the
+          # break-system-packages flag if that's missing.
+          python3 -c 'import yaml' 2>/dev/null \
+            || pip3 install --break-system-packages --user pyyaml --quiet \
+            || sudo apt-get install -y python3-yaml
+          python3 .github/actions/compliance/trace-matrix.py \
+            artifacts "$OUTPUT_DIR/verdict-evidence" "$OUTPUT_DIR" || true
+        fi
+
     - name: Write README
       shell: bash
       env:
@@ -122,13 +139,19 @@ runs:
             <name>/report.txt            MC/DC truth tables + verdicts (text)
             <name>/report.json           MC/DC report (JSON, schema v1)
             <name>/predicate.json        in-toto Statement (unsigned)
+            <name>/signed.dsse.json      DSSE-signed envelope (v0.6.4+)
             <name>/lcov.info, overview.txt  LCOV (when DWARF surfaces)
+          verifying-key.pub      - Ed25519 public key (v0.6.4+) — verify with witness verify
+          VERIFY.md              - verification walkthrough (v0.6.4+)
           SUMMARY.txt            - one-line-per-verdict status table
+          traceability-matrix.json   - V-model matrix (v0.6.5+, schema /witness-trace-matrix/v1)
+          traceability-matrix.html   - V-model matrix (rendered)
 
         Schemas:
           https://pulseengine.eu/witness-coverage/v1            (predicate)
           https://pulseengine.eu/witness-rivet-evidence/v1     (rivet evidence)
           https://pulseengine.eu/witness-mcdc/v1               (MC/DC report)
+          https://pulseengine.eu/witness-trace-matrix/v1       (V-model matrix)
         EOF
 
     - name: Create archive
