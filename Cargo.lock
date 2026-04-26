@@ -3094,7 +3094,7 @@ dependencies = [
 
 [[package]]
 name = "witness"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -3116,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "witness-core"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "anyhow",
  "base64",

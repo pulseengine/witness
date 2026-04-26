@@ -351,6 +351,11 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
     // FunctionId is stable when rewrite_brif emits a Call.
     let trace_mem = build_trace_infra(module)?;
     let trace_record_helper = build_trace_record_helper(module, trace_mem)?;
+    // v0.7.4: trace_outcome_helper writes kind=2 records carrying
+    // (function_index, return_value) so per-function-call outcomes
+    // are visible to the runner and can be correlated with the
+    // decisions belonging to that function.
+    let trace_outcome_helper = build_trace_outcome_helper(module, trace_mem)?;
 
     let mut cursor: usize = 0;
     for scan in scans.into_iter() {
@@ -386,7 +391,251 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
     // v0.6.1: build the __witness_row_reset helper function.
     build_row_reset(module, &brval_globals, &brcnt_globals)?;
 
+    // v0.7.4: instrument per-function-call outcome capture for every
+    // local function with at least one BrIf decision and an i32
+    // return type. Each return point (explicit + implicit) writes a
+    // kind=2 trace record carrying (function_index, return_value).
+    let target_funcs: std::collections::HashSet<u32> = entries
+        .iter()
+        .filter(|e| e.kind == BranchKind::BrIf)
+        .map(|e| e.function_index)
+        .collect();
+    instrument_function_outcomes(module, trace_outcome_helper, &target_funcs)?;
+
     Ok(entries)
+}
+
+/// Build `__witness_trace_outcome(function_idx: i32, value: i32) -> ()`.
+/// Same shape as `trace_record` but writes a kind=2 record.
+fn build_trace_outcome_helper(module: &mut Module, mem: MemoryId) -> Result<FunctionId> {
+    let i32_ty = ValType::I32;
+    let mut builder = FunctionBuilder::new(&mut module.types, &[i32_ty, i32_ty], &[]);
+    let function_idx_local = module.locals.add(i32_ty);
+    let value_local = module.locals.add(i32_ty);
+    {
+        let mut body = builder.func_body();
+        // Stack: [cursor]
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Load(walrus::ir::Load {
+            memory: mem,
+            kind: LoadKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        // packed = (kind=2 << 24) | (value << 16) | (function_idx & 0xFFFF)
+        body.instr(Instr::LocalGet(LocalGet {
+            local: value_local,
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(16),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Shl,
+        }));
+        body.instr(Instr::LocalGet(LocalGet {
+            local: function_idx_local,
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0xFFFF),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32And,
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Or,
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0x02_00_00_00),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Or,
+        }));
+        // Stack: [cursor, packed]
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        // Advance cursor
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(0),
+        }));
+        body.instr(Instr::Load(walrus::ir::Load {
+            memory: mem,
+            kind: LoadKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+        body.instr(Instr::Const(Const {
+            value: Value::I32(i32::try_from(TRACE_RECORD_BYTES).unwrap_or(4)),
+        }));
+        body.instr(Instr::Binop(Binop {
+            op: BinaryOp::I32Add,
+        }));
+        body.instr(Instr::Store(Store {
+            memory: mem,
+            kind: StoreKind::I32 { atomic: false },
+            arg: MemArg {
+                align: 4,
+                offset: 0,
+            },
+        }));
+    }
+    let func_id = builder.finish(
+        vec![function_idx_local, value_local],
+        &mut module.funcs,
+    );
+    Ok(func_id)
+}
+
+/// v0.7.4: walk every local function whose `function_index` is in
+/// `targets` and that has a single i32 return type. For each
+/// `Return` instruction, splice in `local.tee tmp; const f_idx;
+/// local.get tmp; call helper; local.get tmp` immediately before
+/// the return. For the implicit fall-through return, append the
+/// same pattern (minus the explicit `return`) at the end of the
+/// entry block — the value remains on the stack for Wasm's
+/// implicit return semantics.
+fn instrument_function_outcomes(
+    module: &mut Module,
+    helper: FunctionId,
+    targets: &std::collections::HashSet<u32>,
+) -> Result<()> {
+    use walrus::ir::Call;
+    let local_funcs: Vec<(u32, FunctionId)> = module
+        .funcs
+        .iter_local()
+        .enumerate()
+        .map(|(i, (fid, _))| (u32::try_from(i).unwrap_or(u32::MAX), fid))
+        .collect();
+    for (fn_idx, fid) in local_funcs {
+        if !targets.contains(&fn_idx) {
+            continue;
+        }
+        // Check return signature: single i32.
+        let ty_id = module.funcs.get(fid).ty();
+        let ty = module.types.get(ty_id);
+        if ty.results() != [ValType::I32] {
+            continue;
+        }
+        let tmp = module.locals.add(ValType::I32);
+        // SAFETY-REVIEW: only Local kinds have a body to walk.
+        #[allow(clippy::wildcard_enum_match_arm)]
+        let lf = match &mut module.funcs.get_mut(fid).kind {
+            walrus::FunctionKind::Local(lf) => lf,
+            _ => continue,
+        };
+
+        // Collect (seq_id, position) of every `Return` and the
+        // entry-block end position for the implicit return.
+        let entry = lf.entry_block();
+        let mut all_seqs: Vec<InstrSeqId> = Vec::new();
+        collect_outcome_seq_ids(lf, entry, &mut all_seqs);
+
+        let fn_idx_i32 = i32::try_from(fn_idx).unwrap_or(i32::MAX);
+        // Capture pattern for explicit Return (insert BEFORE the return):
+        //   local.tee tmp
+        //   i32.const f_idx
+        //   local.get tmp
+        //   call helper
+        //   local.get tmp
+        let make_capture_before_return = || -> [Instr; 5] {
+            [
+                Instr::LocalTee(LocalTee { local: tmp }),
+                Instr::Const(Const {
+                    value: Value::I32(fn_idx_i32),
+                }),
+                Instr::LocalGet(LocalGet { local: tmp }),
+                Instr::Call(Call { func: helper }),
+                Instr::LocalGet(LocalGet { local: tmp }),
+            ]
+        };
+
+        // First pass: process explicit Returns (insert in reverse so
+        // earlier indices stay valid).
+        for seq_id in &all_seqs {
+            let return_positions: Vec<usize> = lf
+                .block(*seq_id)
+                .instrs
+                .iter()
+                .enumerate()
+                .filter_map(|(i, (instr, _))| {
+                    matches!(instr, Instr::Return(_)).then_some(i)
+                })
+                .collect();
+            for pos in return_positions.into_iter().rev() {
+                let capture = make_capture_before_return();
+                let instrs = &mut lf.block_mut(*seq_id).instrs;
+                let mut at = pos;
+                for ins in capture {
+                    instrs.insert(at, (ins, Default::default()));
+                    at = at.saturating_add(1);
+                }
+            }
+        }
+
+        // Second pass: implicit return at end of entry block. Append
+        // `local.tee tmp; const f_idx; local.get tmp; call helper`
+        // (NO trailing local.get tmp — the tee already left the value
+        // on the stack for the implicit return).
+        let entry_instrs = &mut lf.block_mut(entry).instrs;
+        entry_instrs.push((
+            Instr::LocalTee(LocalTee { local: tmp }),
+            Default::default(),
+        ));
+        entry_instrs.push((
+            Instr::Const(Const {
+                value: Value::I32(fn_idx_i32),
+            }),
+            Default::default(),
+        ));
+        entry_instrs.push((
+            Instr::LocalGet(LocalGet { local: tmp }),
+            Default::default(),
+        ));
+        entry_instrs.push((
+            Instr::Call(Call { func: helper }),
+            Default::default(),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_outcome_seq_ids(
+    func: &walrus::LocalFunction,
+    seq_id: InstrSeqId,
+    out: &mut Vec<InstrSeqId>,
+) {
+    out.push(seq_id);
+    let seq = func.block(seq_id);
+    for (instr, _) in &seq.instrs {
+        // SAFETY-REVIEW: only nested-seq instructions recurse.
+        #[allow(clippy::wildcard_enum_match_arm)]
+        match instr {
+            Instr::Block(b) => collect_outcome_seq_ids(func, b.seq, out),
+            Instr::Loop(l) => collect_outcome_seq_ids(func, l.seq, out),
+            Instr::IfElse(IfElse {
+                consequent,
+                alternative,
+            }) => {
+                collect_outcome_seq_ids(func, *consequent, out);
+                collect_outcome_seq_ids(func, *alternative, out);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Build the `__witness_trace_record(branch_id: i32, value: i32) -> ()`

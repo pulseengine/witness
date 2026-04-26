@@ -7,6 +7,101 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-04-26
+
+### What v0.7.4 closes (the architecture)
+
+v0.7.3 made per-iteration condition vectors visible but reused the
+top-level row's function-return as the outcome for every decision.
+For decisions in *separately-compiled* called functions, that's
+wrong — those functions have their own return values. v0.7.4
+adds per-function-call outcome capture: each instrumented function
+emits a `kind=2` trace record at every return point carrying
+`(function_index, return_value)`.
+
+### Added — `__witness_trace_outcome` helper + return-point instrumentation
+
+A new internal helper function `__witness_trace_outcome(function_idx,
+value)` writes a 4-byte record with `kind=2` to the trace memory.
+
+For each local function f satisfying both:
+1. f contains at least one `BrIf` decision in its body.
+2. f's signature has exactly one i32 result.
+
+The instrumenter walks f's body and:
+- Replaces each `Return` instruction with `local.tee tmp; const
+  f_idx; local.get tmp; call helper; local.get tmp; return` — captures
+  the return value, records it, restores it for the actual return.
+- Appends `local.tee tmp; const f_idx; local.get tmp; call helper`
+  to the end of the entry block — for the implicit fall-through
+  return. The tee leaves the value on the stack as Wasm's implicit
+  return semantics expect.
+
+### Updated — runner parser handles `kind=2` records
+
+`parse_trace_records` now treats `kind=2` records distinctly: when
+one arrives with function_index F, every in-flight iteration of
+every decision belonging to F is finalised with the outcome value
+from the record. Decisions whose function never wrote a kind=2
+record (because the function had a non-i32 return type, or
+trapped, or never reached its return) fall back to the row-level
+function-return outcome.
+
+The runner builds two lookups: `branch_to_decision` (for kind=0
+records) and `function_to_decisions` (for kind=2 records).
+
+### Result on httparse — same numbers, different reason
+
+| Version | full MC/DC | proved | gap | dead | trace bytes |
+|---|---:|---:|---:|---:|---:|
+| v0.7.3 (per-row outcomes) | 1/70 | 12 | 52 | 122 | 6328 |
+| **v0.7.4 (per-call outcomes)** | **1/70** | **12** | 52 | 122 | **6380** |
+
+The score is unchanged because **rustc inlines aggressively**: most
+"interesting" memchr / iter / SWAR decisions are inlined into
+`parse_request`, so the wasm-level `function_index` for those
+inlined br_ifs is parse_request's index even though the manifest
+records `source_file: "memchr.rs"`. Per-wasm-function outcome
+capture for the inlined case is the same as the row-level outcome.
+
+The 52 extra trace bytes (= 13 outcome records ÷ ~15 rows ≈ 1
+outcome per row) is exactly parse_request's outcome being captured
+on every call.
+
+### Why ship anyway
+
+v0.7.4 is structurally correct — for separately-compiled functions
+(common in less-optimised builds, or in CI runs with `opt-level = 0`,
+or when `#[inline(never)]` is applied to the predicates in the call
+graph), per-call outcomes are now captured. The architecture lays
+the foundation for v0.8's per-DWARF-inlined-context outcome
+tracking, which is the proper fix for aggressively-inlined code
+like httparse. The work doesn't compose into something later;
+it's the layer below.
+
+### Notes for v0.7.5 / v0.8
+
+- **Per-DWARF-inlined-context outcome tracking** is the next track.
+  `function_index` in the manifest is the wasm-level function;
+  v0.8 needs to also track the DWARF inlined-subroutine chain so
+  decisions inlined from memchr into parse_request get attributed
+  back to memchr's logical "outcome" (which doesn't exist as a
+  real return value because there is no real call — but can be
+  derived from the chain's terminating br_if direction).
+- **Multi-result function support**. Currently only single-i32-
+  result functions get outcome instrumentation. Rust's
+  `Option<usize>` and similar lower to multi-result on
+  wasm32-wasip2 sometimes; v0.7.5 could extend the filter.
+
+### Implements / Verifies
+
+- Implements: REQ-034 (architecture for per-call outcomes — the
+  v0.6 trace-buffer plan now has all four record kinds wired:
+  conditions, row-markers, and outcomes).
+- Verifies: leap_year unchanged at 1/1 + 2 proved; httparse
+  unchanged at 1/70 + 12 proved (with 52 extra trace bytes
+  documenting the captured outcomes).
+
 ## [0.7.3] — 2026-04-26
 
 ### What v0.7.3 closes (read side)

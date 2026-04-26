@@ -114,6 +114,22 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
             branch_to_decision.insert(bid, (d.id, cond_idx_u32));
         }
     }
+    // v0.7.4: build function_index → list of decision_ids in that
+    // function. When a kind=2 trace record arrives with a function
+    // index, all in-flight iterations of decisions in that function
+    // are finalised with the captured return value as the outcome.
+    let mut function_to_decisions: HashMap<u32, Vec<u32>> = HashMap::new();
+    for d in &manifest.decisions {
+        // Look up the function via the first condition's branch entry.
+        if let Some(&first_bid) = d.conditions.first()
+            && let Some(branch) = manifest.branches.iter().find(|b| b.id == first_bid)
+        {
+            function_to_decisions
+                .entry(branch.function_index)
+                .or_default()
+                .push(d.id);
+        }
+    }
 
     for name in &options.invoke {
         if let Some(reset) = row_reset {
@@ -152,8 +168,11 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         // v0.7.2: read the trace memory header to learn how many record
         // bytes were written this row. v0.7.3 walks the records and
         // emits one DecisionRow per iteration when trace data is
-        // present; falls back to per-row-globals when not.
-        let mut trace_iterations: BTreeMap<u32, Vec<BTreeMap<u32, bool>>> = BTreeMap::new();
+        // present; falls back to per-row-globals when not. v0.7.4
+        // augments the per-iteration entries with per-function-call
+        // outcomes from kind=2 records.
+        type IterEntry = (BTreeMap<u32, bool>, Option<bool>);
+        let mut trace_iterations: BTreeMap<u32, Vec<IterEntry>> = BTreeMap::new();
         if let Some(mem) = trace_memory {
             let data = mem.data(&mut store);
             // SAFETY-REVIEW: the length check guards the indexes; the
@@ -169,24 +188,32 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                     trace_overflow_seen = true;
                 }
                 if bytes_this_row > 0 {
-                    trace_iterations = parse_trace_records(data, cursor, &branch_to_decision);
+                    trace_iterations = parse_trace_records(
+                        data,
+                        cursor,
+                        &branch_to_decision,
+                        &function_to_decisions,
+                    );
                 }
             }
         }
 
         if !trace_iterations.is_empty() {
-            // v0.7.3 — use per-iteration trace data. Each iteration
-            // becomes its own DecisionRow with the row's function-
-            // return outcome.
+            // v0.7.3 / v0.7.4 — use per-iteration trace data. Each
+            // iteration becomes its own DecisionRow. The outcome is
+            // the per-call function-return value captured by v0.7.4
+            // kind=2 trace records when available; otherwise falls
+            // back to the row-level function-return value.
             for (dec_id, iters) in trace_iterations {
-                for evaluated in iters {
+                for (evaluated, iter_outcome) in iters {
+                    let row_outcome = iter_outcome.or(outcome);
                     rows_per_decision
                         .entry(dec_id)
                         .or_default()
                         .push(DecisionRow {
                             row_id: next_row_id,
                             evaluated,
-                            outcome,
+                            outcome: row_outcome,
                         });
                     next_row_id = next_row_id.saturating_add(1);
                 }
@@ -255,24 +282,31 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
 }
 
 /// v0.7.3 — parse the trace memory's records into per-iteration
-/// condition-vector maps grouped by decision_id.
+/// condition-vector maps grouped by decision_id, with per-function-
+/// call outcomes attached when a `kind=2` record names the function
+/// the decision belongs to.
 ///
-/// Walk records in order. For each condition record (kind=0), look
-/// up branch_id in `branch_to_decision`. Append the (cond_idx, value)
-/// pair to the decision's "current iteration" map. When a duplicate
-/// cond_idx appears (= the same condition fires again, meaning the
-/// loop iterated), finalize the current iteration and start fresh.
-///
-/// Records other than `kind=0` (row-marker, decision-outcome) are
-/// reserved for future use and skipped here.
+/// Walk records in order:
+/// - `kind=0` (condition): append `(cond_idx, value)` to the
+///   decision's current iteration; duplicate cond_idx finalises the
+///   iteration with no outcome (yet).
+/// - `kind=2` (function outcome) v0.7.4: the record's `branch_id`
+///   slot carries a `function_index`; finalise every in-flight
+///   iteration of every decision in that function with the outcome
+///   value.
+type IterationEntry = (BTreeMap<u32, bool>, Option<bool>);
+type IterationsByDecision = BTreeMap<u32, Vec<IterationEntry>>;
+
+#[allow(clippy::type_complexity)]
 fn parse_trace_records(
     data: &[u8],
     cursor: u32,
     branch_to_decision: &HashMap<u32, (u32, u32)>,
-) -> BTreeMap<u32, Vec<BTreeMap<u32, bool>>> {
+    function_to_decisions: &HashMap<u32, Vec<u32>>,
+) -> IterationsByDecision {
     use witness_core::instrument::{TRACE_HEADER_BYTES, TRACE_RECORD_BYTES};
     let mut current: BTreeMap<u32, BTreeMap<u32, bool>> = BTreeMap::new();
-    let mut completed: BTreeMap<u32, Vec<BTreeMap<u32, bool>>> = BTreeMap::new();
+    let mut completed: IterationsByDecision = BTreeMap::new();
 
     let header_usize = usize::try_from(TRACE_HEADER_BYTES).unwrap_or(usize::MAX);
     let record_usize = usize::try_from(TRACE_RECORD_BYTES).unwrap_or(4);
@@ -295,29 +329,49 @@ fn parse_trace_records(
         };
         offset = offset.saturating_add(record_usize);
 
-        if kind != 0 {
-            // row-marker / outcome / reserved — v0.7.3 first pass skips.
-            continue;
+        match kind {
+            0 => {
+                // Condition record.
+                let Some(&(dec_id, cond_idx)) = branch_to_decision.get(&branch_id) else {
+                    continue;
+                };
+                let entry = current.entry(dec_id).or_default();
+                if entry.contains_key(&cond_idx) {
+                    let finished = std::mem::take(entry);
+                    completed.entry(dec_id).or_default().push((finished, None));
+                }
+                current.entry(dec_id).or_default().insert(cond_idx, value);
+            }
+            2 => {
+                // v0.7.4 outcome: branch_id slot is the function index;
+                // value is the function's return value. Finalise every
+                // in-flight iteration of every decision in that function.
+                let function_idx = branch_id;
+                let Some(decision_ids) = function_to_decisions.get(&function_idx) else {
+                    continue;
+                };
+                for &dec_id in decision_ids {
+                    if let Some(iter_map) = current.remove(&dec_id)
+                        && !iter_map.is_empty()
+                    {
+                        completed
+                            .entry(dec_id)
+                            .or_default()
+                            .push((iter_map, Some(value)));
+                    }
+                }
+            }
+            _ => {
+                // row-marker / reserved — skip.
+            }
         }
-
-        let Some(&(dec_id, cond_idx)) = branch_to_decision.get(&branch_id) else {
-            continue;
-        };
-
-        let entry = current.entry(dec_id).or_default();
-        if entry.contains_key(&cond_idx) {
-            // Duplicate condition_index for this decision → end of iteration.
-            let finished = std::mem::take(entry);
-            completed.entry(dec_id).or_default().push(finished);
-        }
-        // Re-fetch entry (it was just emptied if duplicate fired).
-        current.entry(dec_id).or_default().insert(cond_idx, value);
     }
 
-    // Flush trailing in-progress iterations.
+    // Flush trailing in-progress iterations (no outcome — function
+    // never returned, e.g. trapped or never reached its return).
     for (dec_id, iter_map) in current {
         if !iter_map.is_empty() {
-            completed.entry(dec_id).or_default().push(iter_map);
+            completed.entry(dec_id).or_default().push((iter_map, None));
         }
     }
 
