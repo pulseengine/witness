@@ -7,6 +7,60 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-04-26
+
+### What v0.8.2 adds
+
+- **`suite-index.html` in the compliance bundle.** The release pipeline
+  now writes a self-contained HTML scoreboard at
+  `verdict-evidence/suite-index.html`. Open it locally — no server
+  required — to get:
+  - **Headline cards** up front: conditions proved, full MC/DC count,
+    decisions total, br_ifs instrumented, verdict count.
+  - **Verify command** front-and-center, copy-paste ready:
+    `witness verify --envelope httparse/signed.dsse.json --public-key
+    verifying-key.pub`.
+  - **Scoreboard** matching `SUMMARY.txt` (branches / decisions / full
+    MC/DC / proved / gap / dead) with a TOTAL row, plus per-row links
+    to `report.txt`, `report.json`, `lcov.info`.
+  - **Per-verdict drill-down**: each row expands into a `<details>`
+    section that inlines the first ~6 KB of `report.txt` — truth
+    tables and gap-closure citations visible without leaving the page.
+  - **Light/dark mode** via `color-scheme: light dark` + a
+    `prefers-color-scheme: dark` media query.
+- **Wired into the compliance action.** The `compliance/action.yml`
+  step `Generate suite index HTML` runs `suite-index.py` after
+  `run-suite.sh` lands the verdict evidence and the V-model matrix is
+  generated. Best-effort (`|| true`) — a malformed report will not
+  fail a release.
+
+### Why a static HTML index
+
+This release is about **review experience**. The compliance bundle
+already had everything a reviewer needed (`SUMMARY.txt`,
+`traceability-matrix.html`, per-verdict `report.txt` and signed
+envelopes), but a reviewer arriving cold would have to know to open
+`SUMMARY.txt` first, scroll to the TOTAL row, then dig into
+individual subdirectories to read truth tables. `suite-index.html`
+collapses that flow to one click: open `verdict-evidence/index.html`,
+see the headline numbers, expand the verdicts you want to inspect.
+
+The page is pure HTML + inline CSS — no JS, no external deps. It
+works offline, on any browser, and renders identically whether
+served, opened locally, or extracted from the tarball.
+
+### Implements / Verifies
+
+- New file: `.github/actions/compliance/suite-index.py` (Python 3
+  stdlib only — no PyYAML or other deps).
+- New step in `.github/actions/compliance/action.yml`: `Generate suite
+  index HTML (v0.8.2+)`, gated on `verdict-evidence/` existing.
+- README listing in the bundle's `README.txt` updated to mention
+  `suite-index.html`.
+
+No instrumentation, runtime, reporter, or schema changes; this is a
+pure presentation-layer release on top of v0.8.0's substance.
+
 ## [0.8.1] — 2026-04-26
 
 ### What v0.8.1 adds

@@ -99,6 +99,19 @@ runs:
           echo "warn: verdicts/run-suite.sh missing; skipping verdict bundle" >&2
         fi
 
+    - name: Generate suite index HTML (v0.8.2+)
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+        if [ -f .github/actions/compliance/suite-index.py ] \
+           && [ -d "$OUTPUT_DIR/verdict-evidence" ]; then
+          python3 .github/actions/compliance/suite-index.py \
+            "$OUTPUT_DIR/verdict-evidence" \
+            "$OUTPUT_DIR/verdict-evidence/suite-index.html" || true
+        fi
+
     - name: Generate V-model traceability matrix (v0.6.5+)
       shell: bash
       env:
@@ -163,6 +176,7 @@ runs:
           predicates/            - in-toto Statements (unsigned, ready for sigil)
           manifests/             - branch manifests (.witness.json)
           verdict-evidence/      - per-verdict end-to-end evidence (v0.6.3+):
+            suite-index.html             scoreboard + drill-down (v0.8.2+)
             <name>/source.wasm           pre-instrumentation Wasm
             <name>/instrumented.wasm     post-instrumentation Wasm
             <name>/manifest.json         branches + reconstructed decisions
