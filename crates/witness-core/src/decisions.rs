@@ -211,16 +211,39 @@ fn build_dwarf<'a>(s: &DwarfSections<'a>) -> gimli::Dwarf<EndianSlice<'a, Little
     }
 }
 
-/// Walk a manifest's branches and group adjacent `BrIf` entries that
-/// share a `(function_index, file, line)` key into one `Decision`. Other
-/// kinds (`IfThen` / `IfElse` / `BrTableTarget` / `BrTableDefault`) are
-/// not grouped — they have natural per-arm semantics that don't compose
-/// into MC/DC decisions the same way `br_if` chains do.
-fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Decision> {
-    let mut out: Vec<Decision> = Vec::new();
-    let mut next_decision_id: u32 = 0;
+/// Maximum source-line span allowed within a single decision cluster.
+///
+/// v0.6.1 shipped same-line-only grouping which worked for predicates
+/// rustc lowers onto a single line (e.g. `(a && b) || c` returned as a
+/// one-line expression — leap_year). It missed multi-line short-circuit
+/// chains where each `&&` operand is on its own source line — a common
+/// shape for safety-critical guards (`state_guard`, `safety_envelope`).
+///
+/// v0.6.2 relaxes the criterion: br_ifs in the same `(function, file)`
+/// whose source lines fall within `MAX_DECISION_LINE_SPAN` of each
+/// other cluster into one Decision. The threshold is intentionally
+/// permissive — the alternative (require strict adjacency) would miss
+/// blank lines and inline comments inside a chain. False-grouping of
+/// genuinely separate decisions is bounded because the cluster
+/// terminates as soon as a br_if appears outside the line window.
+pub const MAX_DECISION_LINE_SPAN: u32 = 10;
 
-    let mut groups: BTreeMap<(u32, String, u32), Vec<&BranchEntry>> = BTreeMap::new();
+/// Walk a manifest's branches and group `BrIf` entries that share a
+/// `(function_index, file)` and have source lines within
+/// `MAX_DECISION_LINE_SPAN` into a `Decision`. Other kinds (`IfThen` /
+/// `IfElse` / `BrTableTarget` / `BrTableDefault`) are not grouped —
+/// they have natural per-arm semantics that don't compose into MC/DC
+/// decisions the same way `br_if` chains do.
+///
+/// Clustering walks branches in branch-id order (= source-walk
+/// emission order from `walk_collect`), which preserves the
+/// short-circuit chain's natural sequence. A new cluster starts when
+/// the next br_if's line falls outside the current cluster's span.
+fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Decision> {
+    // Step 1: resolve each br_if's (function, file, line). Drop entries
+    // missing byte_offset (synthetic) or with no DWARF mapping.
+    type Resolved<'a> = (u32, String, u32, &'a BranchEntry);
+    let mut resolved: Vec<Resolved<'_>> = Vec::new();
     for entry in branches {
         if entry.kind != BranchKind::BrIf {
             continue;
@@ -231,28 +254,85 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
         let Some(loc) = lookup_line(line_map, u64::from(byte_offset)) else {
             continue;
         };
-        groups
-            .entry((entry.function_index, loc.file.clone(), loc.line))
-            .or_default()
-            .push(entry);
+        resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
     }
 
-    for ((_func, file, line), members) in groups {
-        if members.len() < 2 {
-            // Single-condition decisions are not worth materialising —
-            // strict-per-br_if already covers them, and emitting a
-            // one-element Decision adds no information.
-            continue;
-        }
-        let conditions: Vec<u32> = members.iter().map(|e| e.id).collect();
-        out.push(Decision {
-            id: next_decision_id,
-            conditions,
-            source_file: if file.is_empty() { None } else { Some(file) },
-            source_line: Some(line),
-        });
-        next_decision_id = next_decision_id.saturating_add(1);
+    // Step 2: bucket by (function, file). Within each bucket, br_ifs
+    // are already in branch-id order because `branches` is, and we
+    // preserved that order in `resolved`.
+    let mut by_func_file: BTreeMap<(u32, String), Vec<(u32, &BranchEntry)>> = BTreeMap::new();
+    for (func, file, line, entry) in resolved {
+        by_func_file
+            .entry((func, file))
+            .or_default()
+            .push((line, entry));
     }
+
+    let mut out: Vec<Decision> = Vec::new();
+    let mut next_decision_id: u32 = 0;
+
+    for ((_func, file), entries) in by_func_file {
+        let mut cluster: Vec<&BranchEntry> = Vec::new();
+        let mut cluster_min: u32 = u32::MAX;
+        let mut cluster_max: u32 = 0;
+
+        let flush = |cluster: &mut Vec<&BranchEntry>,
+                     cluster_min: u32,
+                     next_decision_id: &mut u32,
+                     out: &mut Vec<Decision>,
+                     file: &str| {
+            if cluster.len() >= 2 {
+                let conditions: Vec<u32> = cluster.iter().map(|e| e.id).collect();
+                out.push(Decision {
+                    id: *next_decision_id,
+                    conditions,
+                    source_file: if file.is_empty() {
+                        None
+                    } else {
+                        Some(file.to_string())
+                    },
+                    source_line: Some(cluster_min),
+                });
+                *next_decision_id = next_decision_id.saturating_add(1);
+            }
+            cluster.clear();
+        };
+
+        for (line, entry) in entries {
+            if cluster.is_empty() {
+                cluster.push(entry);
+                cluster_min = line;
+                cluster_max = line;
+                continue;
+            }
+            let candidate_min = cluster_min.min(line);
+            let candidate_max = cluster_max.max(line);
+            if candidate_max.saturating_sub(candidate_min) <= MAX_DECISION_LINE_SPAN {
+                cluster.push(entry);
+                cluster_min = candidate_min;
+                cluster_max = candidate_max;
+            } else {
+                flush(
+                    &mut cluster,
+                    cluster_min,
+                    &mut next_decision_id,
+                    &mut out,
+                    &file,
+                );
+                cluster.push(entry);
+                cluster_min = line;
+                cluster_max = line;
+            }
+        }
+        flush(
+            &mut cluster,
+            cluster_min,
+            &mut next_decision_id,
+            &mut out,
+            &file,
+        );
+    }
+
     out
 }
 
@@ -391,6 +471,108 @@ mod tests {
             decisions.is_empty(),
             "two functions sharing a (file, line) is a coincidence, not a decision"
         );
+    }
+
+    /// v0.6.2 — `state_guard`-style decision: 4-cond `&&` chain whose
+    /// operands rustc attributes to consecutive source lines. The
+    /// adjacent-line clustering must group all four into one Decision.
+    #[test]
+    fn group_into_decisions_clusters_adjacent_lines() {
+        let mut line_map = LineMap::new();
+        line_map.insert(
+            10,
+            LineLocation {
+                file: "lib.rs".to_string(),
+                line: 23,
+            },
+        );
+        line_map.insert(
+            20,
+            LineLocation {
+                file: "lib.rs".to_string(),
+                line: 24,
+            },
+        );
+        line_map.insert(
+            30,
+            LineLocation {
+                file: "lib.rs".to_string(),
+                line: 25,
+            },
+        );
+        line_map.insert(
+            40,
+            LineLocation {
+                file: "lib.rs".to_string(),
+                line: 26,
+            },
+        );
+        let entries = vec![
+            entry_with_offset(0, 10),
+            entry_with_offset(1, 20),
+            entry_with_offset(2, 30),
+            entry_with_offset(3, 40),
+        ];
+        let decisions = group_into_decisions(&entries, &line_map);
+        assert_eq!(
+            decisions.len(),
+            1,
+            "four br_ifs on lines 23-26 → one decision"
+        );
+        assert_eq!(decisions[0].conditions, vec![0, 1, 2, 3]);
+        assert_eq!(decisions[0].source_line, Some(23));
+    }
+
+    /// v0.6.2 — gap larger than `MAX_DECISION_LINE_SPAN` separates
+    /// clusters. Two `&&` chains in the same function (e.g. two
+    /// independent guard expressions) must be reported as two
+    /// Decisions, not merged.
+    #[test]
+    fn group_into_decisions_splits_on_large_gap() {
+        let mut line_map = LineMap::new();
+        line_map.insert(
+            10,
+            LineLocation {
+                file: "lib.rs".to_string(),
+                line: 10,
+            },
+        );
+        line_map.insert(
+            20,
+            LineLocation {
+                file: "lib.rs".to_string(),
+                line: 11,
+            },
+        );
+        // 50-line gap between two clusters.
+        line_map.insert(
+            30,
+            LineLocation {
+                file: "lib.rs".to_string(),
+                line: 60,
+            },
+        );
+        line_map.insert(
+            40,
+            LineLocation {
+                file: "lib.rs".to_string(),
+                line: 61,
+            },
+        );
+        let entries = vec![
+            entry_with_offset(0, 10),
+            entry_with_offset(1, 20),
+            entry_with_offset(2, 30),
+            entry_with_offset(3, 40),
+        ];
+        let decisions = group_into_decisions(&entries, &line_map);
+        assert_eq!(
+            decisions.len(),
+            2,
+            "two clusters separated by a 49-line gap"
+        );
+        assert_eq!(decisions[0].conditions, vec![0, 1]);
+        assert_eq!(decisions[1].conditions, vec![2, 3]);
     }
 
     #[test]

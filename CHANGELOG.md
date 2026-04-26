@@ -7,6 +7,105 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-04-26
+
+### What v0.6.2 closes
+
+v0.6.1 made the per-row instrumentation work end-to-end on the
+`leap_year` verdict, where rustc happens to attribute all surviving
+`br_if`s to the same source line. Verdicts whose conditions span
+multiple source lines (`state_guard`, `triangle`, `safety_envelope`,
+`parser_dispatch`) had surviving `br_if`s in their manifests but
+**zero reconstructed decisions** — `decisions::group_into_decisions`
+required strict same-line equality for the grouping criterion, which
+short-circuit chains formatted across multiple lines do not satisfy.
+
+v0.6.2 relaxes the criterion: br_ifs in the same `(function, file)`
+whose source lines fall within `MAX_DECISION_LINE_SPAN = 10` cluster
+into one Decision. Walks branches in branch-id order (= source-walk
+emission order), starts a new cluster when the next br_if is outside
+the line window. False-grouping is bounded — adjacent decisions
+separated by a > 10-line gap stay separate.
+
+### Result
+
+| Verdict | branches | decisions | full MC/DC | notes |
+|---|---:|---:|---|---|
+| `leap_year` | 2 | 1 | 1 | unchanged from v0.6.1 |
+| `state_guard` | 3 | 1 | 1 | **new in v0.6.2** |
+| `triangle` | 2 | 1 | 1 | **new in v0.6.2** |
+| `safety_envelope` | 4 | 1 | 1 (3 conds) | **new in v0.6.2** |
+| `parser_dispatch` | 33 | **7** | 1 | **new in v0.6.2** — finds decisions in `memchr` library calls automatically |
+| `range_overlap` | 0 | 0 | n/a | optimised to `i32.and` (bitwise), nothing to measure |
+| `mixed_or_and` | 0 | 0 | n/a | optimised to bitwise; nothing to measure |
+
+### parser_dispatch is the standout
+
+The `parser_dispatch` verdict's `s.contains(b'@')` call lowered into
+the `memchr` library's byte-search loops, which themselves contain
+compound boolean conditions. `decisions::reconstruct_decisions` picks
+them up automatically:
+
+```
+$ witness report --input parser_dispatch.run.json --format mcdc
+decisions: 1/7 full MC/DC; conditions: 7 proved, 15 gap, 5 dead
+
+decision #0 lib.rs:37: Partial
+  c0 (branch 3): proved via rows 1+4 (masking)
+  c1 (branch 10): DEAD — never evaluated in any row
+  c2 (branch 11): DEAD — never evaluated in any row
+  c3 (branch 17): GAP — try a row {c0=T, c3=T} (outcome must differ from row 4)
+decision #1 lib.rs:58: FullMcdc
+  c0 (branch 18): proved via rows 2+4 (masking)
+  c1 (branch 19): proved via rows 3+5 (unique-cause)
+decision #2 memchr.rs:40: Partial
+  c0 (branch 0): proved via rows 0+4 (masking)
+  c1 (branch 1): proved via rows 1+5 (masking)
+  c2 (branch 2): GAP — try a row {c0=T, c1=T, c2=F} (outcome must differ from row 4)
+...
+```
+
+This is "witness on real code, not toys" — the predicate is six
+test rows of 4-condition URL-authority validation, but the underlying
+implementation drags in the standard library's compound predicates,
+and witness reports MC/DC on all of them with cited row pairs and
+closure recommendations.
+
+### Implementation
+
+- `decisions::MAX_DECISION_LINE_SPAN: u32 = 10` — public constant so
+  consumers can document the threshold in V-model briefs.
+- `group_into_decisions` rewritten as a two-pass algorithm: resolve
+  br_if entries to `(function, file, line)`, then bucket by
+  `(function, file)` and cluster within each bucket using the
+  adjacent-line span.
+- Two new unit tests: `group_into_decisions_clusters_adjacent_lines`
+  (4 br_ifs on lines 23-26 → one Decision) and
+  `group_into_decisions_splits_on_large_gap` (two clusters separated
+  by a 49-line gap stay separate).
+
+### Implements / Verifies
+
+- Implements: REQ-027, REQ-028, REQ-029 — extends the v0.6.0 schema
+  + reporter to cover the broader range of compound-decision
+  lowerings rustc emits.
+- Verifies: 5 verdicts (leap_year, state_guard, triangle,
+  safety_envelope, parser_dispatch) produce non-empty MC/DC reports
+  with cited row pairs.
+
+### Notes for v0.6.3 / v0.7
+
+- `range_overlap` and `mixed_or_and` produce zero branches because
+  rustc fully optimises their pure-boolean conditions to bitwise
+  arithmetic. v0.7's "compiler hint" work could ask rustc to emit
+  branches for these patterns when an opt-in attribute is present —
+  per the v0.2 paper's "witness-and-checker" stance. Out of scope
+  for v0.6.x.
+- `parser_dispatch` shows 5 dead conditions across 6 test rows; the
+  verdict's `TRUTH-TABLE.md` should be revised to align expected
+  rows with what the post-rustc lowering actually exposes (rather
+  than the source-level decisions originally documented).
+
 ## [0.6.1] — 2026-04-26
 
 ### What v0.6.1 closes
