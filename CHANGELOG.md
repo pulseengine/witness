@@ -7,6 +7,86 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-04-26
+
+### What v0.7.3 closes (read side)
+
+v0.7.2 shipped the trace-buffer write side. v0.7.3 ships the
+runner-side parser that converts the 4-byte trace records into
+per-iteration `DecisionRow` entries. The MC/DC reporter then
+finds proving pairs across iterations that the per-row-globals
+collapse hid.
+
+### Added — `parse_trace_records` in the runner
+
+Reads the trace memory bytes after each row, walks records in
+order. For each condition record (kind=0):
+
+1. Looks up `branch_id` in `branch_to_decision` (built from
+   manifest `Decision::conditions`).
+2. Appends `(condition_index, value)` to the decision's "current
+   iteration" map.
+3. When a duplicate condition_index appears for the same
+   decision (= the loop iterated), finalises the current
+   iteration and starts fresh.
+4. Trailing in-progress iterations flushed at the end.
+
+The runner now generates one `DecisionRow` per iteration, each
+with a fresh `row_id`. Outcome is the function's return value
+(per-decision outcome capture is a separate v0.7.x track).
+
+When the trace memory is empty (e.g. a v0.6 fixture predating
+v0.7.2 instrumentation), the runner falls back to the per-row-
+globals path. So existing verdicts stay backward-compatible.
+
+### Result on httparse
+
+| Version | full MC/DC | proved | gap | dead |
+|---|---:|---:|---:|---:|
+| v0.7.0 (per-row globals) | 0/70 | 9 | 55 | 122 |
+| **v0.7.3 (trace parser)** | **1/70** | **12** | 52 | 122 |
+
+Modest but real. `mod.rs` gained a fully-proved decision; lib.rs and
+macros.rs each gained 1-2 proved conditions. The remaining gap is
+because outcomes are still uniform per row (function return value);
+per-decision outcome capture is the next track.
+
+### Implementation notes
+
+- Iteration boundary detection is conservative — "duplicate
+  condition_index" may incorrectly join two semantically distinct
+  iterations if the second iteration short-circuits at the same
+  condition that fired last. v0.7.x will switch to row-marker-based
+  boundaries (the `__witness_trace_row_marker` helper exists already
+  but isn't yet emitted between iterations).
+- Records other than `kind=0` (row-marker, decision-outcome) are
+  reserved and skipped by this pass. Becomes load-bearing in the
+  next iteration of the iteration-boundary detection.
+
+### Notes for v0.7.4+
+
+- **Per-decision outcome capture** is the largest remaining
+  unlock. Currently every decision's outcome is the row's
+  function-return value, which is correct only for the top-level
+  predicate decision. Sub-decisions (memchr's compound predicates,
+  iter.rs's bounds checks) have actual outcomes the trace buffer
+  doesn't yet record.
+- **Row-marker-based iteration boundaries** would be more accurate
+  than "duplicate condition_index". The instrumenter already exports
+  `__witness_trace_row_marker(u32)`; v0.7.4 wires the runner to call
+  it between rows, and the parser splits on those markers instead.
+- **Trace buffer overflow handling** at v0.9-scale workloads —
+  currently the writer sets `overflow_flag` and silently drops, the
+  reporter refuses MC/DC verdicts on overflow. v0.9 might add a
+  host-callback flush.
+
+### Implements / Verifies
+
+- Implements: REQ-034 (substance — trace-buffer primitive end-to-end).
+- Verifies: leap_year unchanged (1/1 full MC/DC, 2 proved); httparse
+  improved from 0/70 + 9 proved to 1/70 + 12 proved with no other
+  changes.
+
 ## [0.7.2] — 2026-04-26
 
 ### What v0.7.2 closes (write side)

@@ -102,8 +102,20 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     }
     let mut trace_bytes_total: u64 = 0;
     let mut trace_overflow_seen = false;
+    let mut next_row_id: u32 = 0;
 
-    for (row_index, name) in options.invoke.iter().enumerate() {
+    // v0.7.3: build branch_id → (decision_id, condition_index) lookup
+    // for the trace-record parser. One entry per condition of every
+    // reconstructed decision in the manifest.
+    let mut branch_to_decision: HashMap<u32, (u32, u32)> = HashMap::new();
+    for d in &manifest.decisions {
+        for (idx, &bid) in d.conditions.iter().enumerate() {
+            let cond_idx_u32 = u32::try_from(idx).unwrap_or(u32::MAX);
+            branch_to_decision.insert(bid, (d.id, cond_idx_u32));
+        }
+    }
+
+    for name in &options.invoke {
         if let Some(reset) = row_reset {
             reset
                 .call(&mut store, &[], &mut [])
@@ -138,9 +150,10 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         let (brvals, brcnts) = read_per_row_globals(&mut store, &instance)?;
 
         // v0.7.2: read the trace memory header to learn how many record
-        // bytes were written this row. The full per-iteration row
-        // parser lands in v0.7.3; v0.7.2 just exposes the watermark in
-        // RunRecord.trace_health so users can see writes are happening.
+        // bytes were written this row. v0.7.3 walks the records and
+        // emits one DecisionRow per iteration when trace data is
+        // present; falls back to per-row-globals when not.
+        let mut trace_iterations: BTreeMap<u32, Vec<BTreeMap<u32, bool>>> = BTreeMap::new();
         if let Some(mem) = trace_memory {
             let data = mem.data(&mut store);
             // SAFETY-REVIEW: the length check guards the indexes; the
@@ -155,28 +168,52 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                 if overflow != 0 {
                     trace_overflow_seen = true;
                 }
+                if bytes_this_row > 0 {
+                    trace_iterations = parse_trace_records(data, cursor, &branch_to_decision);
+                }
             }
         }
 
-        let row_id = u32::try_from(row_index).unwrap_or(u32::MAX);
-        for d in &manifest.decisions {
-            let mut evaluated: BTreeMap<u32, bool> = BTreeMap::new();
-            for (cond_idx, branch_id) in d.conditions.iter().enumerate() {
-                let cnt = brcnts.get(branch_id).copied().unwrap_or(0);
-                if cnt > 0 {
-                    let val = brvals.get(branch_id).copied().unwrap_or(0);
-                    let cond_idx_u32 = u32::try_from(cond_idx).unwrap_or(u32::MAX);
-                    evaluated.insert(cond_idx_u32, val != 0);
+        if !trace_iterations.is_empty() {
+            // v0.7.3 — use per-iteration trace data. Each iteration
+            // becomes its own DecisionRow with the row's function-
+            // return outcome.
+            for (dec_id, iters) in trace_iterations {
+                for evaluated in iters {
+                    rows_per_decision
+                        .entry(dec_id)
+                        .or_default()
+                        .push(DecisionRow {
+                            row_id: next_row_id,
+                            evaluated,
+                            outcome,
+                        });
+                    next_row_id = next_row_id.saturating_add(1);
                 }
             }
-            rows_per_decision
-                .entry(d.id)
-                .or_default()
-                .push(DecisionRow {
-                    row_id,
-                    evaluated,
-                    outcome,
-                });
+        } else {
+            // Fallback: v0.6.1 per-row-globals path.
+            let row_id = next_row_id;
+            next_row_id = next_row_id.saturating_add(1);
+            for d in &manifest.decisions {
+                let mut evaluated: BTreeMap<u32, bool> = BTreeMap::new();
+                for (cond_idx, branch_id) in d.conditions.iter().enumerate() {
+                    let cnt = brcnts.get(branch_id).copied().unwrap_or(0);
+                    if cnt > 0 {
+                        let val = brvals.get(branch_id).copied().unwrap_or(0);
+                        let cond_idx_u32 = u32::try_from(cond_idx).unwrap_or(u32::MAX);
+                        evaluated.insert(cond_idx_u32, val != 0);
+                    }
+                }
+                rows_per_decision
+                    .entry(d.id)
+                    .or_default()
+                    .push(DecisionRow {
+                        row_id,
+                        evaluated,
+                        outcome,
+                    });
+            }
         }
     }
 
@@ -215,6 +252,76 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
             .push(format!("__witness_trace_bytes={trace_bytes_total}"));
     }
     record.save(options.output)
+}
+
+/// v0.7.3 — parse the trace memory's records into per-iteration
+/// condition-vector maps grouped by decision_id.
+///
+/// Walk records in order. For each condition record (kind=0), look
+/// up branch_id in `branch_to_decision`. Append the (cond_idx, value)
+/// pair to the decision's "current iteration" map. When a duplicate
+/// cond_idx appears (= the same condition fires again, meaning the
+/// loop iterated), finalize the current iteration and start fresh.
+///
+/// Records other than `kind=0` (row-marker, decision-outcome) are
+/// reserved for future use and skipped here.
+fn parse_trace_records(
+    data: &[u8],
+    cursor: u32,
+    branch_to_decision: &HashMap<u32, (u32, u32)>,
+) -> BTreeMap<u32, Vec<BTreeMap<u32, bool>>> {
+    use witness_core::instrument::{TRACE_HEADER_BYTES, TRACE_RECORD_BYTES};
+    let mut current: BTreeMap<u32, BTreeMap<u32, bool>> = BTreeMap::new();
+    let mut completed: BTreeMap<u32, Vec<BTreeMap<u32, bool>>> = BTreeMap::new();
+
+    let header_usize = usize::try_from(TRACE_HEADER_BYTES).unwrap_or(usize::MAX);
+    let record_usize = usize::try_from(TRACE_RECORD_BYTES).unwrap_or(4);
+    let cursor_usize = usize::try_from(cursor).unwrap_or(usize::MAX);
+    let mut offset = header_usize;
+    let end = cursor_usize.min(data.len());
+
+    while offset.saturating_add(record_usize) <= end {
+        // SAFETY-REVIEW: bounded by `offset + record_usize <= end`.
+        // The 4 explicit indexes below cover bytes[0..4]; that range is
+        // exactly the slice we just took, so the indexes are in-bounds.
+        #[allow(clippy::indexing_slicing)]
+        let (branch_id, value, kind) = {
+            let bytes = &data[offset..offset.saturating_add(record_usize)];
+            (
+                u32::from(u16::from_le_bytes([bytes[0], bytes[1]])),
+                bytes[2] != 0,
+                bytes[3],
+            )
+        };
+        offset = offset.saturating_add(record_usize);
+
+        if kind != 0 {
+            // row-marker / outcome / reserved — v0.7.3 first pass skips.
+            continue;
+        }
+
+        let Some(&(dec_id, cond_idx)) = branch_to_decision.get(&branch_id) else {
+            continue;
+        };
+
+        let entry = current.entry(dec_id).or_default();
+        if entry.contains_key(&cond_idx) {
+            // Duplicate condition_index for this decision → end of iteration.
+            let finished = std::mem::take(entry);
+            completed.entry(dec_id).or_default().push(finished);
+        }
+        // Re-fetch entry (it was just emptied if duplicate fired).
+        current.entry(dec_id).or_default().insert(cond_idx, value);
+    }
+
+    // Flush trailing in-progress iterations.
+    for (dec_id, iter_map) in current {
+        if !iter_map.is_empty() {
+            completed.entry(dec_id).or_default().push(iter_map);
+        }
+    }
+
+    completed
 }
 
 /// Read the per-row `__witness_brval_<id>` and `__witness_brcnt_<id>`
