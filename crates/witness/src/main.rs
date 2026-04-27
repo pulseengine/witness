@@ -473,10 +473,17 @@ fn init_tracing(verbosity: u8) {
         2 => "debug",
         _ => "trace",
     };
+    // v0.9.4 — silence walrus's `name-section parse` warning by default.
+    // Walrus emits `WARN walrus::module: in name section: function index 0
+    // is out of bounds for local` for every well-formed cdylib produced
+    // by stable rustc, which makes good output look broken (tester
+    // review). At -v or higher we restore the default for diagnostics.
+    let walrus_filter = if verbosity >= 1 { "" } else { ",walrus=error" };
+    let default_directive = format!("{level}{walrus_filter}");
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level)),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_directive)),
         )
         .init();
 }

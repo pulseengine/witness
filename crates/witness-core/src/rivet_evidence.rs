@@ -20,7 +20,7 @@ use crate::run_record::{BranchHit, RunRecord};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Schema URL embedded at the top of every witness-rivet-evidence file.
 pub const SCHEMA: &str = "https://pulseengine.eu/witness-rivet-evidence/v1";
@@ -105,11 +105,12 @@ pub struct MapEntry {
 impl RequirementMap {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path).map_err(Error::Io)?;
-        serde_yaml::from_str(&text).map_err(|e| {
-            Error::Runtime(anyhow::anyhow!(
-                "failed to parse requirement map at {}: {e}",
-                path.display()
-            ))
+        // v0.9.4 — was Error::Runtime("wasm runtime error: ..."), which
+        // misled tester-reviewers into thinking a wasmtime trap had
+        // occurred. Now reports as a config/schema problem.
+        serde_yaml::from_str(&text).map_err(|e| Error::RequirementMap {
+            path: path.to_path_buf(),
+            source: anyhow::Error::new(e),
         })
     }
 
@@ -121,10 +122,16 @@ impl RequirementMap {
         for entry in &self.mappings {
             for &b in &entry.branches {
                 if let Some(existing) = out.insert(b, entry.artifact.clone()) {
-                    return Err(Error::Runtime(anyhow::anyhow!(
-                        "branch id {b} mapped to both `{existing}` and `{}`",
-                        entry.artifact
-                    )));
+                    // Schema-level conflict, not a runtime trap. Use a
+                    // synthesised PathBuf to flag the offending mapping
+                    // since we don't have the source path here.
+                    return Err(Error::RequirementMap {
+                        path: PathBuf::from("<requirement-map>"),
+                        source: anyhow::anyhow!(
+                            "branch id {b} mapped to both `{existing}` and `{}`",
+                            entry.artifact
+                        ),
+                    });
                 }
             }
         }

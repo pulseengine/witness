@@ -84,6 +84,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.9.4** | Tester-review Tier 0: ship witness-viz in releases, component preflight, harness protocol docs, error-tag fixes, walrus warning silenced |
 | **v0.9.3** | Fix `json_lite` Linux CI build (`unused_mut` under `-D warnings`) |
 | **v0.9.2** | Stacked coverage bars on dashboard + 12th verdict (base64_decode) + visual TOTAL row |
 | **v0.9.1** | Gap drill-down view (tutorial-style explanation + copy-paste test stub) + real HTMX 2.0.4 bundle |
@@ -190,7 +191,8 @@ witness run app.instrumented.wasm \
   --invoke run_row_0 --invoke run_row_1 --invoke run_row_2
 
 # Subprocess harness mode. The harness reads WITNESS_MODULE /
-# WITNESS_MANIFEST and writes a counter snapshot to WITNESS_OUTPUT.
+# WITNESS_MANIFEST and writes a `witness-harness-v1` snapshot to
+# WITNESS_OUTPUT. See "Harness-mode protocol" below for the schema.
 witness run app.instrumented.wasm --harness "node tests/runner.mjs"
 
 # Branch-coverage report (text / JSON).
@@ -224,6 +226,72 @@ instrumentation pattern (`br_if`, `if/else`, `br_table`). Build it with
 instrument→run→assert flow against compiler output (not just hand-written
 WAT). The fixture's `README.md` documents the entry-point conventions
 witness uses for `--invoke`.
+
+## Harness-mode protocol (`witness-harness-v1`)
+
+`witness run --harness <cmd>` is the escape hatch for runtimes other
+than embedded wasmtime — Node WASI, custom kiln deployments, hardware
+boards. witness spawns the harness via `sh -c` with three env vars set:
+
+```
+WITNESS_MODULE   — absolute path to the instrumented .wasm
+WITNESS_MANIFEST — absolute path to <module>.witness.json
+WITNESS_OUTPUT   — absolute path the harness must write to before exit
+```
+
+The harness loads the module, exercises it however it wants, then
+writes a JSON file to `WITNESS_OUTPUT` matching:
+
+```json
+{
+  "schema": "witness-harness-v1",
+  "counters": {
+    "0": 12,
+    "1": 7,
+    "2": 0,
+    "3": 12
+  }
+}
+```
+
+**Keys are the per-branch decimal IDs** as published in the manifest
+(`branches[].id`). **Values are u64 hit counts.** That's the entire
+v1 wire format. A 10-line Node WASI harness is enough.
+
+```js
+// harness.mjs — minimal witness-harness-v1 implementation
+import fs from "node:fs/promises";
+import { WASI } from "node:wasi";
+
+const mod = await WebAssembly.compile(
+  await fs.readFile(process.env.WITNESS_MODULE),
+);
+const wasi = new WASI({ version: "preview1" });
+const inst = await WebAssembly.instantiate(mod, { wasi_snapshot_preview1: wasi.wasiImport });
+inst.exports.run_row_0(); inst.exports.run_row_1(); /* ... */
+
+const counters = {};
+for (const [name, val] of Object.entries(inst.exports)) {
+  if (name.startsWith("__witness_counter_") && typeof val.value === "bigint") {
+    counters[name.replace("__witness_counter_", "")] = Number(val.value);
+  }
+}
+await fs.writeFile(
+  process.env.WITNESS_OUTPUT,
+  JSON.stringify({ schema: "witness-harness-v1", counters }),
+);
+```
+
+### Caveats — when to choose embedded mode instead
+
+Harness mode degrades to **branch coverage only**: MC/DC reconstruction
+needs per-row condition vectors (`__witness_brval_<id>`,
+`__witness_brcnt_<id>`) and trace-buffer outcomes (`__witness_trace`),
+which v1 does not transport. If you want truth tables, run via
+embedded wasmtime: `witness run module.wasm --invoke row_0 ...`. The
+v2 protocol (extending `counters` with `brvals`, `brcnts`, and the
+base64-encoded trace memory) is on the v0.9.x roadmap; harness mode
+v1 is the right choice today only when you cannot embed wasmtime.
 
 ## Where it fits
 

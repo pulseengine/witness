@@ -280,6 +280,28 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
         path: input.to_path_buf(),
         source,
     })?;
+
+    // v0.9.4 — preflight: distinguish a Wasm Component from a core
+    // module before walrus tries (and fails with an opaque "not
+    // supported yet"). Wasm magic + version word:
+    //   core module:  \0asm \01 \00 \00 \00
+    //   component:    \0asm \0d \00 \01 \00   (DraftD, v1)
+    // Both share the first 4 bytes; bytes 4..8 disambiguate. Anything
+    // else falls through to walrus's normal parse error.
+    if let Some(header) = original_bytes.first_chunk::<8>()
+        && &header[0..4] == b"\0asm"
+    {
+        let kind_byte = header[4];
+        let layer_byte = header[6];
+        // Core modules: byte4=0x01, layer byte=0x00.
+        // Components:   byte4=0x0d (current draft), layer byte=0x01.
+        if layer_byte == 0x01 || kind_byte >= 0x0a {
+            return Err(Error::InputIsComponent {
+                path: input.to_path_buf(),
+            });
+        }
+    }
+
     let mut module = Module::from_buffer(&original_bytes).map_err(|source| Error::ParseModule {
         path: input.to_path_buf(),
         source,
@@ -1845,5 +1867,44 @@ mod tests {
         let mut module = wat_to_module(wat_src);
         let entries = instrument_module(&mut module, "test").unwrap();
         assert_eq!(entries.len(), 0);
+    }
+
+    /// v0.9.4 — Wasm Component magic gets a friendly preflight error
+    /// instead of walrus's opaque "not supported yet". Synthetic header
+    /// is enough to exercise the branch — we don't need a real Component.
+    #[test]
+    fn component_input_returns_friendly_preflight_error() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        // Component header: \0asm followed by version byte 0x0d and
+        // layer byte 0x01 (DraftD).
+        let header: [u8; 12] = [
+            b'\0', b'a', b's', b'm', 0x0d, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        std::fs::write(tmp.path(), header).unwrap();
+
+        let out = tmp.path().with_extension("inst.wasm");
+        let result = instrument_file(tmp.path(), &out);
+        match result {
+            Err(crate::error::Error::InputIsComponent { path }) => {
+                assert_eq!(path, tmp.path().to_path_buf());
+            }
+            Err(other) => panic!("expected InputIsComponent, got {other:?}"),
+            Ok(()) => panic!("expected error, got Ok"),
+        }
+    }
+
+    /// v0.9.4 — core module path still works after the preflight check.
+    #[test]
+    fn core_module_input_passes_preflight() {
+        let wat_src = r#"(module (func (export "f")))"#;
+        let mut module = wat_to_module(wat_src);
+        let entries = instrument_module(&mut module, "test").unwrap();
+        assert_eq!(entries.len(), 0);
+        // The preflight check is in instrument_file, not
+        // instrument_module — so we exercise via a tempfile round-trip.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), wat::parse_str(wat_src).unwrap()).unwrap();
+        let out = tmp.path().with_extension("inst.wasm");
+        instrument_file(tmp.path(), &out).expect("core module should pass preflight");
     }
 }

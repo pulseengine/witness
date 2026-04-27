@@ -7,6 +7,133 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-04-27
+
+### Tier 0 — tester-review feedback addressed
+
+A senior tester drove every advertised surface of v0.9.2 and produced
+a thorough maturity assessment. v0.9.4 is the "fix-in-an-afternoon,
+huge UX impact" tier — five concrete items, all shipped.
+
+#### 1. `witness-viz` is now in release tarballs
+
+The most embarrassing miss from v0.9.0: the visualiser was pitched as
+the headline feature, but `release.yml` only built the `witness` and
+`witness-component` matrix. Tester reproduced: every release tarball
+shipped without `witness-viz`, so `witness viz` errored out of the
+box on a fresh install.
+
+Fixed by extending the existing build-binaries matrix to also build
+`crates/witness-viz/` (its own standalone workspace) per target and
+copy both binaries into the same staging directory before packaging.
+Tarballs from v0.9.4 onward contain `witness` AND `witness-viz` for
+all five platforms (linux x86_64, linux aarch64, macos x86_64, macos
+aarch64, windows x86_64).
+
+#### 2. Component preflight in `witness instrument`
+
+Today walrus reports an opaque `not supported yet` when a Wasm
+Component is fed to `instrument`. Tester (and any first-time user
+who points witness at a `wasm32-wasip2` build) can't tell whether
+witness is broken, the file is corrupt, or they need a different
+target.
+
+`instrument_file()` now peeks at bytes 0..8: `\\0asm\\01\\00\\00\\00`
+is a core module (passes through), `\\0asm\\0d\\00\\01\\00` is a
+Component (returns `Error::InputIsComponent`):
+
+```
+$ witness instrument app.component.wasm -o app.inst.wasm
+Error: input 'app.component.wasm' is a Wasm Component, not a core module.
+  witness instruments core modules only. Either:
+    (a) compile your crate to wasm32-unknown-unknown or wasm32-wasip1
+        (instead of wasm32-wasip2 / Component-Model targets), or
+    (b) extract the inner core module:
+        wasm-tools component unbundle 'app.component.wasm' --module-out core.wasm
+        witness instrument core.wasm
+```
+
+Two new unit tests cover the preflight: synthetic component header
+returns the new error variant; core module passes through. Existing
+8 instrument-tests still pass.
+
+#### 3. Harness-mode protocol documented
+
+The `witness-harness-v1` schema (`HarnessSnapshot { schema, counters }`)
+was hidden in `run_record.rs:125` — tester recovered it by `strings`-
+grepping the binary. Now there's a full "Harness-mode protocol"
+section in the README with a 10-line Node WASI reference
+implementation. Includes the **caveat** that v1 transports counters
+only, so MC/DC reconstruction degrades to branch coverage in
+subprocess mode — when you want truth tables, use embedded.
+
+#### 4. `Error::RequirementMap` separates schema from runtime errors
+
+Tester saw rivet-evidence report YAML schema errors as
+`wasm runtime error: ...` because `RequirementMap::load` funnelled
+parse failures through `Error::Runtime(anyhow!(..))`. Added a
+dedicated variant:
+
+```rust
+#[error("requirement-map config malformed at {path}")]
+RequirementMap {
+    path: PathBuf,
+    #[source]
+    source: anyhow::Error,
+}
+```
+
+Plus a third variant `Error::InputIsComponent { path }` for the
+preflight check above. Two error-tagging issues, one PR.
+
+#### 5. Walrus name-section warning silenced by default
+
+`walrus::module: in name section: function index 0 is out of bounds
+for local` fires on every well-formed cdylib produced by stable
+rustc. Cosmetic, but it makes good output look broken.
+
+`init_tracing()` now applies `walrus=error` filter at default
+verbosity (no `-v`). At `-v` or higher the filter is lifted so the
+warning is available when you actually want it. Tester's
+specific complaint quoted in the comment for posterity.
+
+### Bonus polish
+
+- New `GET /healthz` route on witness-viz (200 + JSON with version
+  + service name). Container-deployment friendly per tester suggestion.
+- New `GET /api/v1/verdicts/{name}` route (plural alias for the
+  existing singular form) — tester naturally typed plural after
+  hitting `/api/v1/verdicts`. Both forms now work.
+
+### Notes for v0.9.x
+
+Tier 1 still pending (per tester review):
+
+- **Harness mode v2** (carrying brvals/brcnts/trace) so subprocess
+  mode produces MC/DC, not just branch coverage. Largest single
+  functional gap remaining.
+- **`--invoke-with-args 'name:42,2024'`** — eliminate the
+  `core::hint::black_box` wrapper-export pattern.
+- **Per-target br_table decision reconstruction** —
+  `BranchKind::BrTableTarget` exists in the manifest but
+  `decisions.rs` doesn't group them; finishing this lifts httparse
+  and json_lite numbers without API changes.
+- **Trace-buffer overflow telemetry** — `WITNESS_TRACE_PAGES` env
+  override (the constant comment promises it; the code doesn't
+  honour it yet) plus per-decision iteration counts in `TraceHealth`.
+
+Tier 2/3 (qualification posture, DX) tracked for v0.9.x and v1.0.
+
+### Implements / Verifies
+
+- `cargo test --workspace --release` passes (49 tests, 2 new).
+- `witness instrument <component>` returns the friendly preflight
+  error; the synthetic-component unit test locks the behaviour.
+- README's harness-mode section covers the v1 wire format with a
+  runnable Node example.
+- `gh release download v0.9.4` will (once published) contain both
+  `witness` and `witness-viz` binaries.
+
 ## [0.9.3] — 2026-04-27
 
 ### Fixed — `json_lite` build under `-D warnings` (Linux CI)

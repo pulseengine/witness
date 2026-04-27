@@ -47,17 +47,33 @@ jobs:
         if: matrix.cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Build (native)
+      - name: Build witness (native)
         if: ${{ !matrix.cross }}
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Build (cross)
+      - name: Build witness (cross)
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }}
 
-      - name: Strip binary (Unix)
+      # v0.9.4 — witness-viz lives in its own standalone workspace at
+      # crates/witness-viz (DEC-026). Build it for the same target so
+      # release tarballs ship both binaries; otherwise `witness viz`
+      # subcommand has no binary to spawn.
+      - name: Build witness-viz (native)
+        if: ${{ !matrix.cross }}
+        working-directory: crates/witness-viz
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build witness-viz (cross)
+        if: matrix.cross
+        working-directory: crates/witness-viz
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Strip binaries (Unix)
         if: runner.os != 'Windows'
-        run: strip "target/${{ matrix.target }}/release/witness" 2>/dev/null || true
+        run: |
+          strip "target/${{ matrix.target }}/release/witness" 2>/dev/null || true
+          strip "crates/witness-viz/target/${{ matrix.target }}/release/witness-viz" 2>/dev/null || true
 
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
@@ -68,6 +84,7 @@ jobs:
           ARCHIVE="witness-${VERSION}-${TARGET}.tar.gz"
           mkdir -p staging
           cp "target/${TARGET}/release/witness" staging/
+          cp "crates/witness-viz/target/${TARGET}/release/witness-viz" staging/
           cp README.md LICENSE-APACHE LICENSE-MIT staging/ 2>/dev/null || true
           tar -czf "$ARCHIVE" -C staging .
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
@@ -82,6 +99,7 @@ jobs:
           ARCHIVE="witness-${VERSION}-${TARGET}.zip"
           mkdir -p staging
           cp "target/${TARGET}/release/witness.exe" staging/
+          cp "crates/witness-viz/target/${TARGET}/release/witness-viz.exe" staging/
           cp README.md LICENSE-APACHE LICENSE-MIT staging/ 2>/dev/null || true
           cd staging && 7z a "../$ARCHIVE" . && cd ..
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"

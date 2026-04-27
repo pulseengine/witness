@@ -122,6 +122,18 @@ pub async fn decision_detail(
     }
 }
 
+/// GET /healthz — liveness probe for container deployments. Returns
+/// 200 + a JSON body with the crate version. Does NOT touch the
+/// reports directory — must succeed even if the volume is unmounted.
+pub async fn healthz() -> Response {
+    Json(json!({
+        "status": "ok",
+        "service": "witness-viz",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
+    .into_response()
+}
+
 fn json_err(status: StatusCode, msg: &str) -> Response {
     (status, Json(json!({"error": msg}))).into_response()
 }

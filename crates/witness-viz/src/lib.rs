@@ -34,10 +34,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/summary", get(api::summary))
         .route("/api/v1/verdicts", get(api::verdicts))
         .route("/api/v1/verdict/{name}", get(api::verdict_detail))
+        // v0.9.4 — plural alias; tester review found the singular form
+        // unintuitive given the listing endpoint is /api/v1/verdicts.
+        .route("/api/v1/verdicts/{name}", get(api::verdict_detail))
         .route(
             "/api/v1/decision/{verdict}/{decision_id}",
             get(api::decision_detail),
         )
+        // v0.9.4 — health probe for container deployments.
+        .route("/healthz", get(api::healthz))
         .route("/mcp", post(mcp::handler))
         .route("/assets/htmx.min.js", get(htmx_asset))
         .route("/assets/styles.css", get(styles_asset))
