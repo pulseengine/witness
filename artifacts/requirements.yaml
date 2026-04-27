@@ -535,11 +535,13 @@ artifacts:
   # -------------------------------------------------------------------------
   # v0.8 — visualisation tooling
   # (provisional; research output at docs/research/v08-visualisation-roadmap.md)
+  # NOTE: REQ-038 unsealed for v0.9.0 — visualiser implementation begins
+  # this cycle (native Axum first per DEC-023; wasm32-wasip2 deferred).
   # -------------------------------------------------------------------------
   - id: REQ-038
     type: requirement
     title: Interactive visualisation of MC/DC truth tables
-    status: proposed
+    status: approved
     description: >
       The system shall provide interactive visualisation of per-
       decision truth tables, condition independent-effect proofs,
@@ -554,7 +556,7 @@ artifacts:
   - id: REQ-039
     type: requirement
     title: MCP server for MC/DC truth-table queries
-    status: proposed
+    status: approved
     description: >
       The system shall expose an MCP (Model Context Protocol) server
       mounted on the visualisation Axum router with MC/DC-native
@@ -570,7 +572,7 @@ artifacts:
   - id: REQ-040
     type: requirement
     title: Visualiser is itself MC/DC-witnessed (dogfood)
-    status: proposed
+    status: approved
     description: >
       The system's visualisation component shall be witnessed by
       witness itself, with Playwright-driven user-flow tests
@@ -585,11 +587,13 @@ artifacts:
   # -------------------------------------------------------------------------
   # v0.9 — state-of-the-art positioning + autonomous AI-agent gap closure
   # (provisional; research output at docs/research/v09-soa-and-agent-ux.md)
+  # NOTE: REQ-041..043 unsealed for v0.9.0 — implementation begins this
+  # cycle alongside REQ-038..040 (visualiser + MCP server share scope).
   # -------------------------------------------------------------------------
   - id: REQ-041
     type: requirement
     title: Complete MC/DC for a high-complexity Rust application
-    status: proposed
+    status: approved
     description: >
       The system shall produce reviewable, signed MC/DC evidence for
       a high-complexity Rust application identified per v0.7's
@@ -603,7 +607,7 @@ artifacts:
   - id: REQ-042
     type: requirement
     title: Autonomous AI-agent gap-closing loop
-    status: proposed
+    status: approved
     description: >
       The system shall support an autonomous AI-agent loop: agent
       reads gap report via MCP, proposes test rows via tool call,
@@ -618,7 +622,7 @@ artifacts:
   - id: REQ-043
     type: requirement
     title: Superior PR-review experience vs incumbents
-    status: proposed
+    status: approved
     description: >
       The system's PR-time review experience shall surpass LDRA /
       VectorCAST / Cantata / RapiCover on at least three axes:

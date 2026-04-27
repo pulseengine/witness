@@ -7,6 +7,171 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-04-27
+
+### Headline — the agent UX chapter begins
+
+v0.9.0 is the chapter where witness stops being "a great MC/DC tool"
+and starts being "the only MC/DC tool with a truth-table-first
+reviewer experience and an agent contract." Three new surfaces ship
+together: the **witness-viz** Axum visualiser, the **MCP server**
+mounted on it, and the **Playwright self-coverage** suite.
+
+### Added — `witness-viz` (the visualiser)
+
+A native Axum 0.8 web server at `crates/witness-viz/` that loads a
+compliance bundle (`verdict-evidence/`) and serves it over HTTP. New
+binary `witness-viz`, plus a new `witness viz` subcommand on the main
+CLI that spawns it. **The reviewer experience is the truth table, not
+the percentage.**
+
+```
+$ witness viz --reports-dir compliance/verdict-evidence/ --port 3037
+witness-viz listening on http://127.0.0.1:3037
+```
+
+- **Routes (HTML)**:
+  - `GET /` — dashboard with headline cards (decisions, full MC/DC,
+    proved, gap, dead) plus the verdict scoreboard table.
+  - `GET /verdict/{name}` — single-verdict drill-down listing every
+    decision with status and source location.
+  - `GET /decision/{verdict}/{id}` — **the hero view**: full truth
+    table for one decision, condition columns with branch ids, gap
+    rows highlighted, independent-effect pairs listed with proved /
+    gap / dead status, drill-back to the parent verdict.
+- **Routes (JSON)**:
+  - `GET /api/v1/summary` — aggregate scoreboard.
+  - `GET /api/v1/verdicts` — array of per-verdict summaries.
+  - `GET /api/v1/verdict/{name}` — full `McdcReport` JSON.
+  - `GET /api/v1/decision/{verdict}/{id}` — single-decision detail.
+- **No template engine** — HTML rendered via `format!()` with helper
+  functions, mirroring rivet's `serve/` pattern. Inline CSS at
+  `/assets/styles.css` (~265 lines, dark/light mode via
+  `prefers-color-scheme`). HTMX placeholder at `/assets/htmx.min.js`
+  — full bundle deferred to v0.9.x; visualiser falls back cleanly to
+  full-page navigation in the meantime (every link works).
+- **Standalone workspace** — `crates/witness-viz/` has its own
+  `[workspace]` declaration so axum/tokio don't pull into parent
+  workspace builds. Same pattern as `crates/witness-component`.
+- **Integration test** — `tests/integration.rs` writes a fake
+  two-decision bundle, spawns `axum::serve` on `127.0.0.1:0`, hits
+  every route, asserts 200 + key strings + 404s. Passes.
+
+### Added — MCP server on `/mcp`
+
+A pragmatic MCP-over-HTTP endpoint mounted on the witness-viz Axum
+router. Pure JSON-RPC 2.0, no `rmcp` dependency — the surface is small
+enough that hand-rolled is cleaner. Three tools that close the
+agent loop:
+
+- **`get_decision_truth_table`** — input `{ verdict, decision_id }`,
+  returns the full `DecisionReport` (truth table, conditions, pairs,
+  status). The agent's "what does this decision look like?" query.
+- **`find_missing_witness`** — input
+  `{ verdict, decision_id, condition_index }`, returns the needed row
+  vector + pairing, plus a tutorial rationale string. The agent's
+  "what test do I need to close this gap?" query. For already-proved
+  conditions, returns `"Already proved by rows X and Y"` so the agent
+  doesn't churn on satisfied gaps.
+- **`list_uncovered_conditions`** — optional `{ verdict }` filter,
+  returns an array of every gap/dead condition in the bundle with
+  source file, line, branch id. The agent's "where's my work?" query.
+
+```
+$ curl -X POST http://127.0.0.1:3037/mcp \
+    -H content-type:application/json \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+{"jsonrpc":"2.0","id":1,"result":{"tools":[
+  {"name":"get_decision_truth_table", ...},
+  {"name":"find_missing_witness", ...},
+  {"name":"list_uncovered_conditions", ...}
+]}}
+```
+
+The MCP surface is a strict **subset** of the HTTP surface — no
+tool returns information that an HTTP request couldn't. This is
+DEC-027 from the v0.9 architecture decisions. It means humans
+reviewing a PR see exactly what the agent saw.
+
+### Added — Playwright self-coverage suite
+
+A new `tests/playwright/` directory mirrors rivet's pattern. Five
+spec files (`dashboard`, `verdict`, `decision`, `api`, plus the
+shared `helpers.ts`) drive witness-viz against a live evidence
+bundle and assert the truth-table widget renders correctly, gaps
+get the red border, status indicators match, JSON API matches the
+HTML scoreboard.
+
+```
+$ cd tests/playwright && npm install && npm run install-browsers && npm test
+```
+
+The `webServer` config boots
+`crates/witness-viz/target/release/witness-viz --reports-dir $WITNESS_VIZ_FIXTURE
+--port 3037`; default fixture is `/tmp/v081-suite/` (set the env var to
+override). Workers=1, single chromium project, 60s per test.
+TypeScript strict mode passes (`tsc --noEmit` clean).
+
+This suite is the foundation for the **self-witnessing CI gate**
+(REQ-040): v0.9.x will instrument witness-viz itself, drive it via
+Playwright, and ratchet a ≥70% MC/DC release gate so the
+visualiser proves its own correctness on every release.
+
+### Added — rivet artifact unseal
+
+REQ-038 through REQ-043 (visualiser, MCP server, dogfood,
+high-complexity-app dogfood, agent loop, PR review) flipped from
+`proposed` to `approved`. Five new FEATs (FEAT-019..023) and five
+new DECs (DEC-023..027) document the v0.9 architecture choices:
+
+- **DEC-023** — Native Axum first, wasm32-wasip2 deferred. The brief
+  recommended `wstd-axum` on the wasi-http proxy world; rivet's
+  de-risked native pattern ships v0.9.0 faster. The wasm32-wasip2
+  build remains the v0.9.x stretch.
+- **DEC-024** — `format!()` HTML, no template engine. Matches rivet.
+- **DEC-025** — HTMX bundled inline, placeholder for v0.9.0.
+- **DEC-026** — witness-viz as standalone workspace.
+- **DEC-027** — MCP mounted on Axum router, strict subset of HTTP.
+
+`rivet validate` passes with zero warnings.
+
+### Workspace
+
+- Workspace version bumped to **0.9.0** (witness, witness-core).
+- `witness-viz` is `0.9.0` in its own workspace.
+
+### Notes for v0.9.x
+
+The v0.9.0 release is the visualiser + agent contract. Three things
+stay deferred to v0.9.x patches:
+
+1. **Per-DWARF-inlined-context outcome tracking** (v0.8.3 fold-in
+   target). httparse 7/67 stays honest in the meantime; the
+   inlined-context fix is the next single-number-bumping change.
+2. **Real HTMX 2.x bundle** — currently a placeholder. Full-page
+   navigation works in the meantime so no functionality is lost,
+   only swap-without-reload UX.
+3. **wasm32-wasip2 build of witness-viz** — `wstd-axum` integration,
+   `wasmtime serve` distribution. The brief's headline architecture
+   stays planned; the native binary is the v0.9.0 release.
+
+Visualiser self-witnessing (the dogfood loop where witness instruments
+witness-viz and the Playwright suite drives it) is REQ-040's v0.9.x
+gate. Foundations are in place; the CI step + ratchet land in v0.9.1.
+
+### Implements / Verifies
+
+- **REQ-038** Interactive visualisation of MC/DC truth tables — first
+  shipped form.
+- **REQ-039** MCP server for MC/DC truth-table queries.
+- **REQ-040** Visualiser self-witnessed (foundations: Playwright suite
+  + integration test; dogfood loop is v0.9.1).
+- **REQ-043** Superior PR-review experience vs incumbents — the
+  truth-table-first view is the differentiator vs LDRA, VectorCAST,
+  RapiCover, gcov+gcovr.
+- **FEAT-019..023** all delivered or scaffolded.
+- **DEC-023..027** documented in `artifacts/design-decisions.yaml`.
+
 ## [0.8.2] — 2026-04-26
 
 ### What v0.8.2 adds

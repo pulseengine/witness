@@ -701,6 +701,186 @@ artifacts:
       - type: refines
         target: DEC-013
 
+  - id: DEC-023
+    type: design-decision
+    title: Native Axum first, wasm32-wasip2 deferred to v0.9.x
+    status: proposed
+    description: >
+      v0.9.0 ships witness-viz as a native binary built on Axum 0.8 +
+      tokio 1, departing from the v0.8 visualisation brief
+      (docs/research/v08-visualisation-roadmap.md) which recommended
+      wstd-axum on wasm32-wasip2. The Wasm-component target is a
+      v0.9.x stretch goal, not a v0.9.0 blocker.
+    rationale: >
+      Rivet's serve/ module is the closest production reference inside
+      pulseengine for an HTTP-native review UI: it uses native Axum +
+      tokio with no template engine and ships ~5,900 LoC of working
+      code. Mirroring that stack de-risks v0.9.0 — every pattern the
+      visualiser needs is already exercised in a sibling project, so
+      the engineering risk concentrates on MC/DC-specific rendering
+      rather than on Wasm-component plumbing. The deployable-component
+      thesis from v0.8 (DEC-020) remains intact for witness-core but
+      does not need to extend to tooling in v0.9.0; v0.9.x can revisit
+      wstd-axum once it has more production miles.
+    alternatives: >
+      Block v0.9.0 on wstd-axum + wasm32-wasip2 build per DEC-020 —
+      rejected as scope creep that would defer the visualiser
+      indefinitely while wstd-axum matures. Use a static-HTML
+      generator (no server) — rejected because gap drill-down and
+      MCP integration both need a live request/response surface.
+      Build native and Wasm targets in parallel from day one —
+      rejected as splitting attention before the native pattern is
+      proven against real workloads.
+    tags: [v0.9, visualiser, architecture]
+    links:
+      - type: satisfies
+        target: REQ-038
+      - type: satisfies
+        target: REQ-040
+      - type: refines
+        target: DEC-020
+
+  - id: DEC-024
+    type: design-decision
+    title: format!() HTML, no template engine
+    status: proposed
+    description: >
+      witness-viz renders HTML via raw format!() macros and helper
+      functions. No maud, no askama, no handlebars — same pattern
+      rivet's serve module uses across its ~5,900 LoC of production
+      HTML.
+    rationale: >
+      The v0.8 visualisation brief recommended maud for compile-time
+      HTML safety. Rivet's experience contradicts that recommendation
+      in practice: format!() with a small set of escape helpers
+      (html_escape, attr_escape) produces readable rendering code,
+      composes naturally with Rust control flow, and avoids pulling
+      in a proc-macro dependency. The trade-off is real — zero
+      compile-time HTML-injection safety — but matches the rivet
+      pattern and keeps the witness-viz dep tree slim. If the hand-
+      written escaping proves insufficient under audit, migrating to
+      maud is a localised refactor (the rendering helpers are the
+      only callsites).
+    alternatives: >
+      maud per DEC-020 / v0.8 brief — rejected to match rivet pattern
+      and avoid proc-macro dep. askama (Jinja-style) — rejected as
+      adding a separate template language to learn. Yew/Leptos
+      server-side rendering — rejected as over-engineered for the
+      v0.9.0 scope. Hand-rolled string concatenation without format!()
+      — rejected as less readable than format!() with helpers.
+    tags: [v0.9, visualiser, architecture]
+    links:
+      - type: satisfies
+        target: REQ-038
+      - type: refines
+        target: DEC-023
+
+  - id: DEC-025
+    type: design-decision
+    title: HTMX bundled inline as bytes, placeholder for v0.9.0
+    status: proposed
+    description: >
+      witness-viz exposes /htmx.min.js via include_bytes! over a
+      placeholder file shipped in v0.9.0. The visualiser works with
+      full-page navigation as the v0.9.0 fallback; routes are emitted
+      with hx-get / hx-target attributes so the placeholder swap to
+      the real HTMX 2.x bundle in v0.9.x is a one-file change.
+    rationale: >
+      Full HTMX 2.x is ~50KB and the standard delivery pattern is a
+      build script that downloads the official release with checksum
+      verification. That build-script work is not v0.9.0-blocking —
+      the visualiser is reviewable and useful without dynamic swaps,
+      and HTMX's progressive-enhancement design means hx-get
+      attributes degrade gracefully to plain anchor navigation when
+      the script is a no-op. Shipping the placeholder lets v0.9.0
+      ratchet on the routing and rendering surface without entangling
+      the asset-vendoring pipeline.
+    alternatives: >
+      Ship full HTMX bundle in v0.9.0 via a build script that
+      downloads from htmx.org — rejected as v0.9.0 scope creep
+      around supply-chain handling for a third-party JS asset. Skip
+      HTMX entirely and use plain anchor navigation — rejected
+      because v0.9.x dynamic-swap requirements (live MCP tool
+      interaction, gap-drill-down without page reload) need HTMX or
+      equivalent, and emitting hx-* attributes now keeps v0.9.x a
+      backend-only change. Pull HTMX from a CDN — rejected because
+      witness-viz must work offline for compliance review.
+    tags: [v0.9, visualiser, htmx]
+    links:
+      - type: satisfies
+        target: REQ-038
+      - type: refines
+        target: DEC-023
+
+  - id: DEC-026
+    type: design-decision
+    title: witness-viz as standalone workspace
+    status: proposed
+    description: >
+      witness-viz lives at crates/witness-viz with its own
+      Cargo.toml workspace; build via `cd crates/witness-viz &&
+      cargo build --release`. The parent witness workspace does not
+      include witness-viz as a member crate.
+    rationale: >
+      Same problem witness-component already solved: Component Model
+      linker symbols don't compose with the parent workspace, and
+      Axum + tokio together add ~3MB of compile artefacts that don't
+      need to materialise on every parent-workspace build. Keeping
+      witness-viz as a separate workspace lets it version
+      independently (its release cadence will be faster than
+      witness-core), keeps the parent CI jobs slim, and isolates the
+      transitive deps so a tokio version bump in witness-viz cannot
+      perturb witness-core's MSRV floor.
+    alternatives: >
+      Include witness-viz as a member of the parent workspace —
+      rejected for the same reasons witness-component is standalone:
+      compile bloat plus dep-graph entanglement. Make witness-viz a
+      separate top-level repository — rejected because v0.9.x will
+      want to share types with witness-core (DecisionRow, RunRecord)
+      and a workspace-relative path dep is the cleanest expression
+      of that. Build witness-viz only at release time via CI —
+      rejected because local dev for the visualiser must be cheap.
+    tags: [v0.9, visualiser, workspace]
+    links:
+      - type: satisfies
+        target: REQ-038
+
+  - id: DEC-027
+    type: design-decision
+    title: MCP server mounted on Axum router (rivet pattern)
+    status: proposed
+    description: >
+      witness-viz mounts the MCP server on the same Axum router as
+      its HTML routes via rmcp's streamable_http_server transport at
+      /mcp. One binary, one port, one router — the MCP surface is a
+      strict subset of the HTTP API surface, and the same handlers
+      back both representations.
+    rationale: >
+      Rivet uses exactly this pattern: rmcp's streamable_http_server
+      mounts at /mcp on the same Axum router that serves the human-
+      readable HTML, and MCP tool calls are thin adapters over the
+      same internal query functions the HTML routes use. The result
+      is that humans clicking a row and agents calling
+      get_decision_truth_table see the same semantic model — there
+      is no MCP-private surface to drift from the HTTP-private
+      surface. This was already stated in DEC-021 / FEAT-017 as the
+      v0.8 plan; DEC-027 confirms it survives the native-Axum pivot
+      (DEC-023) unchanged.
+    alternatives: >
+      Run the MCP server on a separate port via stdio or its own
+      Axum app — rejected because two surfaces drift. Skip MCP in
+      v0.9.0 and ship HTML-only — rejected because REQ-039 is in
+      v0.9.0 scope and the agent-UX claim is what makes v0.9
+      distinctive against LDRA / VectorCAST. Implement MCP in a
+      separate binary — rejected because deploying two binaries for
+      a single review surface is operationally worse for users.
+    tags: [v0.9, mcp, architecture]
+    links:
+      - type: satisfies
+        target: REQ-039
+      - type: refines
+        target: DEC-021
+
   - id: DEC-011
     type: design-decision
     title: Keep walrus as the rewrite backend in v0.2; revisit in v0.3

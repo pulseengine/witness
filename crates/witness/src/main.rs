@@ -195,6 +195,26 @@ enum Command {
         overview: PathBuf,
     },
 
+    /// Boot the witness-viz HTMX visualiser against a compliance bundle
+    /// (v0.9.0). Renders truth tables for every decision in the bundle
+    /// at http://127.0.0.1:3037 by default. Spawns the `witness-viz`
+    /// binary; set `WITNESS_VIZ_BIN` to override its path. Install with
+    /// `cd crates/witness-viz && cargo install --path .` or build the
+    /// release artifact alongside `witness`.
+    Viz {
+        /// Path to the verdict-evidence directory (e.g.
+        /// `compliance/verdict-evidence/`). Each subdir must contain
+        /// `report.json` and `manifest.json`.
+        #[arg(long = "reports-dir")]
+        reports_dir: PathBuf,
+        /// Port to listen on.
+        #[arg(long, default_value_t = 3037)]
+        port: u16,
+        /// Bind address (default 127.0.0.1 — localhost only).
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+    },
+
     /// Emit rivet-shape coverage evidence YAML, partitioned by a
     /// branch→artefact mapping. Output is consumable by rivet's
     /// `CoverageStore` (landing in the rivet upstream PR coordinated
@@ -391,6 +411,13 @@ fn main() -> Result<()> {
             let record = witness_core::run_record::RunRecord::load(&run)?;
             witness_core::lcov::emit_lcov_files(&manifest_loaded, &record, &output, &overview)?;
         }
+        Command::Viz {
+            reports_dir,
+            port,
+            bind,
+        } => {
+            run_viz(&reports_dir, port, &bind)?;
+        }
         Command::RivetEvidence {
             run,
             requirement_map,
@@ -412,6 +439,30 @@ fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn run_viz(reports_dir: &std::path::Path, port: u16, bind: &str) -> Result<()> {
+    let bin = std::env::var_os("WITNESS_VIZ_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("witness-viz"));
+    let status = std::process::Command::new(&bin)
+        .arg("--reports-dir")
+        .arg(reports_dir)
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--bind")
+        .arg(bind)
+        .status()
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to spawn witness-viz at '{}': {e}\n  hint: install with `cd crates/witness-viz && cargo install --path .`, or set WITNESS_VIZ_BIN to the binary path.",
+                bin.display()
+            )
+        })?;
+    if !status.success() {
+        anyhow::bail!("witness-viz exited with {status}");
+    }
     Ok(())
 }
 

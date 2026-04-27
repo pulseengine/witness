@@ -365,6 +365,113 @@ artifacts:
       - type: satisfies
         target: REQ-043
 
+  - id: FEAT-019
+    type: feature
+    title: v0.9 — witness-viz Axum visualiser
+    status: proposed
+    description: >
+      Native Axum 0.8 + tokio 1 web server (port 3037) rendering MC/DC
+      truth tables for a compliance bundle. Server-side HTML via raw
+      format!() helpers (DEC-024); HTMX bundled inline as bytes with a
+      v0.9.0 placeholder (DEC-025) so routes are HTMX-ready while full-
+      page navigation remains the v0.9.0 fallback. Per-decision
+      permalinks for citation in PR reviews. Standalone workspace at
+      crates/witness-viz (DEC-026) so Axum/tokio compile artefacts do
+      not bloat the parent workspace. wasm32-wasip2 build deferred to
+      v0.9.x per DEC-023.
+    tags: [v0.9, visualiser]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-038
+      - type: satisfies
+        target: REQ-040
+      - type: refines
+        target: FEAT-017
+
+  - id: FEAT-020
+    type: feature
+    title: v0.9 — MCP server for MC/DC queries
+    status: proposed
+    description: >
+      rmcp-based MCP transport mounted on the witness-viz Axum router
+      (DEC-027) exposing MC/DC-native tools: get_decision_truth_table,
+      find_missing_witness, list_uncovered_conditions. One binary, one
+      port; the MCP surface is a strict subset of the HTTP API so
+      humans and agents see the same semantic model. Supersedes the
+      streamable_http_server transport hint in FEAT-017.
+    tags: [v0.9, mcp, agent-ux]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-039
+      - type: refines
+        target: FEAT-017
+
+  - id: FEAT-021
+    type: feature
+    title: v0.9 — truth-table-first PR review
+    status: proposed
+    description: >
+      PR comment renders the truth table for each changed decision
+      with missing-witness rows highlighted in tutorial style — the
+      exact missing condition vector named, expected outcome stated,
+      copy-paste-able test stub generated from the gap. Differentiates
+      from LDRA / VectorCAST / Cantata / RapiCover whose PR surface
+      is coverage percentages, not condition-vector evidence. Drives
+      REQ-043 superiority axis (1) inline truth-table rendering with
+      row citations.
+    tags: [v0.9, review-experience]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-043
+
+  - id: FEAT-022
+    type: feature
+    title: v0.9 — per-DWARF-inlined-context outcomes
+    status: proposed
+    description: >
+      Extend kind=2 trace records with the inlined-subroutine id from
+      DWARF so per-call outcomes are keyed by (function_index,
+      inlined_id) rather than function_index alone. Closes the v0.7
+      over-grouping gap (FEAT-016) where inlined hot paths shared a
+      decision row across distinct call sites. Required for
+      reviewable MC/DC at real-application scale (REQ-035) — without
+      inlined-context keying, hot inlined helpers conflate
+      independent-effect citations across unrelated callers.
+    tags: [v0.9, instrumentation, dwarf]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-035
+      - type: refines
+        target: FEAT-016
+
+  - id: FEAT-023
+    type: feature
+    title: v0.9 — visualiser self-coverage gate
+    status: proposed
+    description: >
+      The witness-viz binary is itself instrumented under witness, and
+      a Playwright suite drives user flows (load bundle, drill into
+      decision, navigate REQ → DEC → row, query MCP tool) to generate
+      MC/DC-relevant decisions. CI gate ratchets ≥70% MC/DC at v0.9.0,
+      ≥80% at v0.9.x, ≥90% at v1.0 — the visualiser visualises its
+      own coverage. Closes REQ-040 dogfood requirement.
+    tags: [v0.9, dogfood]
+    fields:
+      phase: future
+    links:
+      - type: satisfies
+        target: REQ-040
+      - type: refines
+        target: FEAT-017
+
   - id: FEAT-005
     type: feature
     title: v1.0 — Check-It qualification artifact

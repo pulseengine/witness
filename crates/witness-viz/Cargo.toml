@@ -1,0 +1,46 @@
+[package]
+name = "witness-viz"
+version = "0.9.0"
+edition = "2024"
+rust-version = "1.91"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/pulseengine/witness"
+description = "HTMX-powered MC/DC truth-table visualiser for witness compliance bundles"
+
+# Standalone workspace — see crates/witness-component/Cargo.toml for the
+# same pattern. Reason: native binary stays decoupled from workspace
+# build planning, lets us iterate on Axum/Tokio versions independently.
+[workspace]
+
+[lib]
+name = "witness_viz"
+path = "src/lib.rs"
+
+[[bin]]
+name = "witness-viz"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tempfile = "3"
+
+[lints.clippy]
+unwrap_used = { level = "warn", priority = -1 }
+expect_used = { level = "warn", priority = -1 }
+panic = { level = "warn", priority = -1 }
+print_stdout = { level = "warn", priority = -1 }
+
+[profile.release]
+strip = true
+lto = "thin"

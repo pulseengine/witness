@@ -23,13 +23,36 @@ is structurally the same move as *"post-rustc Wasm"*.
 
 ## Status
 
-**v0.6.x is the current release line** (latest tag — see
-[releases](https://github.com/pulseengine/witness/releases)). The
-v0.6.x ratcheted from "consumer-side schema only" up to a complete
-signed-evidence pipeline. v0.7.x added the trace-buffer primitive
-that lifts the per-row-globals limit on loop-bearing programs.
-v0.8.0 adds chain-direction analysis + three new real-application
-fixtures.
+**v0.9.0 is the current release line.** The v0.6.x ratcheted from
+"consumer-side schema only" up to a complete signed-evidence
+pipeline. v0.7.x added the trace-buffer primitive that lifts the
+per-row-globals limit on loop-bearing programs. v0.8.0 adds
+chain-direction analysis + three new real-application fixtures.
+**v0.9.0 ships the visualiser, the MCP server, and the agent
+contract** — see "The reviewer experience" section below.
+
+### The reviewer experience — v0.9.0
+
+```
+$ witness viz --reports-dir compliance/verdict-evidence/ --port 3037
+witness-viz listening on http://127.0.0.1:3037
+```
+
+Open the browser to land on a dashboard with the headline numbers,
+click a verdict to drill down, click a decision to see the **truth
+table** — every row, every condition, gap rows red-bordered,
+independent-effect pairs cited inline. Same data over JSON at
+`/api/v1/*` and over MCP at `POST /mcp` with three agent-callable
+tools (`get_decision_truth_table`, `find_missing_witness`,
+`list_uncovered_conditions`). The MCP surface is a strict subset of
+the HTTP surface — humans reviewing a PR see exactly what the agent
+saw.
+
+The differentiator: where LDRA, VectorCAST, RapiCover, Cantata,
+Bullseye and gcov+gcovr ship percentages and gates, witness ships the
+truth table — and an agent contract over the same surface. Every
+gap-closing test the agent proposes is verifiable: re-run witness, see
+the row appear, see the pair turn from `gap` to `proved`.
 
 ### Current verdict suite — v0.8.0
 
@@ -61,7 +84,8 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
-| **v0.8.0** | Chain-direction analysis (And/Or/Mixed/Unknown) + 3 real-app fixtures (nom_numbers, state_machine, json_lite) |
+| **v0.9.0** | witness-viz Axum visualiser + MCP server (`get_decision_truth_table`, `find_missing_witness`, `list_uncovered_conditions`) + Playwright suite |
+| **v0.8.0..2** | Chain-direction analysis + 3 real-app fixtures + scoreboard + suite-index.html |
 | **v0.7.5** | Expanded httparse rows (15→40); 6× full MC/DC, 2.3× proved |
 | **v0.7.4** | Per-function-call decision outcome capture (kind=2 trace records) |
 | **v0.7.3** | Trace-buffer parser → per-iteration `DecisionRow`s |

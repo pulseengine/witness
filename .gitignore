@@ -19,3 +19,13 @@ verdicts/*/*.wasm
 crates/witness-component/target/
 crates/witness-component/Cargo.lock
 
+# witness-viz is also a standalone workspace (v0.9.0+). Same reasoning.
+crates/witness-viz/target/
+crates/witness-viz/Cargo.lock
+
+# Playwright outputs.
+tests/playwright/node_modules/
+tests/playwright/test-results/
+tests/playwright/playwright-report/
+tests/playwright/.last-run.json
+
