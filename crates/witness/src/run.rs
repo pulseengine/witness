@@ -310,6 +310,12 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     }
     let row_total = u64::try_from(options.invoke.len()).unwrap_or(u64::MAX);
     record.decisions = decisions;
+    // v0.9.8 — read the trace memory's page count from the host so it
+    // ends up in TraceHealth. The runner asked the wasm engine for the
+    // memory above; size_in_pages is its current allocation.
+    let pages_allocated = trace_memory
+        .map(|m| u32::try_from(m.size(&store)).unwrap_or(0))
+        .unwrap_or(0);
     record.trace_health = TraceHealth {
         overflow: trace_overflow_seen,
         rows: row_total,
@@ -318,10 +324,11 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         // v0.7.3 will replace this with the actual per-iteration row
         // emission. For now, the watermark itself is the signal.
         ambiguous_rows: trace_bytes_total > 0,
+        bytes_used: trace_bytes_total,
+        pages_allocated,
     };
-    // v0.7.2: append trace-memory bytes-used as a structured note in
-    // the invoked list so it's visible in the run JSON until the
-    // schema gets a dedicated field in v0.7.3.
+    // v0.9.8 — keep the legacy invoked-list note for tooling that has
+    // not yet upgraded to the v0.9.8 schema fields.
     if trace_bytes_total > 0 {
         record
             .invoked
@@ -746,6 +753,12 @@ fn harness_v2_to_run_record(
         overflow: trace_overflow_seen,
         rows: row_total,
         ambiguous_rows: trace_bytes_total > 0,
+        bytes_used: trace_bytes_total,
+        // v0.9.8 — harness mode can't directly query the wasm memory;
+        // we'd need the harness to ship pages explicitly in v3 of the
+        // schema. For now, leave at 0 so consumers can tell embedded
+        // (>0) from harness-v2 (=0) provenance at a glance.
+        pages_allocated: 0,
     };
     if trace_bytes_total > 0 {
         record

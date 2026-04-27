@@ -92,6 +92,19 @@ pub struct TraceHealth {
     /// determined (e.g. function panicked or returned mid-chain).
     #[serde(default)]
     pub ambiguous_rows: bool,
+    /// v0.9.8 — total trace memory bytes consumed across all rows
+    /// (sum of `cursor - TRACE_HEADER_BYTES` per row). Lets reviewers
+    /// see how close they got to the trace memory cap. Zero means no
+    /// trace records were emitted (pre-v0.7.2 instrumentation, or a
+    /// run where every decision short-circuited before reaching a
+    /// br_if site).
+    #[serde(default)]
+    pub bytes_used: u64,
+    /// v0.9.8 — pages of trace memory the instrumented module
+    /// allocates. Reflects what `WITNESS_TRACE_PAGES` was set to at
+    /// `witness instrument` time. Default 16 (= 1 MiB).
+    #[serde(default)]
+    pub pages_allocated: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -293,6 +306,18 @@ pub fn merge_records(records: &[RunRecord]) -> Result<RunRecord> {
         overflow: records.iter().any(|r| r.trace_health.overflow),
         rows: records.iter().map(|r| r.trace_health.rows).sum(),
         ambiguous_rows: records.iter().any(|r| r.trace_health.ambiguous_rows),
+        // v0.9.8 — sum bytes-used across merged runs, but take the max
+        // pages_allocated since that's a fixed-per-module value (any
+        // disagreement here means the inputs were instrumented with
+        // different WITNESS_TRACE_PAGES, which is technically a manifest
+        // mismatch the merge validator should reject — for now we keep
+        // the larger value, which is the safer-side reading).
+        bytes_used: records.iter().map(|r| r.trace_health.bytes_used).sum(),
+        pages_allocated: records
+            .iter()
+            .map(|r| r.trace_health.pages_allocated)
+            .max()
+            .unwrap_or(0),
     };
 
     Ok(RunRecord {

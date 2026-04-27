@@ -117,9 +117,25 @@ pub const TRACE_RECORD_BYTES: u32 = 4;
 /// Default trace memory size in pages (1 page = 64 KiB). 16 pages =
 /// 1 MiB = 262128 records max (after subtracting the 16-byte header
 /// from one full page worth = 16384 records minus header overhead).
-/// Configurable via the `WITNESS_TRACE_PAGES` env var the host
-/// honours when growing the memory; v0.7.2 ships fixed-size.
+/// Configurable at instrument-time via the `WITNESS_TRACE_PAGES` env
+/// var (read by [`trace_pages_from_env`]); v0.9.8+.
 pub const TRACE_DEFAULT_PAGES: u32 = 16;
+
+/// v0.9.8 — read `WITNESS_TRACE_PAGES` env var; fall back to
+/// [`TRACE_DEFAULT_PAGES`] when unset, empty, non-numeric, or out of
+/// range. Wasm32 memories cap at 65536 pages (4 GiB); we additionally
+/// floor at 1 page so the trace header always fits.
+pub fn trace_pages_from_env() -> u32 {
+    match std::env::var("WITNESS_TRACE_PAGES") {
+        Ok(v) => v
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|n| (1..=65536).contains(n))
+            .unwrap_or(TRACE_DEFAULT_PAGES),
+        Err(_) => TRACE_DEFAULT_PAGES,
+    }
+}
 
 /// v0.7.2 — exported helper function: zero the trace cursor +
 /// overflow_flag (does not memset the record region; stale data
@@ -846,13 +862,13 @@ fn build_trace_record_helper(module: &mut Module, mem: MemoryId) -> Result<Funct
 /// Returns the MemoryId so callers can pass it to the per-br_if
 /// rewrite path that emits trace-record writes.
 fn build_trace_infra(module: &mut Module) -> Result<MemoryId> {
-    let mem = module.memories.add_local(
-        false,
-        false,
-        TRACE_DEFAULT_PAGES.into(),
-        Some(TRACE_DEFAULT_PAGES.into()),
-        None,
-    );
+    // v0.9.8 — sample once at instrumentation entry and reuse for both
+    // memory creation and capacity-init writes; the env var is only
+    // read once per `witness instrument` invocation.
+    let pages = trace_pages_from_env();
+    let mem = module
+        .memories
+        .add_local(false, false, pages.into(), Some(pages.into()), None);
     module.exports.add(TRACE_MEMORY_EXPORT, mem);
 
     // __witness_trace_reset(): zero cursor + overflow_flag (offsets 0, 8).
@@ -877,8 +893,10 @@ fn build_trace_infra(module: &mut Module) -> Result<MemoryId> {
                 offset: 0,
             },
         }));
-        // capacity = (TRACE_DEFAULT_PAGES * 64KiB) - TRACE_HEADER_BYTES
-        let capacity_bytes: u32 = TRACE_DEFAULT_PAGES
+        // v0.9.8 — capacity = (pages * 64KiB) - TRACE_HEADER_BYTES.
+        // `pages` was sampled at the top of build_trace_infra() and
+        // matches the memory size declared above.
+        let capacity_bytes: u32 = pages
             .saturating_mul(65536)
             .saturating_sub(TRACE_HEADER_BYTES);
         body.instr(Instr::Const(Const {
@@ -1867,6 +1885,55 @@ mod tests {
         let mut module = wat_to_module(wat_src);
         let entries = instrument_module(&mut module, "test").unwrap();
         assert_eq!(entries.len(), 0);
+    }
+
+    /// v0.9.8 — `WITNESS_TRACE_PAGES` env var honoured at instrument
+    /// time. `trace_pages_from_env` falls back to default on missing,
+    /// non-numeric, or out-of-range values; accepts 1..=65536 (wasm32
+    /// memory cap).
+    #[test]
+    fn trace_pages_env_override_round_trip() {
+        // SAFETY: env var mutation is unsafe under multi-threaded
+        // tests; cargo runs unit tests in-process. We mutate exactly
+        // one var (`WITNESS_TRACE_PAGES`) which no other test touches.
+        // The block at end restores the unset state. This is the
+        // documented escape-hatch pattern from std::env docs.
+        unsafe {
+            std::env::set_var("WITNESS_TRACE_PAGES", "32");
+        }
+        assert_eq!(trace_pages_from_env(), 32);
+        // SAFETY: same justification.
+        unsafe {
+            std::env::set_var("WITNESS_TRACE_PAGES", "0");
+        }
+        assert_eq!(
+            trace_pages_from_env(),
+            TRACE_DEFAULT_PAGES,
+            "0 pages floored to default"
+        );
+        // SAFETY: same justification.
+        unsafe {
+            std::env::set_var("WITNESS_TRACE_PAGES", "garbage");
+        }
+        assert_eq!(
+            trace_pages_from_env(),
+            TRACE_DEFAULT_PAGES,
+            "non-numeric → default"
+        );
+        // SAFETY: same justification.
+        unsafe {
+            std::env::set_var("WITNESS_TRACE_PAGES", "65537");
+        }
+        assert_eq!(
+            trace_pages_from_env(),
+            TRACE_DEFAULT_PAGES,
+            "above wasm32 cap → default"
+        );
+        // SAFETY: same justification.
+        unsafe {
+            std::env::remove_var("WITNESS_TRACE_PAGES");
+        }
+        assert_eq!(trace_pages_from_env(), TRACE_DEFAULT_PAGES);
     }
 
     /// v0.9.4 — Wasm Component magic gets a friendly preflight error

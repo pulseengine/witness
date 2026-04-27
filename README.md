@@ -84,6 +84,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.9.8** | `WITNESS_TRACE_PAGES` env override at instrument time + `TraceHealth.bytes_used`/`pages_allocated` telemetry |
 | **v0.9.7** | Per-target `br_table` decision reconstruction — httparse +26, json_lite +10 conditions correctly counted as proved |
 | **v0.9.6** | `--invoke-with-args 'name:val,...'` — typed positional args (eliminates `core::hint::black_box` workaround) |
 | **v0.9.5** | `witness-harness-v2` — MC/DC-capable subprocess protocol (counters + brvals + brcnts + base64 trace memory) |

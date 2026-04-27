@@ -7,6 +7,92 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.8] — 2026-04-27
+
+### Added — `WITNESS_TRACE_PAGES` env override at instrument time
+
+Tester review Tier 1 #5: the `TRACE_DEFAULT_PAGES = 16` constant
+comment promised the env override; the code didn't honour it. v0.9.8
+fixes the broken promise.
+
+`witness instrument` now reads `WITNESS_TRACE_PAGES` and uses that
+value (1..=65536, the wasm32 memory cap) for the trace memory's
+declared size + the capacity field that gets baked into the trace
+header at reset. Out-of-range, non-numeric, or unset values fall
+back to `TRACE_DEFAULT_PAGES` (16 = 1 MiB = ~262K records).
+
+```sh
+# Default — 16 pages = 1 MiB trace memory
+witness instrument app.wasm -o app.inst.wasm
+
+# Big workloads (e.g. fuzz harnesses) — bump to 64 pages = 4 MiB
+WITNESS_TRACE_PAGES=64 witness instrument app.wasm -o app.inst.wasm
+
+# Memory-constrained embedded targets — drop to 4 pages = 256 KiB
+WITNESS_TRACE_PAGES=4 witness instrument app.wasm -o app.inst.wasm
+```
+
+The setting is per-instrumented-module (baked into the wasm itself);
+the runner reads back `pages_allocated` at run time and stores it in
+`TraceHealth` so reviewers know what was provisioned without rerunning
+`witness instrument`.
+
+### Added — `TraceHealth.bytes_used` + `TraceHealth.pages_allocated`
+
+`run_record.rs::TraceHealth` gains two new fields:
+
+```rust
+pub struct TraceHealth {
+    pub overflow: bool,
+    pub rows: u64,
+    pub ambiguous_rows: bool,
+    /// v0.9.8 — total trace memory bytes consumed across all rows.
+    pub bytes_used: u64,
+    /// v0.9.8 — pages of trace memory the instrumented module
+    /// allocates (post-`WITNESS_TRACE_PAGES` resolution).
+    pub pages_allocated: u32,
+}
+```
+
+Both are `#[serde(default)]` so v0.9.7 records still deserialise.
+The legacy `__witness_trace_bytes=N` note in the `invoked` list stays
+for tooling that hasn't upgraded.
+
+A run on `triangle` reports cleanly:
+
+```json
+"trace_health": {
+  "overflow": false, "rows": 4, "ambiguous_rows": true,
+  "bytes_used": 44, "pages_allocated": 16
+}
+```
+
+Reviewers can now eyeball the headroom: a 1 MiB trace memory used 44
+bytes — plenty of room — versus a hypothetical 700 KiB used out of
+1 MiB which signals "consider `WITNESS_TRACE_PAGES=32` next time".
+
+### Verified
+
+- `trace_pages_env_override_round_trip` test: 32 → 32, 0 → default,
+  garbage → default, 65537 → default, unset → default.
+- End-to-end smoke: `WITNESS_TRACE_PAGES=8 witness instrument` →
+  `pages_allocated=8` in run output; default → `pages_allocated=16`.
+- `cargo test --workspace --release` — **50 unit tests + 8
+  integration tests pass**.
+- `cargo clippy --all-targets -D warnings` clean.
+
+### Notes for v0.9.x — Tier 1 still pending
+
+- **Per-DWARF-inlined-context outcome tracking** (original v0.8.3
+  fold-in target). The httparse `7/67` Boolean MC/DC ratio still
+  reflects this: when one source-level decision is inlined into many
+  call sites, our reporter aggregates rows per (function, source-
+  line) but can't distinguish per-call iterations of an inlined
+  decision. Big architectural change; needs design pass.
+- **Per-arm `brval`/`brcnt` for `br_table`s** — would let MC/DC
+  pair-finding apply to multi-condition `match` guards
+  (`match (x, y) { (T, T) => ... }`). Decision-shape generalization.
+
 ## [0.9.7] — 2026-04-27
 
 ### Added — per-target br_table decision reconstruction
