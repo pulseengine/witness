@@ -319,10 +319,7 @@ type IterationsByDecision = BTreeMap<u32, Vec<IterationEntry>>;
 ///   (outcome=F).
 /// - For Mixed/Unknown: can't derive; caller falls back to function-
 ///   return outcome.
-fn derive_outcome(
-    chain_kind: ChainKind,
-    evaluated: &BTreeMap<u32, bool>,
-) -> Option<bool> {
+fn derive_outcome(chain_kind: ChainKind, evaluated: &BTreeMap<u32, bool>) -> Option<bool> {
     match chain_kind {
         ChainKind::And | ChainKind::Or => evaluated.values().next_back().copied(),
         ChainKind::Mixed | ChainKind::Unknown => None,
@@ -376,7 +373,10 @@ fn parse_trace_records(
                     // that the per-function-call path can't.
                     let kind = chain_kinds.get(&dec_id).copied().unwrap_or_default();
                     let derived = derive_outcome(kind, &finished);
-                    completed.entry(dec_id).or_default().push((finished, derived));
+                    completed
+                        .entry(dec_id)
+                        .or_default()
+                        .push((finished, derived));
                 }
                 current.entry(dec_id).or_default().insert(cond_idx, value);
             }
@@ -416,7 +416,10 @@ fn parse_trace_records(
         if !iter_map.is_empty() {
             let kind = chain_kinds.get(&dec_id).copied().unwrap_or_default();
             let derived = derive_outcome(kind, &iter_map);
-            completed.entry(dec_id).or_default().push((iter_map, derived));
+            completed
+                .entry(dec_id)
+                .or_default()
+                .push((iter_map, derived));
         }
     }
 

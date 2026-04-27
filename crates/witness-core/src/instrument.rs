@@ -531,9 +531,7 @@ fn build_trace_outcome_helper(module: &mut Module, mem: MemoryId) -> Result<Func
             },
         }));
         // packed = (kind=2 << 24) | (value << 16) | (function_idx & 0xFFFF)
-        body.instr(Instr::LocalGet(LocalGet {
-            local: value_local,
-        }));
+        body.instr(Instr::LocalGet(LocalGet { local: value_local }));
         body.instr(Instr::Const(Const {
             value: Value::I32(16),
         }));
@@ -597,10 +595,7 @@ fn build_trace_outcome_helper(module: &mut Module, mem: MemoryId) -> Result<Func
             },
         }));
     }
-    let func_id = builder.finish(
-        vec![function_idx_local, value_local],
-        &mut module.funcs,
-    );
+    let func_id = builder.finish(vec![function_idx_local, value_local], &mut module.funcs);
     Ok(func_id)
 }
 
@@ -675,9 +670,7 @@ fn instrument_function_outcomes(
                 .instrs
                 .iter()
                 .enumerate()
-                .filter_map(|(i, (instr, _))| {
-                    matches!(instr, Instr::Return(_)).then_some(i)
-                })
+                .filter_map(|(i, (instr, _))| matches!(instr, Instr::Return(_)).then_some(i))
                 .collect();
             for pos in return_positions.into_iter().rev() {
                 let capture = make_capture_before_return();
@@ -695,24 +688,15 @@ fn instrument_function_outcomes(
         // (NO trailing local.get tmp — the tee already left the value
         // on the stack for the implicit return).
         let entry_instrs = &mut lf.block_mut(entry).instrs;
-        entry_instrs.push((
-            Instr::LocalTee(LocalTee { local: tmp }),
-            Default::default(),
-        ));
+        entry_instrs.push((Instr::LocalTee(LocalTee { local: tmp }), Default::default()));
         entry_instrs.push((
             Instr::Const(Const {
                 value: Value::I32(fn_idx_i32),
             }),
             Default::default(),
         ));
-        entry_instrs.push((
-            Instr::LocalGet(LocalGet { local: tmp }),
-            Default::default(),
-        ));
-        entry_instrs.push((
-            Instr::Call(Call { func: helper }),
-            Default::default(),
-        ));
+        entry_instrs.push((Instr::LocalGet(LocalGet { local: tmp }), Default::default()));
+        entry_instrs.push((Instr::Call(Call { func: helper }), Default::default()));
     }
     Ok(())
 }
