@@ -25,9 +25,13 @@
 //!   uses the *innermost* line, which is correct for hand-written
 //!   short-circuit chains and merges over-eagerly when the same line
 //!   spawns multiple decisions via macro magic.
-//! - Per-target `br_table` decision reconstruction. `BrTableTarget` /
-//!   `BrTableDefault` entries are not grouped into Decisions in v0.4;
-//!   they remain strict-per-target.
+//! - ~~Per-target `br_table` decision reconstruction~~ — landed in
+//!   v0.9.7. `BrTableTarget` + `BrTableDefault` entries that share a
+//!   `(function, file, line)` key are now grouped into a single
+//!   `Decision`. The shape isn't classical Boolean MC/DC (a br_table
+//!   has N+1 mutually-exclusive arms, not a short-circuit chain), but
+//!   the truth-table view + per-arm hit counts give reviewers the same
+//!   "every arm must be exercised" picture for `match` expressions.
 //! - Cross-function inlining. If a source decision is inlined from
 //!   another function, we reconstruct it relative to the inlined
 //!   location, not the call-site. v0.5 with `DW_TAG_inlined_subroutine`
@@ -244,17 +248,32 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
     // missing byte_offset (synthetic) or with no DWARF mapping.
     type Resolved<'a> = (u32, String, u32, &'a BranchEntry);
     let mut resolved: Vec<Resolved<'_>> = Vec::new();
+    let mut brtable_resolved: Vec<Resolved<'_>> = Vec::new();
     for entry in branches {
-        if entry.kind != BranchKind::BrIf {
-            continue;
-        }
         let Some(byte_offset) = entry.byte_offset else {
             continue;
         };
         let Some(loc) = lookup_line(line_map, u64::from(byte_offset)) else {
             continue;
         };
-        resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
+        match entry.kind {
+            BranchKind::BrIf => {
+                resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
+            }
+            // v0.9.7 — br_table entries from the same match arm
+            // grouped by (function, file, line). All targets of one
+            // wasm br_table instruction share a source line in
+            // hand-written code; macro-generated tables may merge with
+            // adjacent code, which is the same trade-off `BrIf` makes.
+            BranchKind::BrTableTarget | BranchKind::BrTableDefault => {
+                brtable_resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
+            }
+            // IfThen / IfElse counters are emitted by the if/else
+            // lowering and don't represent independent conditions in
+            // the source-MC/DC sense. They're already consumed by the
+            // BrIf path's per-decision aggregation when present.
+            BranchKind::IfThen | BranchKind::IfElse => {}
+        }
     }
 
     // Step 2: bucket by (function, file). Within each bucket, br_ifs
@@ -336,6 +355,37 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
             &mut out,
             &file,
         );
+    }
+
+    // v0.9.7 — second pass: group BrTable* entries by (function, file,
+    // line). Each group becomes one Decision representing a `match`
+    // expression's per-arm dispatch. Single-arm tables (= unreachable
+    // default-only or 1-arm) are emitted only when they contain >= 2
+    // entries, mirroring the BrIf threshold.
+    let mut by_func_file_line: BTreeMap<(u32, String, u32), Vec<&BranchEntry>> = BTreeMap::new();
+    for (func, file, line, entry) in brtable_resolved {
+        by_func_file_line
+            .entry((func, file, line))
+            .or_default()
+            .push(entry);
+    }
+    for ((_func, file, line), entries) in by_func_file_line {
+        if entries.len() < 2 {
+            continue;
+        }
+        let conditions: Vec<u32> = entries.iter().map(|e| e.id).collect();
+        out.push(Decision {
+            id: next_decision_id,
+            conditions,
+            source_file: if file.is_empty() { None } else { Some(file) },
+            source_line: Some(line),
+            // br_table arms aren't a short-circuit chain — set chain_kind
+            // to `Unknown` so downstream reporters skip the
+            // derive-outcome-from-conditions path. Per-arm counters are
+            // the truth-table view here.
+            chain_kind: crate::instrument::ChainKind::default(),
+        });
+        next_decision_id = next_decision_id.saturating_add(1);
     }
 
     out

@@ -7,6 +7,88 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-04-27
+
+### Added — per-target br_table decision reconstruction
+
+Tester review Tier 1 #4: `BranchKind::BrTableTarget` and
+`BranchKind::BrTableDefault` exist in the manifest, and per-arm
+counters were already emitted, but `decisions.rs:25` had:
+
+> Per-target br_table decision reconstruction. BrTableTarget /
+> BrTableDefault entries are not grouped into Decisions in v0.4
+
+— so every br_table arm stayed as a strict-per-target counter, not a
+groupable decision. This bit `httparse` and `json_lite` hardest:
+both compile their dispatch tables to br_tables (172 + 45 br_table
+arms across the two), and reviewers couldn't see arm-coverage at the
+decision level.
+
+v0.9.7 closes that:
+
+1. **Reconstruction pass** — `group_into_decisions` gains a second
+   bucket. Entries are partitioned by kind: BrIf entries go through
+   the existing source-line-cluster grouping, BrTable* entries are
+   grouped by `(function_index, source_file, source_line)` (every
+   target of one Wasm `br_table` instruction shares those three).
+   Each group with `>= 2` entries becomes a Decision.
+
+2. **Reporter awareness** — `analyse_decision` detects br_table-shape
+   decisions (every condition's branch entry is `BrTableTarget` or
+   `BrTableDefault`) and uses **per-arm counters** for status:
+   - `BranchHit.hits > 0` → `ConditionStatus::Proved` with
+     `interpretation = "br-table-arm"`
+   - `BranchHit.hits == 0` → `ConditionStatus::Dead`
+
+   This is honest per-arm coverage, not Boolean MC/DC. The truth-
+   table view stays empty for these decisions (no per-row brval/brcnt
+   data — that's ARM-014 territory), but the conditions list reads
+   true.
+
+3. **Headline-ratio preservation** — br_table-shape decisions DO NOT
+   bump `decisions_total` / `decisions_full_mcdc` in the overall
+   counts. The MC/DC ratio is reserved for Boolean decisions where
+   independent-effect proofs apply. Br_table arms count in
+   `conditions_proved` / `conditions_gap` / `conditions_dead`, since
+   those reflect arm-hit truth.
+
+### Headline numbers move
+
+Re-running the existing 40-row httparse harness:
+
+```
+                Before v0.9.7         After v0.9.7
+br_if decs       67                    67  (unchanged)
+br_table decs    0  (skipped)          19  (newly reconstructed)
+proved           28                    54   ← +26 from arm coverage
+gap              46                    46  (unchanged)
+dead             108                   274  (br_table 0-hit arms)
+total conditions 181                   374
+full MC/DC ratio 7/67                  7/67  (Boolean ratio preserved)
+```
+
+`json_lite` similarly: 26 proved → 36 proved (+10 from br_table arm
+coverage). The proved count is now an **honest reflection of which
+match arms the test corpus exercises**, not silently zero.
+
+### Notes for v0.9.x — Tier 1 still pending
+
+- **Trace-buffer overflow telemetry + `WITNESS_TRACE_PAGES`** —
+  comment promises the env override; code doesn't honour it yet.
+- **Per-DWARF-inlined-context outcome tracking** — original v0.8.3
+  fold-in target. Would lift the `7/67` Boolean MC/DC ratio for
+  inlined-decision verdicts (httparse particularly).
+- **Per-arm brval/brcnt for br_tables** — ARM-014. Truth-table view
+  for match dispatches; would let MC/DC pair-finding apply to
+  multi-condition `match` guards (`match (x, y) { (T, T) => ...}`).
+
+### Verified
+
+- workspace `cargo test --release` passes (49 unit + 8 integration).
+- `cargo clippy --all-targets --release -- -D warnings` clean.
+- httparse + json_lite re-run end-to-end against the suite; numbers
+  reproduce as documented above.
+
 ## [0.9.6] — 2026-04-27
 
 ### Added — `--invoke-with-args 'name:val[,val...]'`

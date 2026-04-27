@@ -128,10 +128,38 @@ impl McdcReport {
         let mut decisions: Vec<DecisionVerdict> = Vec::with_capacity(record.decisions.len());
 
         for d in &record.decisions {
-            let verdict = analyse_decision(d);
-            overall.decisions_total = overall.decisions_total.saturating_add(1);
-            if matches!(verdict.status, DecisionStatus::FullMcdc) {
-                overall.decisions_full_mcdc = overall.decisions_full_mcdc.saturating_add(1);
+            let verdict = analyse_decision(d, &record.branches);
+            // v0.9.7 — br_table-shape decisions are arm-coverage, not
+            // Boolean MC/DC. Count their conditions in proved/gap/dead
+            // (so reviewers see arm-hit truth) but exclude them from
+            // the decision MC/DC ratio (numerator + denominator) — that
+            // ratio is reserved for Boolean decisions where independent-
+            // effect proofs apply. Reliable signal: every condition's
+            // branch entry is BrTableTarget / BrTableDefault.
+            let kinds: Vec<crate::instrument::BranchKind> = d
+                .condition_branch_ids
+                .iter()
+                .filter_map(|bid| {
+                    record
+                        .branches
+                        .iter()
+                        .find(|b| b.id == *bid)
+                        .map(|b| b.kind)
+                })
+                .collect();
+            let is_br_table = !kinds.is_empty()
+                && kinds.iter().all(|k| {
+                    matches!(
+                        k,
+                        crate::instrument::BranchKind::BrTableTarget
+                            | crate::instrument::BranchKind::BrTableDefault
+                    )
+                });
+            if !is_br_table {
+                overall.decisions_total = overall.decisions_total.saturating_add(1);
+                if matches!(verdict.status, DecisionStatus::FullMcdc) {
+                    overall.decisions_full_mcdc = overall.decisions_full_mcdc.saturating_add(1);
+                }
             }
             for c in &verdict.conditions {
                 overall.conditions_total = overall.conditions_total.saturating_add(1);
@@ -385,7 +413,10 @@ pub fn rollup_from_run_file(path: &Path) -> Result<McdcRollup> {
     Ok(McdcRollup::from_report(&report))
 }
 
-fn analyse_decision(d: &DecisionRecord) -> DecisionVerdict {
+fn analyse_decision(
+    d: &DecisionRecord,
+    branches: &[crate::run_record::BranchHit],
+) -> DecisionVerdict {
     let truth_table: Vec<RowView> = d
         .rows
         .iter()
@@ -395,6 +426,74 @@ fn analyse_decision(d: &DecisionRecord) -> DecisionVerdict {
             outcome: r.outcome,
         })
         .collect();
+
+    // v0.9.7 — br_table-shape decision. All conditions are
+    // BrTableTarget / BrTableDefault entries that share a
+    // (function, file, line) triple. There's no Boolean MC/DC to
+    // prove (arms are mutually exclusive); per-arm coverage is the
+    // honest measurement. Use BranchHit.hits to mark each condition
+    // Proved (counter > 0) or Dead (counter = 0).
+    let condition_kinds: Vec<crate::instrument::BranchKind> = d
+        .condition_branch_ids
+        .iter()
+        .filter_map(|bid| branches.iter().find(|b| b.id == *bid).map(|b| b.kind))
+        .collect();
+    let is_br_table_decision = !condition_kinds.is_empty()
+        && condition_kinds.iter().all(|k| {
+            matches!(
+                k,
+                crate::instrument::BranchKind::BrTableTarget
+                    | crate::instrument::BranchKind::BrTableDefault
+            )
+        });
+
+    if is_br_table_decision {
+        let conditions: Vec<ConditionVerdict> = d
+            .condition_branch_ids
+            .iter()
+            .enumerate()
+            .map(|(i, &bid)| {
+                let hits = branches
+                    .iter()
+                    .find(|b| b.id == bid)
+                    .map(|b| b.hits)
+                    .unwrap_or(0);
+                let (status, interpretation) = if hits > 0 {
+                    (ConditionStatus::Proved, Some("br-table-arm".to_string()))
+                } else {
+                    (ConditionStatus::Dead, None)
+                };
+                ConditionVerdict {
+                    index: u32::try_from(i).unwrap_or(u32::MAX),
+                    branch_id: bid,
+                    status,
+                    interpretation,
+                    pair: None,
+                    gap_closure: None,
+                }
+            })
+            .collect();
+        let any_proved = conditions
+            .iter()
+            .any(|c| matches!(c.status, ConditionStatus::Proved));
+        let any_dead = conditions
+            .iter()
+            .any(|c| matches!(c.status, ConditionStatus::Dead));
+        let status = match (any_proved, any_dead) {
+            (true, false) => DecisionStatus::FullMcdc,
+            (true, true) => DecisionStatus::Partial,
+            (false, true) => DecisionStatus::Unreached,
+            (false, false) => DecisionStatus::Unreached,
+        };
+        return DecisionVerdict {
+            id: d.id,
+            source_file: d.source_file.clone(),
+            source_line: d.source_line,
+            conditions,
+            truth_table,
+            status,
+        };
+    }
 
     if d.rows.is_empty() {
         return DecisionVerdict {
