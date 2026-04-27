@@ -263,3 +263,38 @@ ul.conditions li:last-child { border-bottom: none; }
 }
 
 .back-link { margin-top: 1.5rem; display: inline-block; }
+
+/* v0.9.1 — gap drill-down view */
+.gap-link {
+  margin-left: 0.5rem;
+  font-size: 0.85em;
+  color: var(--accent);
+  text-decoration: none;
+}
+.gap-link:hover { text-decoration: underline; }
+
+.box {
+  padding: 1rem 1.2rem;
+  margin: 1rem 0;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 4px;
+}
+.box pre {
+  background: transparent;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+
+pre.stub {
+  background: var(--code-bg);
+  color: var(--text);
+  padding: 1rem 1.2rem;
+  border-radius: 6px;
+  font-family: 'SF Mono', Monaco, Consolas, 'Courier New', monospace;
+  font-size: 0.88em;
+  line-height: 1.5;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+}

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("decision /decision/{verdict}/{id}", () => {
-  test("/decision/triangle/0 returns 200", async ({ page }) => {
+  test("/decision/triangle/0 returns 200 @smoke", async ({ page }) => {
     const response = await page.goto("/decision/triangle/0");
     expect(response?.status()).toBe(200);
   });

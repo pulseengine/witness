@@ -6,7 +6,7 @@ import {
 } from "./helpers";
 
 test.describe("api /api/v1/*", () => {
-  test("/api/v1/summary returns expected keys", async ({ request }) => {
+  test("/api/v1/summary returns expected keys @smoke", async ({ request }) => {
     const summary = await getJson<SummaryPayload>(request, "/api/v1/summary");
     expect(summary).toHaveProperty("decisions_total");
     expect(summary).toHaveProperty("decisions_full_mcdc");
@@ -23,14 +23,12 @@ test.describe("api /api/v1/*", () => {
   test("verdicts count matches dashboard table", async ({ request, page }) => {
     const summary = await getJson<SummaryPayload>(request, "/api/v1/summary");
     await page.goto("/");
-    // Dashboard has one data row per verdict plus a TOTAL row at the bottom.
-    const totalRows = await page.locator("table tbody tr").count();
-    const dataRows = await page
-      .locator("table tbody tr")
-      .filter({ hasNot: page.locator(".total-row") })
+    // Each verdict row has exactly one anchor pointing at /verdict/...
+    // No other row on the dashboard does, so this counts verdicts cleanly.
+    const verdictLinkCount = await page
+      .locator('table a[href^="/verdict/"]')
       .count();
-    const verdictRowCount = dataRows > 0 ? dataRows : totalRows - 1;
-    expect(verdictRowCount).toBe(summary.verdicts);
+    expect(verdictLinkCount).toBe(summary.verdicts);
   });
 
   test("/api/v1/verdicts is an array, length matches summary.verdicts", async ({

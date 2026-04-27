@@ -84,6 +84,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.9.1** | Gap drill-down view (tutorial-style explanation + copy-paste test stub) + real HTMX 2.0.4 bundle |
 | **v0.9.0** | witness-viz Axum visualiser + MCP server (`get_decision_truth_table`, `find_missing_witness`, `list_uncovered_conditions`) + Playwright suite |
 | **v0.8.0..2** | Chain-direction analysis + 3 real-app fixtures + scoreboard + suite-index.html |
 | **v0.7.5** | Expanded httparse rows (15→40); 6× full MC/DC, 2.3× proved |

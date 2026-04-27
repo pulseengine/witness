@@ -7,7 +7,7 @@ test.describe("dashboard /", () => {
     await expect(page).toHaveTitle(/witness-viz/);
   });
 
-  test("headline cards present with non-zero counts", async ({ page }) => {
+  test("headline cards present with non-zero counts @smoke", async ({ page }) => {
     await page.goto("/");
     const cards = page.locator(".cards .card");
     await expect(cards).not.toHaveCount(0);

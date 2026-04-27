@@ -1,11 +1,12 @@
 [package]
 name = "witness-viz"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2024"
 rust-version = "1.91"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/pulseengine/witness"
 description = "HTMX-powered MC/DC truth-table visualiser for witness compliance bundles"
+build = "build.rs"
 
 # Standalone workspace — see crates/witness-component/Cargo.toml for the
 # same pattern. Reason: native binary stays decoupled from workspace

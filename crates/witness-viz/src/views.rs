@@ -202,7 +202,7 @@ pub async fn decision(
     body.push_str(&render_truth_table(decision));
 
     body.push_str("<h2>Independent-effect pairs</h2>\n");
-    body.push_str(&render_conditions(decision));
+    body.push_str(&render_conditions(decision, &verdict_name));
 
     let _ = write!(
         body,
@@ -213,6 +213,175 @@ pub async fn decision(
 
     let title = format!("Decision #{decision_id}");
     Html(page(&title, &body)).into_response()
+}
+
+/// GET /gap/{verdict}/{decision_id}/{condition_index} — the tutorial-
+/// style gap drill-down. Renders the missing-witness row, paired row,
+/// rationale prose, and a copy-paste Rust test stub. This is the
+/// reviewer-facing version of MCP's `find_missing_witness` — humans
+/// see exactly what an agent would see.
+pub async fn gap(
+    Path((verdict_name, decision_id, condition_index)): Path<(String, u32, u32)>,
+    State(state): State<AppState>,
+) -> Response {
+    let bundle = match data::find_verdict(state.reports_dir(), &verdict_name) {
+        Ok(Some(b)) => b,
+        Ok(None) => return not_found("verdict", &verdict_name),
+        Err(e) => return error_page("Failed to load verdict", &e.to_string()),
+    };
+
+    let decision = match bundle.report.decisions.iter().find(|d| d.id == decision_id) {
+        Some(d) => d,
+        None => return not_found("decision", &format!("#{decision_id} in {verdict_name}")),
+    };
+
+    let condition = match decision.conditions.iter().find(|c| c.index == condition_index) {
+        Some(c) => c,
+        None => {
+            return not_found(
+                "condition",
+                &format!("c{condition_index} in decision #{decision_id}"),
+            );
+        }
+    };
+
+    let mut body = String::new();
+    let _ = write!(
+        body,
+        "<h1>Gap analysis — c{ci} in decision #{did}</h1>\n<p class=\"muted\"><code>{verd}</code> &middot; <code>{src}:{line}</code> &middot; branch <code>{br}</code></p>\n",
+        ci = condition_index,
+        did = decision_id,
+        verd = escape(&verdict_name),
+        src = escape(&decision.source_file),
+        line = decision.source_line,
+        br = condition.branch_id,
+    );
+
+    let _ = write!(
+        body,
+        "<p>Status: <span class=\"status status-{cls}\">{up}</span></p>\n",
+        cls = escape(&condition.status),
+        up = escape(&condition.status.to_ascii_uppercase()),
+    );
+
+    match condition.status.as_str() {
+        "proved" => {
+            body.push_str("<div class=\"box\">\n");
+            if let Some(pair) = condition.pair {
+                let interp = condition.interpretation.as_deref().unwrap_or("");
+                let _ = write!(
+                    body,
+                    "<p>Already proved by rows <code>{a}</code> and <code>{b}</code> ({interp}). No action needed.</p>\n",
+                    a = pair.first().copied().unwrap_or(0),
+                    b = pair.get(1).copied().unwrap_or(0),
+                    interp = escape(interp),
+                );
+            } else {
+                body.push_str("<p>Already proved. No action needed.</p>\n");
+            }
+            body.push_str("</div>\n");
+        }
+        "dead" => {
+            body.push_str("<div class=\"box\">\n");
+            body.push_str("<p>Condition is <strong>dead</strong>: the runtime never reached this branch under any test row. The compiler may have folded the predicate, or the call-path is unreachable from the harness.</p>\n");
+            body.push_str("<p>Action: confirm by reading the source. If the branch is genuinely unreachable, the dead status is the verdict. If reachable, expand the test corpus to drive code through this branch.</p>\n");
+            body.push_str("</div>\n");
+        }
+        _ => {
+            // gap (or unknown — treat as gap-like)
+            render_gap_tutorial(&mut body, &verdict_name, decision, condition);
+        }
+    }
+
+    let _ = write!(
+        body,
+        r#"<p class="back-link"><a href="/decision/{verdict}/{did}">← back to decision #{did}</a></p>"#,
+        verdict = escape(&verdict_name),
+        did = decision_id,
+    );
+
+    let title = format!("Gap c{condition_index} in decision #{decision_id}");
+    Html(page(&title, &body)).into_response()
+}
+
+fn render_gap_tutorial(
+    body: &mut String,
+    verdict_name: &str,
+    decision: &DecisionReport,
+    condition: &crate::data::ConditionReport,
+) {
+    // Find any existing row that has this condition evaluated — that
+    // gives us a starting point. The "needed row" is the same row with
+    // this condition's value flipped. The other conditions stay as the
+    // existing row had them; if a condition was unevaluated (short-
+    // circuited away) the agent / reviewer may need to massage inputs
+    // so it gets evaluated.
+    let key = condition.index.to_string();
+    let baseline = decision
+        .truth_table
+        .iter()
+        .find(|r| r.evaluated.contains_key(&key));
+
+    body.push_str("<h2>What you need</h2>\n");
+    body.push_str("<div class=\"box\">\n");
+
+    match baseline {
+        Some(row) => {
+            let current = row.evaluated.get(&key).copied().unwrap_or(false);
+            let needed = !current;
+            let _ = write!(
+                body,
+                "<p>To prove condition <code>c{ci}</code> independently affects the decision, you need a row where <code>c{ci} = {needed}</code> and the outcome differs from row <code>{rid}</code> (where <code>c{ci} = {current}</code>).</p>\n",
+                ci = condition.index,
+                needed = if needed { "T" } else { "F" },
+                current = if current { "T" } else { "F" },
+                rid = row.row_id,
+            );
+
+            body.push_str("<p>Required condition vector:</p>\n<pre>");
+            for c in &decision.conditions {
+                let k = c.index.to_string();
+                let val = if c.index == condition.index {
+                    if needed { "T" } else { "F" }
+                } else {
+                    match row.evaluated.get(&k) {
+                        Some(true) => "T",
+                        Some(false) => "F",
+                        None => "*",
+                    }
+                };
+                let _ = write!(body, "  c{idx} = {val}\n", idx = c.index, val = val);
+            }
+            body.push_str("</pre>\n");
+
+            body.push_str("<p class=\"muted\">Conditions marked <code>*</code> were short-circuited in the baseline row; the new test must drive inputs so they get evaluated to either T or F.</p>\n");
+        }
+        None => {
+            body.push_str("<p>No baseline row exists yet — every existing test row short-circuited before reaching this condition. To drive coverage to this condition, expand the test corpus so prior conditions evaluate in the direction that allows control to flow here.</p>\n");
+        }
+    }
+
+    body.push_str("</div>\n");
+
+    // Copy-paste test stub. We don't have the function signature handy
+    // (would require linking the manifest's function_name back to a
+    // Rust source declaration), so the stub is structural — the agent
+    // or reviewer fills in the call. Worth more than nothing.
+    body.push_str("<h2>Suggested test stub</h2>\n");
+    body.push_str("<pre class=\"stub\">");
+    let _ = write!(
+        body,
+        "#[test]\nfn closes_gap_d{did}_c{ci}() {{\n    // Verdict: {verd}\n    // Source: {src}:{line}\n    // Branch:  {br}\n    //\n    // TODO: drive the function so condition c{ci} evaluates to the\n    // value above and the resulting decision outcome differs from\n    // the existing pair row.\n    todo!(\"witness viz: gap drill-down for d#{did}/c{ci}\");\n}}",
+        did = decision.id,
+        ci = condition.index,
+        verd = escape(verdict_name),
+        src = escape(&decision.source_file),
+        line = decision.source_line,
+        br = condition.branch_id,
+    );
+    body.push_str("</pre>\n");
+
+    body.push_str("<p class=\"muted\">After adding the test, re-run: <code>witness instrument && witness run --invoke run_row_NEW && witness report</code>. The condition should flip from <code>gap</code> to <code>proved</code>.</p>\n");
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────
@@ -289,7 +458,7 @@ fn row_class_for(row: &TruthRow, gap_indices: &std::collections::BTreeSet<u32>) 
     ""
 }
 
-fn render_conditions(decision: &DecisionReport) -> String {
+fn render_conditions(decision: &DecisionReport, verdict_name: &str) -> String {
     let mut out = String::from("<ul class=\"conditions\">\n");
     for c in &decision.conditions {
         let _ = write!(out, "<li class=\"cond-{status}\">", status = escape(&c.status));
@@ -310,6 +479,15 @@ fn render_conditions(decision: &DecisionReport) -> String {
                 a = pair.first().copied().unwrap_or(0),
                 b = pair.get(1).copied().unwrap_or(0),
                 interp = escape(interp),
+            );
+        }
+        if c.status != "proved" {
+            let _ = write!(
+                out,
+                r#" <a class="gap-link" href="/gap/{verdict}/{did}/{ci}">view gap →</a>"#,
+                verdict = escape(verdict_name),
+                did = decision.id,
+                ci = c.index,
             );
         }
         out.push_str("</li>\n");

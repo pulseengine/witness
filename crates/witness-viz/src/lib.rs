@@ -27,6 +27,10 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(views::index))
         .route("/verdict/{name}", get(views::verdict))
         .route("/decision/{verdict}/{decision_id}", get(views::decision))
+        .route(
+            "/gap/{verdict}/{decision_id}/{condition_index}",
+            get(views::gap),
+        )
         .route("/api/v1/summary", get(api::summary))
         .route("/api/v1/verdicts", get(api::verdicts))
         .route("/api/v1/verdict/{name}", get(api::verdict_detail))

@@ -7,6 +7,97 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-04-27
+
+### Added — gap drill-down view (`/gap/{verdict}/{decision}/{condition}`)
+
+The reviewer-facing twin of MCP's `find_missing_witness`. For every
+condition that isn't `proved`, witness-viz now renders a tutorial-
+style page with three modes:
+
+- **Gap conditions** — explains "to prove condition `cN` independently
+  affects the decision, you need a row where `cN = X` and the outcome
+  differs from row `R` (where `cN = !X`)". Renders the full required
+  condition vector + a copy-paste Rust test stub:
+
+  ```rust
+  #[test]
+  fn closes_gap_d2_c2() {
+      // Verdict: parser_dispatch
+      // Source: memchr.rs:40
+      // Branch: 2
+      //
+      // TODO: drive the function so condition c2 evaluates to F and
+      // the resulting decision outcome differs from existing pair row.
+      todo!("witness viz: gap drill-down for d#2/c2");
+  }
+  ```
+
+- **Proved conditions** — early-out: "Already proved by rows X and Y
+  ({interpretation}). No action needed." Stops agents from churning
+  on satisfied gaps.
+
+- **Dead conditions** — reachability hint: "the runtime never reached
+  this branch under any test row. The compiler may have folded the
+  predicate, or the call-path is unreachable from the harness."
+
+The condition list on `/decision/{verdict}/{id}` now renders a
+`view gap →` link next to every non-proved condition. One click takes
+the reviewer from the truth table to the tutorial — that's the
+v0.9.0-brief promise of "truth-table-first PR review" delivered.
+
+### Added — real HTMX 2.0.4 bundle
+
+`crates/witness-viz/build.rs` ensures `assets/htmx.min.js` is the real
+htmx 2.0.4 bundle (~50 KB) on every clean build. Downloaded via
+system `curl` from `unpkg.com` if missing or stub-sized; falls back
+to the placeholder with a `cargo:warning` when offline (set
+`WITNESS_VIZ_OFFLINE=1` to force-skip the download).
+
+`/assets/htmx.min.js` now serves the real bundle. Visualiser pages
+support `hx-*` attributes for in-place swaps; existing full-page
+`<a href>` navigation continues to work as the no-JS fallback.
+
+### Added — Playwright @smoke subset + gap.spec.ts
+
+- New `gap.spec.ts` — 5 tests verifying gap-view rendering for proved,
+  gap, and dead conditions plus the `/decision → /gap` link path.
+- `@smoke` tag on the most representative test in each spec file
+  (5 tests total, runnable via `npm run test:smoke`).
+- All 30 Playwright tests pass against the live witness-viz binary
+  serving the v0.8.1 evidence bundle (`/tmp/v081-suite/`).
+
+### Fixed — `verdicts count matches dashboard table` test
+
+The v0.9.0 test counted `<tr>` elements in the dashboard table
+expecting an explicit `.total-row` filter. The dashboard doesn't
+render a TOTAL row (one is in `SUMMARY.txt` instead), so the count
+included the thead row and tripped. Now counts `a[href^="/verdict/"]`
+which is unambiguous.
+
+### Notes for v0.9.x
+
+- Per-DWARF-inlined-context outcome tracking (the v0.8.3 fold-in)
+  remains v0.9.2's substance work. Architectural change to instrument-
+  ation; deserves its own release.
+- Visualiser self-witnessing (instrument witness-viz, drive via
+  Playwright, report self-coverage on every release) — foundations
+  in place; CI step + ratchet still pending.
+- HTMX-powered in-place swaps on the gap-link click — the markup is
+  ready (`hx-get` attributes), the styling for the swap target needs
+  one more pass.
+
+### Implements / Verifies
+
+- **REQ-038** — interactive truth-table visualiser, *gap drill-down
+  delivered* in addition to v0.9.0's truth table view.
+- **REQ-043** — superior PR-review experience: the
+  truth-table → tutorial-stub flow is the headline differentiator vs
+  LDRA / VectorCAST / RapiCover / cargo-llvm-cov. None of those tools
+  render a missing-witness row + needed condition vector.
+- 30 Playwright tests pass; `cargo test --workspace --release` shows
+  47 unit + 7 integration + 0 failures.
+
 ## [0.9.0] — 2026-04-27
 
 ### Headline — the agent UX chapter begins
