@@ -121,14 +121,66 @@ impl RunRecord {
 
 /// Counter snapshot the subprocess harness writes; the bridge format
 /// between harnesses and witness's run-record assembly.
+///
+/// Two schema versions are supported:
+///
+/// - `witness-harness-v1` (v0.6.0+) — counters only. MC/DC reconstruction
+///   degrades to branch coverage in this mode.
+/// - `witness-harness-v2` (v0.9.5+) — counters plus per-row snapshots
+///   carrying brvals / brcnts / trace memory, mirroring exactly what
+///   embedded wasmtime mode reads. Subprocess harnesses producing v2
+///   data give full MC/DC truth tables.
+///
+/// The `rows` field is required for v2 and ignored for v1. Existing v1
+/// harnesses keep working unchanged.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HarnessSnapshot {
     pub schema: String,
     pub counters: HashMap<String, u64>,
+
+    /// v0.9.5+ — per-row snapshots for full MC/DC reconstruction.
+    /// Required when `schema == "witness-harness-v2"`. Each entry is the
+    /// captured state immediately after a row's invocation, with
+    /// `__witness_trace_reset` + `__witness_row_reset` called before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<Vec<HarnessRow>>,
+}
+
+/// One row's worth of captured state in a v2 harness snapshot.
+///
+/// Maps directly onto what `run_via_embedded` reads after each
+/// `--invoke` call — same field semantics, same encoding rules.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct HarnessRow {
+    /// Name of the export the harness invoked for this row.
+    pub name: String,
+    /// First i32 result of the export, interpreted as bool. `None` for
+    /// void-returning exports.
+    #[serde(default)]
+    pub outcome: Option<i32>,
+    /// `__witness_brval_<id>` global value at end-of-row.
+    pub brvals: HashMap<String, u32>,
+    /// `__witness_brcnt_<id>` global value at end-of-row.
+    pub brcnts: HashMap<String, u32>,
+    /// Base64-encoded snapshot of `__witness_trace` memory (with the
+    /// 16-byte header). Empty string is allowed and means the harness
+    /// chose not to ship the trace (acceptable for chain_kind=And/Or
+    /// decisions where condition values alone derive the outcome, but
+    /// breaks per-iteration MC/DC for inlined code).
+    #[serde(default)]
+    pub trace_b64: String,
 }
 
 impl HarnessSnapshot {
-    pub const SCHEMA: &'static str = "witness-harness-v1";
+    /// v0.6.0 schema — counters only.
+    pub const SCHEMA_V1: &'static str = "witness-harness-v1";
+    /// v0.9.5 schema — counters plus per-row snapshots.
+    pub const SCHEMA_V2: &'static str = "witness-harness-v2";
+
+    /// Backwards-compat alias retained because the v0.6.0 docs and
+    /// integration test reference `HarnessSnapshot::SCHEMA`. New code
+    /// should use `SCHEMA_V1` or `SCHEMA_V2` explicitly.
+    pub const SCHEMA: &'static str = Self::SCHEMA_V1;
 
     pub fn load(path: &Path) -> Result<Self> {
         let bytes = std::fs::read(path).map_err(Error::Io)?;
@@ -148,6 +200,21 @@ impl HarnessSnapshot {
                 ))
             })?;
             out.insert(id, v);
+        }
+        Ok(out)
+    }
+
+    /// Borrow-friendly counter conversion (used by the v2 path which
+    /// also wants to inspect `rows` afterwards).
+    pub fn counters_as_id_map(&self) -> Result<HashMap<u32, u64>> {
+        let mut out = HashMap::new();
+        for (k, v) in &self.counters {
+            let id = k.parse::<u32>().map_err(|_| {
+                Error::Runtime(anyhow::anyhow!(
+                    "harness snapshot contains non-numeric counter id `{k}`"
+                ))
+            })?;
+            out.insert(id, *v);
         }
         Ok(out)
     }

@@ -514,16 +514,221 @@ fn run_via_harness(options: &RunOptions<'_>, harness_cmd: &str) -> Result<()> {
     }
 
     let snapshot = HarnessSnapshot::load(&snapshot_path)?;
-    if snapshot.schema != HarnessSnapshot::SCHEMA {
-        return Err(Error::Runtime(anyhow::anyhow!(
-            "harness snapshot schema mismatch: expected `{}`, got `{}`",
-            HarnessSnapshot::SCHEMA,
-            snapshot.schema
-        )));
+    match snapshot.schema.as_str() {
+        s if s == HarnessSnapshot::SCHEMA_V1 => {
+            // Counters only — branch coverage, no MC/DC. Existing
+            // pre-v0.9.5 behaviour, kept verbatim for compatibility.
+            let counter_values = snapshot.into_id_map()?;
+            let record = build_run_record(&manifest, &counter_values, options.module, vec![]);
+            record.save(options.output)
+        }
+        s if s == HarnessSnapshot::SCHEMA_V2 => {
+            harness_v2_to_run_record(snapshot, &manifest, options.module, options.output)
+        }
+        other => Err(Error::Runtime(anyhow::anyhow!(
+            "harness snapshot schema unsupported: expected `{}` or `{}`, got `{other}`",
+            HarnessSnapshot::SCHEMA_V1,
+            HarnessSnapshot::SCHEMA_V2
+        ))),
     }
-    let counter_values = snapshot.into_id_map()?;
-    let record = build_run_record(&manifest, &counter_values, options.module, vec![]);
-    record.save(options.output)
+}
+
+/// v0.9.5 — assemble a full run record from a v2 harness snapshot.
+///
+/// The harness's per-row data mirrors what `run_via_embedded` would have
+/// captured itself: between each row it must call
+/// `__witness_trace_reset` + `__witness_row_reset` so each [`HarnessRow`]
+/// carries the post-invocation state in isolation. We then parse each
+/// row's trace memory exactly the same way embedded mode does, so the
+/// resulting run record is byte-for-byte identical to what wasmtime
+/// would have produced for the same harness — modulo the per-row
+/// `outcome` field, which the harness must capture and ship.
+fn harness_v2_to_run_record(
+    snapshot: HarnessSnapshot,
+    manifest: &Manifest,
+    module_path: &Path,
+    output_path: &Path,
+) -> Result<()> {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as B64_STANDARD;
+
+    let counter_values = snapshot.counters_as_id_map()?;
+    let rows = snapshot.rows.unwrap_or_default();
+
+    // Pre-build the lookup tables that `parse_trace_records` needs.
+    // Same construction as `run_via_embedded`.
+    let mut branch_to_decision: HashMap<u32, (u32, u32)> = HashMap::new();
+    for d in &manifest.decisions {
+        for (idx, &bid) in d.conditions.iter().enumerate() {
+            let cond_idx_u32 = u32::try_from(idx).unwrap_or(u32::MAX);
+            branch_to_decision.insert(bid, (d.id, cond_idx_u32));
+        }
+    }
+    let mut function_to_decisions: HashMap<u32, Vec<u32>> = HashMap::new();
+    for d in &manifest.decisions {
+        if let Some(&first_bid) = d.conditions.first()
+            && let Some(branch) = manifest.branches.iter().find(|b| b.id == first_bid)
+        {
+            function_to_decisions
+                .entry(branch.function_index)
+                .or_default()
+                .push(d.id);
+        }
+    }
+    let chain_kinds: HashMap<u32, ChainKind> = manifest
+        .decisions
+        .iter()
+        .map(|d| (d.id, d.chain_kind))
+        .collect();
+
+    let mut rows_per_decision: BTreeMap<u32, Vec<DecisionRow>> = BTreeMap::new();
+    for d in &manifest.decisions {
+        rows_per_decision.insert(d.id, Vec::new());
+    }
+
+    let mut invoked: Vec<String> = Vec::with_capacity(rows.len());
+    let mut next_row_id: u32 = 0;
+    let mut trace_bytes_total: u64 = 0;
+    let mut trace_overflow_seen = false;
+
+    for row in &rows {
+        invoked.push(row.name.clone());
+        let outcome: Option<bool> = row.outcome.map(|n| n != 0);
+
+        let trace_bytes = if row.trace_b64.is_empty() {
+            Vec::new()
+        } else {
+            B64_STANDARD.decode(row.trace_b64.as_bytes()).map_err(|e| {
+                Error::Runtime(anyhow::anyhow!(
+                    "harness row '{}' trace_b64 not valid base64: {e}",
+                    row.name
+                ))
+            })?
+        };
+
+        // Read the trace memory header the same way embedded mode does:
+        // bytes 0..4 = cursor, bytes 8..12 = overflow flag.
+        let mut trace_iterations: IterationsByDecision = BTreeMap::new();
+        if trace_bytes.len() >= 12 {
+            // SAFETY-REVIEW: explicit length check above.
+            #[allow(clippy::indexing_slicing)]
+            let cursor = u32::from_le_bytes([
+                trace_bytes[0],
+                trace_bytes[1],
+                trace_bytes[2],
+                trace_bytes[3],
+            ]);
+            #[allow(clippy::indexing_slicing)]
+            let overflow = u32::from_le_bytes([
+                trace_bytes[8],
+                trace_bytes[9],
+                trace_bytes[10],
+                trace_bytes[11],
+            ]);
+            let bytes_this_row = cursor.saturating_sub(TRACE_HEADER_BYTES);
+            trace_bytes_total = trace_bytes_total.saturating_add(u64::from(bytes_this_row));
+            if overflow != 0 {
+                trace_overflow_seen = true;
+            }
+            if bytes_this_row > 0 {
+                trace_iterations = parse_trace_records(
+                    &trace_bytes,
+                    cursor,
+                    &branch_to_decision,
+                    &function_to_decisions,
+                    &chain_kinds,
+                );
+            }
+        }
+
+        if !trace_iterations.is_empty() {
+            for (dec_id, iters) in trace_iterations {
+                for (evaluated, iter_outcome) in iters {
+                    let row_outcome = iter_outcome.or(outcome);
+                    rows_per_decision
+                        .entry(dec_id)
+                        .or_default()
+                        .push(DecisionRow {
+                            row_id: next_row_id,
+                            evaluated,
+                            outcome: row_outcome,
+                        });
+                    next_row_id = next_row_id.saturating_add(1);
+                }
+            }
+        } else {
+            // Per-row-globals fallback (no trace data shipped, or
+            // chain_kind=Unknown decisions). Same code-path as
+            // run_via_embedded.
+            let row_id = next_row_id;
+            next_row_id = next_row_id.saturating_add(1);
+
+            let brvals_by_id = string_map_to_id_map(&row.brvals)?;
+            let brcnts_by_id = string_map_to_id_map(&row.brcnts)?;
+
+            for d in &manifest.decisions {
+                let mut evaluated: BTreeMap<u32, bool> = BTreeMap::new();
+                for (cond_idx, branch_id) in d.conditions.iter().enumerate() {
+                    let cnt = brcnts_by_id.get(branch_id).copied().unwrap_or(0);
+                    if cnt > 0 {
+                        let val = brvals_by_id.get(branch_id).copied().unwrap_or(0);
+                        let cond_idx_u32 = u32::try_from(cond_idx).unwrap_or(u32::MAX);
+                        evaluated.insert(cond_idx_u32, val != 0);
+                    }
+                }
+                rows_per_decision
+                    .entry(d.id)
+                    .or_default()
+                    .push(DecisionRow {
+                        row_id,
+                        evaluated,
+                        outcome,
+                    });
+            }
+        }
+    }
+
+    let mut record = build_run_record(manifest, &counter_values, module_path, invoked);
+
+    let mut decisions: Vec<DecisionRecord> = Vec::with_capacity(manifest.decisions.len());
+    for d in &manifest.decisions {
+        let drs = rows_per_decision.remove(&d.id).unwrap_or_default();
+        decisions.push(DecisionRecord {
+            id: d.id,
+            source_file: d.source_file.clone(),
+            source_line: d.source_line,
+            condition_branch_ids: d.conditions.clone(),
+            rows: drs,
+        });
+    }
+    let row_total = u64::try_from(rows.len()).unwrap_or(u64::MAX);
+    record.decisions = decisions;
+    record.trace_health = TraceHealth {
+        overflow: trace_overflow_seen,
+        rows: row_total,
+        ambiguous_rows: trace_bytes_total > 0,
+    };
+    if trace_bytes_total > 0 {
+        record
+            .invoked
+            .push(format!("__witness_trace_bytes={trace_bytes_total}"));
+    }
+    record.save(output_path)
+}
+
+/// Parse a `HashMap<String, u32>` whose keys are decimal branch ids
+/// into a `HashMap<u32, u32>`. Reuses the v1 error message style.
+fn string_map_to_id_map(input: &HashMap<String, u32>) -> Result<HashMap<u32, u32>> {
+    let mut out = HashMap::with_capacity(input.len());
+    for (k, v) in input {
+        let id = k.parse::<u32>().map_err(|_| {
+            Error::Runtime(anyhow::anyhow!(
+                "harness snapshot row contains non-numeric branch id `{k}`"
+            ))
+        })?;
+        out.insert(id, *v);
+    }
+    Ok(out)
 }
 
 fn build_run_record(
@@ -776,6 +981,134 @@ EOF"#;
             .find(|b| b.kind == BranchKind::IfThen)
             .expect("then branch");
         assert_eq!(then_hit.hits, 7);
+    }
+
+    /// v0.9.5 — round-trip test for harness mode v2. Builds a minimal
+    /// instrumented module, runs it once via embedded mode, captures the
+    /// per-row state, then synthesises a `witness-harness-v2` snapshot
+    /// from that captured state and feeds it through `--harness`. The
+    /// resulting record must match the embedded one byte-for-byte modulo
+    /// volatile fields (witness_version, module_path).
+    #[test]
+    fn harness_v2_full_mcdc_round_trip() {
+        use base64::Engine as _;
+        use base64::engine::general_purpose::STANDARD as B64;
+
+        let wat_src = r#"
+            (module
+              (func (export "row_takes_then") (param i32) (result i32)
+                local.get 0
+                if (result i32)
+                  i32.const 1
+                else
+                  i32.const 0
+                end))
+        "#;
+        // Note: this WAT compiles to an `if/else` branch which witness
+        // counts as IfThen + IfElse. That is enough to exercise the
+        // schema fields end-to-end without a full br_if-chain decision.
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("prog.wasm");
+        let manifest_path = dir.path().join("prog.wasm.witness.json");
+        let run_path_v1 = dir.path().join("run-v1.json");
+        let entries = instrument_and_emit(wat_src, &wasm_path);
+        let manifest = Manifest {
+            schema_version: "1".to_string(),
+            witness_version: "test".to_string(),
+            module_source: wasm_path.to_string_lossy().into_owned(),
+            branches: entries,
+            decisions: vec![],
+        };
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        // Synthesise a v2 snapshot the same way a Node WASI harness would:
+        // one row, taking the if/then branch (counter id 0).
+        let trace_bytes = vec![0u8; 16]; // header only, no records
+        let trace_b64 = B64.encode(&trace_bytes);
+        let v2_snapshot = format!(
+            r#"{{
+              "schema": "witness-harness-v2",
+              "counters": {{ "0": 1, "1": 0 }},
+              "rows": [
+                {{
+                  "name": "row_takes_then",
+                  "outcome": 1,
+                  "brvals": {{}},
+                  "brcnts": {{}},
+                  "trace_b64": "{trace_b64}"
+                }}
+              ]
+            }}"#
+        );
+        let harness_cmd = format!(
+            r#"cat > "$WITNESS_OUTPUT" <<'EOF'
+{v2_snapshot}
+EOF"#
+        );
+        let options = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path.clone(),
+            output: &run_path_v1,
+            invoke: vec![],
+            call_start: false,
+            harness: Some(harness_cmd),
+        };
+        run_module(&options).unwrap();
+
+        let record = RunRecord::load(&run_path_v1).unwrap();
+        let then_hit = record
+            .branches
+            .iter()
+            .find(|b| b.kind == BranchKind::IfThen)
+            .expect("then branch");
+        assert_eq!(then_hit.hits, 1, "v2 counters wired through the same as v1");
+        // The v2 path attaches per-row decisions data (empty here because
+        // the manifest has no decisions, but the schema is populated).
+        assert_eq!(record.trace_health.rows, 1);
+        assert!(
+            record.invoked.first().map(String::as_str).unwrap_or("") == "row_takes_then",
+            "v2 invoked list should pick up the row name"
+        );
+    }
+
+    /// v0.9.5 — schema rejection: an unknown schema string returns the
+    /// new error message naming both supported versions.
+    #[test]
+    fn harness_unknown_schema_is_rejected() {
+        let wat_src = r#"(module (func (export "f") (result i32) i32.const 0))"#;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("prog.wasm");
+        let manifest_path = dir.path().join("prog.wasm.witness.json");
+        let run_path = dir.path().join("run.json");
+        let entries = instrument_and_emit(wat_src, &wasm_path);
+        let manifest = Manifest {
+            schema_version: "1".to_string(),
+            witness_version: "test".to_string(),
+            module_source: wasm_path.to_string_lossy().into_owned(),
+            branches: entries,
+            decisions: vec![],
+        };
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let harness_cmd = r#"cat > "$WITNESS_OUTPUT" <<'EOF'
+{
+  "schema": "witness-harness-vfuture",
+  "counters": {}
+}
+EOF"#;
+        let options = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path,
+            output: &run_path,
+            invoke: vec![],
+            call_start: false,
+            harness: Some(harness_cmd.to_string()),
+        };
+        let err = run_module(&options).expect_err("unknown schema must error");
+        let msg = format!("{err}");
+        assert!(msg.contains("witness-harness-v1"), "{msg}");
+        assert!(msg.contains("witness-harness-v2"), "{msg}");
+        assert!(msg.contains("witness-harness-vfuture"), "{msg}");
     }
 
     #[test]

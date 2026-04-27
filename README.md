@@ -84,6 +84,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.9.5** | `witness-harness-v2` — MC/DC-capable subprocess protocol (counters + brvals + brcnts + base64 trace memory) |
 | **v0.9.4** | Tester-review Tier 0: ship witness-viz in releases, component preflight, harness protocol docs, error-tag fixes, walrus warning silenced |
 | **v0.9.3** | Fix `json_lite` Linux CI build (`unused_mut` under `-D warnings`) |
 | **v0.9.2** | Stacked coverage bars on dashboard + 12th verdict (base64_decode) + visual TOTAL row |
@@ -282,16 +283,89 @@ await fs.writeFile(
 );
 ```
 
-### Caveats — when to choose embedded mode instead
+### v2 schema — full MC/DC from a subprocess (`witness-harness-v2`, v0.9.5+)
 
-Harness mode degrades to **branch coverage only**: MC/DC reconstruction
-needs per-row condition vectors (`__witness_brval_<id>`,
-`__witness_brcnt_<id>`) and trace-buffer outcomes (`__witness_trace`),
-which v1 does not transport. If you want truth tables, run via
-embedded wasmtime: `witness run module.wasm --invoke row_0 ...`. The
-v2 protocol (extending `counters` with `brvals`, `brcnts`, and the
-base64-encoded trace memory) is on the v0.9.x roadmap; harness mode
-v1 is the right choice today only when you cannot embed wasmtime.
+`witness-harness-v1` carries counters only, so MC/DC reconstruction
+degrades to branch coverage. **v0.9.5 ships v2** — the same wire
+format extended with per-row `brvals` / `brcnts` / `trace_b64`,
+mirroring exactly what embedded wasmtime mode reads. A v2-aware
+harness produces full truth tables identical to embedded.
+
+```json
+{
+  "schema": "witness-harness-v2",
+  "counters": { "0": 7, "1": 3 },
+  "rows": [
+    {
+      "name": "run_row_0",
+      "outcome": 1,
+      "brvals": { "0": 1, "1": 0 },
+      "brcnts": { "0": 1, "1": 1 },
+      "trace_b64": "AAAA..."
+    },
+    {
+      "name": "run_row_1",
+      "outcome": 0,
+      "brvals": { "0": 0, "1": 0 },
+      "brcnts": { "0": 1, "1": 1 },
+      "trace_b64": "AAAA..."
+    }
+  ]
+}
+```
+
+A v2 harness must call `__witness_trace_reset` and
+`__witness_row_reset` between rows so each `HarnessRow` carries
+isolated post-invocation state. The trace bytes are the raw 64 KiB ×
+N pages of `__witness_trace` memory, base64 standard-encoded
+(including the 16-byte header).
+
+```js
+// harness.mjs — minimal witness-harness-v2 implementation
+import fs from "node:fs/promises";
+import { WASI } from "node:wasi";
+
+const mod = await WebAssembly.compile(
+  await fs.readFile(process.env.WITNESS_MODULE),
+);
+const wasi = new WASI({ version: "preview1" });
+const inst = await WebAssembly.instantiate(mod, { wasi_snapshot_preview1: wasi.wasiImport });
+const exp = inst.exports;
+
+const traceMem = exp.__witness_trace;
+const rows = [];
+const rowNames = ["run_row_0", "run_row_1", "run_row_2"];
+for (const name of rowNames) {
+  exp.__witness_trace_reset();
+  exp.__witness_row_reset();
+  const out = exp[name]();
+
+  const brvals = {}, brcnts = {};
+  for (const [k, v] of Object.entries(exp)) {
+    if (k.startsWith("__witness_brval_")) brvals[k.replace("__witness_brval_", "")] = Number(v.value);
+    else if (k.startsWith("__witness_brcnt_")) brcnts[k.replace("__witness_brcnt_", "")] = Number(v.value);
+  }
+  const trace_b64 = Buffer.from(traceMem.buffer).toString("base64");
+  rows.push({ name, outcome: out, brvals, brcnts, trace_b64 });
+}
+
+const counters = {};
+for (const [k, v] of Object.entries(exp)) {
+  if (k.startsWith("__witness_counter_")) counters[k.replace("__witness_counter_", "")] = Number(v.value);
+}
+await fs.writeFile(
+  process.env.WITNESS_OUTPUT,
+  JSON.stringify({ schema: "witness-harness-v2", counters, rows }),
+);
+```
+
+### v1 stays supported (counters-only fallback)
+
+Existing `witness-harness-v1` harnesses keep working unchanged in
+v0.9.5+. The schema-string dispatch picks v1's counters-only path,
+producing branch coverage like before. Migrate when you need truth
+tables — v1 → v2 is a strict superset, no breaking changes to the v1
+fields.
 
 ## Where it fits
 

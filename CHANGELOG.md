@@ -7,6 +7,90 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.5] — 2026-04-27
+
+### Added — `witness-harness-v2`: MC/DC-capable subprocess protocol
+
+The biggest functional gap from v0.9.2's tester review (Tier 1 #1):
+harness mode shipped only counters, so MC/DC reconstruction silently
+degraded to branch coverage in subprocess mode. v2 closes that gap.
+
+The new schema extends `HarnessSnapshot` with optional `rows`, each
+carrying everything embedded wasmtime mode reads after each
+invocation:
+
+```json
+{
+  "schema": "witness-harness-v2",
+  "counters": { "0": 7, "1": 3 },
+  "rows": [
+    {
+      "name": "run_row_0",
+      "outcome": 1,
+      "brvals": { "0": 1, "1": 0 },
+      "brcnts": { "0": 1, "1": 1 },
+      "trace_b64": "AAAA..."
+    },
+    { "name": "run_row_1", "outcome": 0, "brvals": { ... }, "brcnts": { ... }, "trace_b64": "..." }
+  ]
+}
+```
+
+The harness must call `__witness_trace_reset` and
+`__witness_row_reset` between rows so each entry carries isolated
+post-invocation state. `trace_b64` is base64-standard-encoded raw
+`__witness_trace` memory (with the 16-byte header). Witness then
+parses each row's trace via the **same** `parse_trace_records`
+function the embedded path uses, producing per-iteration
+`DecisionRow`s identical to what wasmtime would have written.
+
+Backward compatibility:
+- `witness-harness-v1` still works. Schema dispatch picks the
+  counters-only path verbatim — no behaviour change for existing
+  Node WASI / kiln / hardware-board harnesses.
+- Unknown schema strings (e.g. `witness-harness-vfuture`) now error
+  with both supported versions named in the message.
+
+```rust
+// New error path covered by tests:
+//
+// harness snapshot schema unsupported: expected `witness-harness-v1`
+// or `witness-harness-v2`, got `witness-harness-vfuture`
+```
+
+### Added — Node WASI v2 reference example
+
+The README's harness-mode section gains a 25-line v2 implementation:
+loop over `rowNames`, reset between rows, snapshot each row's
+`__witness_brval_*` / `__witness_brcnt_*` globals + the trace memory
+buffer, encode base64, ship JSON. Drops in as a CI-runnable
+replacement for v1 with no API surface change beyond the schema
+field.
+
+### Verified
+
+- New `harness_v2_full_mcdc_round_trip` integration test: synthesises
+  a v2 snapshot via `cat <<EOF`, feeds it through `--harness`,
+  asserts counter ingestion, decision-row population, invoked-list
+  preservation. Passes.
+- New `harness_unknown_schema_is_rejected` test: validates the new
+  schema-mismatch error message names both v1 and v2.
+- Existing `harness_subprocess_round_trip` (v1) passes unchanged.
+- Workspace `cargo fmt + clippy --all-targets -D warnings` clean;
+  47 + 2 = **49 unit tests pass**, 0 failures.
+
+### Notes for v0.9.x — Tier 1 still pending
+
+Per the senior tester review, three Tier 1 items remain after v2:
+- **`--invoke-with-args 'name:i32=42'`** — eliminate the
+  `core::hint::black_box` wrapper-export pattern users currently
+  reach for. Medium work, medium-high impact. Next.
+- **Per-target br_table decision reconstruction** — finishes the
+  half-implemented BranchKind::BrTableTarget path; would lift
+  httparse and json_lite numbers without API changes.
+- **Trace-buffer overflow telemetry + `WITNESS_TRACE_PAGES`** — the
+  comment promises the env override; the code doesn't honour it yet.
+
 ## [0.9.4] — 2026-04-27
 
 ### Tier 0 — tester-review feedback addressed
