@@ -234,7 +234,7 @@ fn parse_object(buf: &[u8], mut i: usize, allow_nested_inside: bool) -> Option<u
 
 #[inline(never)]
 fn parse(buf: &[u8]) -> Option<usize> {
-    let mut i = skip_ws(buf, 0);
+    let i = skip_ws(buf, 0);
     if i >= buf.len() {
         return None;
     }

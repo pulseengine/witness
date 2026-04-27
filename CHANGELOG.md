@@ -7,6 +7,44 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-04-27
+
+### Fixed — `json_lite` build under `-D warnings` (Linux CI)
+
+The CI workflow runs with `RUSTFLAGS="-D warnings"`, which promotes
+every Rust lint to an error. `json_lite` carried a single
+`unused_mut` warning at `verdicts/json_lite/src/lib.rs:237` that's
+been silently failing the verdict-suite step on every release tag
+since v0.7.4 — the Release workflow does not set `-D warnings` so
+release artefacts kept publishing, but CI was failing for the same
+build reason.
+
+```diff
+-    let mut i = skip_ws(buf, 0);
++    let i = skip_ws(buf, 0);
+```
+
+Trivial change, rebound effect: the verdict suite now passes on
+Linux CI for every release line going forward, so the green/red CI
+badge tracks reality again.
+
+### Verified — full verdict suite under `-D warnings`
+
+Built every verdict (`leap_year`, `range_overlap`, `triangle`,
+`state_guard`, `mixed_or_and`, `safety_envelope`, `parser_dispatch`,
+`httparse`, `nom_numbers`, `state_machine`, `json_lite`,
+`base64_decode`) with `RUSTFLAGS="-D warnings"` after a force-clean.
+All 12 build clean. Workspace `cargo clippy --all-targets --release`
+passes with `-D warnings` too.
+
+### Implements / Verifies
+
+- 47 unit + 7 integration tests pass; 30 Playwright tests pass.
+- All 12 verdict fixtures build clean under the strictest lint
+  config CI uses.
+- Tags v0.8.2, v0.9.0, v0.9.1, v0.9.2 pushed in this session;
+  Release runs queued for each.
+
 ## [0.9.2] — 2026-04-27
 
 ### Added — stacked coverage bars on the dashboard
