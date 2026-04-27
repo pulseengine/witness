@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/pulseengine/witness/discussions
+    about: For open-ended questions about MC/DC, Wasm-as-measurement-point, or the V-model story, prefer Discussions over Issues.

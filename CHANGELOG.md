@@ -7,6 +7,94 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.9] — 2026-04-27
+
+### Added — `pulseengine/witness/.github/actions/witness@v1`
+
+Tester review Tier 3 #2: a reusable composite GitHub Action so any
+Rust crate can adopt the witness pipeline in 8 lines of YAML.
+
+```yaml
+- uses: pulseengine/witness/.github/actions/witness@v1
+  with:
+    module: build/app.wasm
+    invoke: |
+      run_row_0
+      run_row_1
+      run_row_2
+    upload-to-release: ${{ startsWith(github.ref, 'refs/tags/') }}
+```
+
+The action:
+1. Downloads the latest (or pinned) `witness` + `witness-viz` release
+   tarball for the runner's platform (linux x86_64/aarch64, macOS
+   x86_64/aarch64). No witness compile cost in adopters' CI.
+2. Runs `instrument → run → predicate → attest`.
+3. On tag-push events, uploads predicate, signed DSSE envelope, and
+   verifying public key to the matching GitHub release.
+
+Inputs: `witness-version`, `module`, `invoke`, `invoke-with-args`
+(v0.9.6+), `output-dir`, `predicate-name`, `sign`,
+`upload-to-release`. Outputs paths to every artefact for downstream
+steps to consume.
+
+`.github/actions/witness/README.md` documents adoption + verification
+on the consumer side (`witness verify` or `cosign verify-blob`).
+
+### Added — `.github/ISSUE_TEMPLATE/`
+
+Tester review Tier 3 #6: empty issue tracker hides feedback channels.
+Three templates land:
+
+- **`instrument-failure.md`** — for `witness instrument` errors,
+  manifest-content surprises. Asks for witness version, rustc target,
+  whether the input is a core module or a Component.
+- **`mcdc-surprise.md`** — for unexpected MC/DC numbers (proved/gap/
+  dead/full). Asks for the source-level decision, manifest excerpt,
+  what the user already ruled out.
+- **`harness-question.md`** — for questions about `--harness <cmd>`,
+  v1/v2 schemas, and non-wasmtime runtimes. Includes schema-version
+  checkboxes.
+
+Plus `config.yml` redirecting open-ended questions to Discussions.
+
+### Changed — release artefact rename
+
+Tester review Tier 3 #5: the v0.7.0+ wasm release asset shipped as
+`witness-component-vX.X.X-wasm32-wasip2.wasm` and got mistaken for an
+instrumentable target. It's actually the WASI 0.2.9 reporter
+component (used by sigil/loom plumbing tests, never as a `witness
+instrument` input). Renamed to:
+
+```
+witness-reporter-component-vX.X.X-wasm32-wasip2.wasm
+```
+
+Workflow `::notice::` annotation now spells out the purpose so
+release-notes readers see the intent at a glance.
+
+### Notes for v0.9.x — Tier 1+ still pending
+
+- **Per-DWARF-inlined-context outcome tracking** — the original
+  v0.8.3 fold-in target. Needs design pass before implementation.
+- **Per-arm `brval`/`brcnt` for `br_table`s** — multi-condition
+  match-guard MC/DC.
+- **`witness new <fixture>` template** — Tier 3 #1, would eliminate
+  90% of new-user friction. Half-scaffolded by the action above.
+- **JSON schemas in `docs/schemas/`** — Tier 2 #4. Lock the four
+  cross-tool contracts (`witness-mcdc/v1`, `witness-coverage/v1`,
+  `witness-rivet-evidence/v1`, `witness-trace-matrix/v1`).
+- **Qualifiable MC/DC checker crate extraction** — Tier 2 #2. Lift
+  `find_independent_effect_pair` (~70 LoC) into `witness-mcdc-checker`.
+
+### Verified
+
+- `cargo test --workspace --release` — **50 unit + 8 integration
+  tests pass**.
+- `cargo clippy --all-targets -D warnings` clean.
+- The action.yml structure mirrors the `.github/actions/compliance`
+  pattern already in use; both are composite shell-step actions.
+
 ## [0.9.8] — 2026-04-27
 
 ### Added — `WITNESS_TRACE_PAGES` env override at instrument time

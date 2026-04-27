@@ -151,10 +151,15 @@ jobs:
       - name: Stage wasm asset
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          ASSET="witness-component-${VERSION}-wasm32-wasip2.wasm"
+          # v0.9.9 rename: was `witness-component-...wasm` which
+          # confused users (per tester review) into thinking they
+          # could feed it to `witness instrument`. It's actually the
+          # WASI 0.2.9 *reporter* component — used by sigil/loom
+          # plumbing tests, not as a witness instrument target.
+          ASSET="witness-reporter-component-${VERSION}-wasm32-wasip2.wasm"
           cp crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm "$ASSET"
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
-          echo "::notice::witness-component built ($(wc -c < $ASSET) bytes); replaces v0.5–v0.6's 13 KB witness-core.wasm stub which had no callable exports"
+          echo "::notice::witness-reporter-component built ($(wc -c < $ASSET) bytes); WASI 0.2.9 reporter component, NOT an instrumentable target — see release notes"
 
       - uses: actions/upload-artifact@v4
         with:

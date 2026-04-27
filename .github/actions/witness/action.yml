@@ -1,0 +1,207 @@
+name: Witness MC/DC Coverage
+description: |
+  Instrument a Wasm module, run it, emit a signed in-toto coverage
+  predicate, and (optionally) upload the evidence as release assets.
+  Composable in 8 lines of YAML.
+author: pulseengine
+
+# v0.9.9 — first cut. Re-uses the existing release binaries from a
+# pulseengine/witness release rather than building from source, so
+# adopters don't pay the witness compile cost in their own CI.
+
+inputs:
+  witness-version:
+    description: |
+      Version of witness to download from
+      pulseengine/witness/releases. Defaults to the latest stable
+      release; pin to a specific tag (e.g. "v0.9.9") for hermetic
+      runs.
+    required: false
+    default: "latest"
+  module:
+    description: Path to the Wasm core module to instrument.
+    required: true
+  invoke:
+    description: |
+      Newline-separated list of `--invoke <export>` arguments to pass
+      to `witness run`. Each export must take zero arguments. Use
+      `invoke-with-args` for typed-arg exports.
+    required: false
+    default: ""
+  invoke-with-args:
+    description: |
+      Newline-separated list of `--invoke-with-args 'name:val,...'`
+      arguments. v0.9.6+.
+    required: false
+    default: ""
+  output-dir:
+    description: Directory to write witness outputs into.
+    required: false
+    default: witness-output
+  predicate-name:
+    description: |
+      Filename for the in-toto predicate (under output-dir). Default
+      keys it by the module's basename.
+    required: false
+    default: ""
+  sign:
+    description: |
+      "true" (default) generates an ephemeral Ed25519 keypair, signs
+      the predicate as a DSSE envelope, and ships the verifying key
+      alongside. "false" stops at the unsigned predicate.
+    required: false
+    default: "true"
+  upload-to-release:
+    description: |
+      When run on a tag-push event, set "true" to attach the witness
+      outputs to the GitHub release the tag points at.
+    required: false
+    default: "false"
+
+outputs:
+  output-dir:
+    description: Directory containing all witness outputs.
+    value: ${{ inputs.output-dir }}
+  predicate-path:
+    description: Path to the unsigned in-toto Statement JSON.
+    value: ${{ steps.compute-paths.outputs.predicate }}
+  envelope-path:
+    description: Path to the signed DSSE envelope (when sign=true).
+    value: ${{ steps.compute-paths.outputs.envelope }}
+  verifying-key-path:
+    description: Path to the public key (when sign=true).
+    value: ${{ steps.compute-paths.outputs.verifying-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Determine witness version
+      id: version
+      shell: bash
+      env:
+        REQUESTED: ${{ inputs.witness-version }}
+      run: |
+        if [ "$REQUESTED" = "latest" ]; then
+          # Resolve via GitHub's redirect-on-latest endpoint.
+          VERSION=$(curl -s -o /dev/null -w '%{redirect_url}' \
+            https://github.com/pulseengine/witness/releases/latest \
+            | sed 's|.*/||')
+        else
+          VERSION="$REQUESTED"
+        fi
+        echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Using witness $VERSION"
+
+    - name: Determine release asset
+      id: asset
+      shell: bash
+      run: |
+        OS=$(uname -s)
+        ARCH=$(uname -m)
+        case "$OS-$ARCH" in
+          Linux-x86_64)   TARGET=x86_64-unknown-linux-gnu ;;
+          Linux-aarch64)  TARGET=aarch64-unknown-linux-gnu ;;
+          Darwin-x86_64)  TARGET=x86_64-apple-darwin ;;
+          Darwin-arm64)   TARGET=aarch64-apple-darwin ;;
+          *) echo "unsupported runner $OS-$ARCH" >&2; exit 1 ;;
+        esac
+        echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+    - name: Download witness binaries
+      shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.value }}
+        TARGET: ${{ steps.asset.outputs.target }}
+      run: |
+        ARCHIVE="witness-${VERSION}-${TARGET}.tar.gz"
+        URL="https://github.com/pulseengine/witness/releases/download/${VERSION}/${ARCHIVE}"
+        curl -fsSL "$URL" -o /tmp/witness.tar.gz
+        tar -xzf /tmp/witness.tar.gz -C /tmp
+        chmod +x /tmp/witness /tmp/witness-viz 2>/dev/null || true
+        echo "/tmp" >> "$GITHUB_PATH"
+        /tmp/witness --version || true
+
+    - name: Compute output paths
+      id: compute-paths
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        MODULE: ${{ inputs.module }}
+        PREDICATE_NAME: ${{ inputs.predicate-name }}
+      run: |
+        mkdir -p "$OUTPUT_DIR"
+        BASENAME=$(basename "$MODULE" .wasm)
+        if [ -n "$PREDICATE_NAME" ]; then
+          PRED="$OUTPUT_DIR/$PREDICATE_NAME"
+        else
+          PRED="$OUTPUT_DIR/${BASENAME}-predicate.json"
+        fi
+        ENV="$OUTPUT_DIR/${BASENAME}-signed.dsse.json"
+        VK="$OUTPUT_DIR/${BASENAME}-verifying-key.pub"
+        echo "instrumented=$OUTPUT_DIR/${BASENAME}.inst.wasm" >> "$GITHUB_OUTPUT"
+        echo "run=$OUTPUT_DIR/${BASENAME}-run.json" >> "$GITHUB_OUTPUT"
+        echo "predicate=$PRED" >> "$GITHUB_OUTPUT"
+        echo "envelope=$ENV" >> "$GITHUB_OUTPUT"
+        echo "verifying-key=$VK" >> "$GITHUB_OUTPUT"
+
+    - name: Instrument
+      shell: bash
+      env:
+        MODULE: ${{ inputs.module }}
+        INSTRUMENTED: ${{ steps.compute-paths.outputs.instrumented }}
+      run: witness instrument "$MODULE" -o "$INSTRUMENTED"
+
+    - name: Run
+      shell: bash
+      env:
+        INSTRUMENTED: ${{ steps.compute-paths.outputs.instrumented }}
+        RUN: ${{ steps.compute-paths.outputs.run }}
+        INVOKE: ${{ inputs.invoke }}
+        INVOKE_WITH_ARGS: ${{ inputs.invoke-with-args }}
+      run: |
+        ARGS=()
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+          ARGS+=(--invoke "$line")
+        done <<< "$INVOKE"
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+          ARGS+=(--invoke-with-args "$line")
+        done <<< "$INVOKE_WITH_ARGS"
+        witness run "$INSTRUMENTED" "${ARGS[@]}" -o "$RUN"
+
+    - name: Predicate
+      shell: bash
+      env:
+        RUN: ${{ steps.compute-paths.outputs.run }}
+        INSTRUMENTED: ${{ steps.compute-paths.outputs.instrumented }}
+        PRED: ${{ steps.compute-paths.outputs.predicate }}
+      run: witness predicate --run "$RUN" --module "$INSTRUMENTED" -o "$PRED"
+
+    - name: Sign (DSSE)
+      if: ${{ inputs.sign == 'true' }}
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        PRED: ${{ steps.compute-paths.outputs.predicate }}
+        ENV: ${{ steps.compute-paths.outputs.envelope }}
+        VK: ${{ steps.compute-paths.outputs.verifying-key }}
+      run: |
+        SK_DIR=$(mktemp -d)
+        SK="$SK_DIR/witness-action.sk"
+        witness keygen --secret "$SK" --public "$VK"
+        witness attest \
+          --predicate "$PRED" \
+          --secret-key "$SK" \
+          --key-id "witness-action/$(basename "$PRED" .json)" \
+          -o "$ENV"
+        rm -rf "$SK_DIR"
+
+    - name: Upload to GitHub Release
+      if: ${{ inputs.upload-to-release == 'true' && startsWith(github.ref, 'refs/tags/') }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ github.ref_name }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: gh release upload "$TAG" "$OUTPUT_DIR"/* --clobber
