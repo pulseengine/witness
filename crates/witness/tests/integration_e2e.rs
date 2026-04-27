@@ -93,6 +93,7 @@ fn run_with_invoke(invoke: &str) -> RunRecord {
         manifest: manifest_path,
         output: &run_path,
         invoke: vec![invoke.to_string()],
+        invoke_with_args: vec![],
         call_start: false,
         harness: None,
     };

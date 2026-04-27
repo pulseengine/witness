@@ -40,6 +40,12 @@ pub struct RunOptions<'a> {
     /// Exports to invoke (embedded-runtime mode). Each export must take
     /// no parameters and return zero or one value.
     pub invoke: Vec<String>,
+    /// v0.9.6 — exports to invoke with positional typed arguments.
+    /// Each entry is `name:val,val,...` (values parsed against the
+    /// export's param types via `func.ty()`). Eliminates the
+    /// `core::hint::black_box` wrapper-export pattern users hit when
+    /// exercising functions whose inputs would otherwise be folded.
+    pub invoke_with_args: Vec<String>,
     /// If true, call `_start` automatically before any `invoke` entries
     /// (the WASI "command" convention). Ignored when `harness` is `Some`.
     pub call_start: bool,
@@ -140,7 +146,26 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         .map(|d| (d.id, d.chain_kind))
         .collect();
 
-    for name in &options.invoke {
+    // v0.9.6 — combine no-arg `--invoke` entries with typed
+    // `--invoke-with-args` specs into a single ordered invocation list.
+    // No-arg entries first (in order given), then typed entries.
+    enum Invocation {
+        NoArgs(String),
+        Typed { name: String, raw: String },
+    }
+    let mut invocations: Vec<Invocation> = Vec::new();
+    for n in &options.invoke {
+        invocations.push(Invocation::NoArgs(n.clone()));
+    }
+    for spec in &options.invoke_with_args {
+        let (name, _) = parse_invoke_spec(spec)?;
+        invocations.push(Invocation::Typed {
+            name: name.to_string(),
+            raw: spec.clone(),
+        });
+    }
+
+    for inv in &invocations {
         if let Some(reset) = row_reset {
             reset
                 .call(&mut store, &[], &mut [])
@@ -152,6 +177,20 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                 .map_err(|e| Error::Runtime(e.into()))?;
         }
 
+        let (export_name, args): (&str, Vec<Val>) = match inv {
+            Invocation::NoArgs(n) => (n.as_str(), Vec::new()),
+            Invocation::Typed { name, raw } => {
+                let func = instance.get_func(&mut store, name).ok_or_else(|| {
+                    Error::Runtime(anyhow::anyhow!(
+                        "export `{name}` not found in instrumented module"
+                    ))
+                })?;
+                let ty = func.ty(&store);
+                let parsed = build_typed_args(raw, &ty)?;
+                (name.as_str(), parsed)
+            }
+        };
+        let name = export_name;
         let func = instance.get_func(&mut store, name).ok_or_else(|| {
             Error::Runtime(anyhow::anyhow!(
                 "export `{name}` not found in instrumented module"
@@ -159,9 +198,9 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         })?;
         let ty = func.ty(&store);
         let mut results: Vec<Val> = ty.results().map(|_| Val::I32(0)).collect();
-        func.call(&mut store, &[], &mut results)
+        func.call(&mut store, &args, &mut results)
             .map_err(|e| Error::Runtime(e.into()))?;
-        invoked.push(name.clone());
+        invoked.push(name.to_string());
 
         // SAFETY-REVIEW: only `i32` is interpretable as a bool outcome.
         // Other Wasm value types (`i64`, `f32`, `f64`, `v128`, ref types)
@@ -731,6 +770,85 @@ fn string_map_to_id_map(input: &HashMap<String, u32>) -> Result<HashMap<u32, u32
     Ok(out)
 }
 
+/// v0.9.6 — split a `--invoke-with-args` spec into the export name
+/// and the comma-separated value list (raw strings).
+fn parse_invoke_spec(spec: &str) -> Result<(&str, Vec<&str>)> {
+    let (name, rest) = spec.split_once(':').ok_or_else(|| {
+        Error::Runtime(anyhow::anyhow!(
+            "--invoke-with-args spec must be 'name:val[,val...]', got '{spec}'"
+        ))
+    })?;
+    let values: Vec<&str> = if rest.is_empty() {
+        Vec::new()
+    } else {
+        rest.split(',').collect()
+    };
+    Ok((name, values))
+}
+
+/// v0.9.6 — coerce one positional value string against the declared
+/// Wasm parameter type. Wasmtime's `Val::F32` / `Val::F64` carry the
+/// IEEE-754 *bits* (u32 / u64), so we parse to f32/f64 then `to_bits()`.
+/// Reference types (FuncRef / ExternRef) and v128 are not supported
+/// from the CLI — pass via a wrapper export instead.
+fn build_typed_args(spec: &str, ty: &wasmtime::FuncType) -> Result<Vec<Val>> {
+    use wasmtime::ValType;
+    let (_, value_strs) = parse_invoke_spec(spec)?;
+    let param_types: Vec<ValType> = ty.params().collect();
+    if value_strs.len() != param_types.len() {
+        return Err(Error::Runtime(anyhow::anyhow!(
+            "spec '{spec}' has {} values but the export declares {} params",
+            value_strs.len(),
+            param_types.len()
+        )));
+    }
+    let mut out: Vec<Val> = Vec::with_capacity(param_types.len());
+    for (i, (vs, vt)) in value_strs.iter().zip(param_types.iter()).enumerate() {
+        // SAFETY-REVIEW: numeric Wasm types covered explicitly. v128
+        // and reference types (FuncRef/ExternRef) take the wildcard arm
+        // — they have no obvious CLI textual encoding, so the user
+        // gets an explanatory error.
+        #[allow(clippy::wildcard_enum_match_arm)]
+        let val = match vt {
+            ValType::I32 => vs
+                .parse::<i32>()
+                .map(Val::I32)
+                .map_err(|e| arg_err(spec, i, "i32", vs, &e))?,
+            ValType::I64 => vs
+                .parse::<i64>()
+                .map(Val::I64)
+                .map_err(|e| arg_err(spec, i, "i64", vs, &e))?,
+            ValType::F32 => vs
+                .parse::<f32>()
+                .map(|f| Val::F32(f.to_bits()))
+                .map_err(|e| arg_err(spec, i, "f32", vs, &e))?,
+            ValType::F64 => vs
+                .parse::<f64>()
+                .map(|f| Val::F64(f.to_bits()))
+                .map_err(|e| arg_err(spec, i, "f64", vs, &e))?,
+            other => {
+                return Err(Error::Runtime(anyhow::anyhow!(
+                    "spec '{spec}' param {i}: type {other:?} is not supported by --invoke-with-args (use a no-arg wrapper export with core::hint::black_box for v128 or reference types)"
+                )));
+            }
+        };
+        out.push(val);
+    }
+    Ok(out)
+}
+
+fn arg_err(
+    spec: &str,
+    idx: usize,
+    type_name: &str,
+    value: &str,
+    err: &dyn std::fmt::Display,
+) -> Error {
+    Error::Runtime(anyhow::anyhow!(
+        "spec '{spec}' param {idx}: cannot parse '{value}' as {type_name} ({err})"
+    ))
+}
+
 fn build_run_record(
     manifest: &Manifest,
     counter_values: &HashMap<u32, u64>,
@@ -872,6 +990,7 @@ mod tests {
             output: &run_path,
             invoke: vec!["hit_then".to_string()],
             call_start: false,
+            invoke_with_args: vec![],
             harness: None,
         };
         run_module(&options).unwrap();
@@ -922,6 +1041,7 @@ mod tests {
             output: &run_path,
             invoke: vec!["take_branch".to_string()],
             call_start: false,
+            invoke_with_args: vec![],
             harness: None,
         };
         run_module(&options).unwrap();
@@ -971,6 +1091,7 @@ EOF"#;
             output: &run_path,
             invoke: vec![],
             call_start: false,
+            invoke_with_args: vec![],
             harness: Some(harness_cmd.to_string()),
         };
         run_module(&options).unwrap();
@@ -981,6 +1102,95 @@ EOF"#;
             .find(|b| b.kind == BranchKind::IfThen)
             .expect("then branch");
         assert_eq!(then_hit.hits, 7);
+    }
+
+    /// v0.9.6 — `--invoke-with-args` parses positional values against
+    /// `func.ty()`. The 1-arg `if/else` export takes an i32 selector,
+    /// so spec `take_branch:1` should call with `Val::I32(1)` and hit
+    /// the then-branch counter.
+    #[test]
+    fn invoke_with_args_positional_typed_call() {
+        let wat_src = r#"
+            (module
+              (func (export "take_branch") (param i32) (result i32)
+                local.get 0
+                if (result i32)
+                  i32.const 1
+                else
+                  i32.const 0
+                end))
+        "#;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("prog.wasm");
+        let manifest_path = dir.path().join("prog.wasm.witness.json");
+        let run_path = dir.path().join("run.json");
+        let entries = instrument_and_emit(wat_src, &wasm_path);
+        let manifest = Manifest {
+            schema_version: "1".to_string(),
+            witness_version: "test".to_string(),
+            module_source: wasm_path.to_string_lossy().into_owned(),
+            branches: entries,
+            decisions: vec![],
+        };
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+        let options = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path,
+            output: &run_path,
+            invoke: vec![],
+            invoke_with_args: vec!["take_branch:1".to_string()],
+            call_start: false,
+            harness: None,
+        };
+        run_module(&options).unwrap();
+        let record = RunRecord::load(&run_path).unwrap();
+        let then_hit = record
+            .branches
+            .iter()
+            .find(|b| b.kind == BranchKind::IfThen)
+            .expect("then branch");
+        assert_eq!(then_hit.hits, 1, "i32=1 should pick the then branch");
+        // Invoked list must show the export name (without the spec).
+        assert_eq!(
+            record.invoked.first().map(String::as_str),
+            Some("take_branch")
+        );
+    }
+
+    /// v0.9.6 — wrong arg count returns the explanatory error.
+    #[test]
+    fn invoke_with_args_arity_mismatch_errors() {
+        let wat_src = r#"
+            (module
+              (func (export "two_args") (param i32) (param i32) (result i32)
+                local.get 0))
+        "#;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("prog.wasm");
+        let manifest_path = dir.path().join("prog.wasm.witness.json");
+        let run_path = dir.path().join("run.json");
+        let entries = instrument_and_emit(wat_src, &wasm_path);
+        let manifest = Manifest {
+            schema_version: "1".to_string(),
+            witness_version: "test".to_string(),
+            module_source: wasm_path.to_string_lossy().into_owned(),
+            branches: entries,
+            decisions: vec![],
+        };
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+        let options = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path,
+            output: &run_path,
+            invoke: vec![],
+            invoke_with_args: vec!["two_args:42".to_string()], // missing the second arg
+            call_start: false,
+            harness: None,
+        };
+        let err = run_module(&options).expect_err("arity mismatch must error");
+        let msg = format!("{err}");
+        assert!(msg.contains("1 values"), "{msg}");
+        assert!(msg.contains("2 params"), "{msg}");
     }
 
     /// v0.9.5 — round-trip test for harness mode v2. Builds a minimal
@@ -1051,6 +1261,7 @@ EOF"#
             output: &run_path_v1,
             invoke: vec![],
             call_start: false,
+            invoke_with_args: vec![],
             harness: Some(harness_cmd),
         };
         run_module(&options).unwrap();
@@ -1102,6 +1313,7 @@ EOF"#;
             output: &run_path,
             invoke: vec![],
             call_start: false,
+            invoke_with_args: vec![],
             harness: Some(harness_cmd.to_string()),
         };
         let err = run_module(&options).expect_err("unknown schema must error");
@@ -1132,6 +1344,7 @@ EOF"#;
             output: &run_path,
             invoke: vec![],
             call_start: false,
+            invoke_with_args: vec![],
             harness: Some("exit 1".to_string()),
         };
         let result = run_module(&options);

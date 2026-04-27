@@ -56,6 +56,15 @@ enum Command {
         /// Ignored when `--harness` is set.
         #[arg(long = "invoke")]
         invoke: Vec<String>,
+        /// v0.9.6 — export to call with positional typed arguments,
+        /// e.g. `--invoke-with-args 'is_leap:2024'` or
+        /// `--invoke-with-args 'parse:0,12345,3.14'`. Types are taken
+        /// from the export's Wasm signature via `func.ty()`; no
+        /// type-annotation needed in the spec. May be repeated;
+        /// processed after all `--invoke` entries. Eliminates the
+        /// `core::hint::black_box` wrapper-export pattern.
+        #[arg(long = "invoke-with-args")]
+        invoke_with_args: Vec<String>,
         /// Call the `_start` WASI entry-point before `--invoke` targets.
         /// Ignored when `--harness` is set.
         #[arg(long)]
@@ -277,6 +286,7 @@ fn main() -> Result<()> {
             manifest,
             output,
             invoke,
+            invoke_with_args,
             call_start,
             harness,
         } => {
@@ -287,6 +297,7 @@ fn main() -> Result<()> {
                 manifest,
                 output: &output,
                 invoke,
+                invoke_with_args,
                 call_start,
                 harness,
             };

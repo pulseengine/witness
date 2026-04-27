@@ -84,6 +84,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.9.6** | `--invoke-with-args 'name:val,...'` — typed positional args (eliminates `core::hint::black_box` workaround) |
 | **v0.9.5** | `witness-harness-v2` — MC/DC-capable subprocess protocol (counters + brvals + brcnts + base64 trace memory) |
 | **v0.9.4** | Tester-review Tier 0: ship witness-viz in releases, component preflight, harness protocol docs, error-tag fixes, walrus warning silenced |
 | **v0.9.3** | Fix `json_lite` Linux CI build (`unused_mut` under `-D warnings`) |

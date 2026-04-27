@@ -7,6 +7,65 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.6] — 2026-04-27
+
+### Added — `--invoke-with-args 'name:val[,val...]'`
+
+Tester review Tier 1 #2: embedded mode required zero-arg exports, so
+users had to wrap inputs in `core::hint::black_box` to stop rustc
+constant-folding the row entry. New flag accepts positional values
+parsed against `func.ty()`:
+
+```
+witness run app.wasm \
+  --invoke-with-args 'is_leap:2024' \
+  --invoke-with-args 'parse_request:0,12345,3.14'
+```
+
+The export's Wasm signature drives type coercion. `i32` / `i64` /
+`f32` / `f64` parameters are all supported; `v128` and reference
+types remain wrapper-territory because they have no obvious CLI
+encoding (the error explains that).
+
+The flag composes with `--invoke` — no-arg entries process first,
+then typed entries — so existing `run_row_*` workflows keep
+working unchanged.
+
+```rust
+// New error paths:
+//
+// --invoke-with-args spec must be 'name:val[,val...]', got 'foo'
+// spec 'two_args:42' has 1 values but the export declares 2 params
+// spec 'is_leap:abc' param 0: cannot parse 'abc' as i32 (...)
+```
+
+Adds clarity to the no-arg restriction in the docstring while keeping
+backward compat: `--invoke` continues to require zero-arg exports
+(simple, fast path), and users only reach for `--invoke-with-args`
+when their function takes parameters they want to vary.
+
+### Verified
+
+- `invoke_with_args_positional_typed_call`: an `if (param i32) ...
+  if/else ...` export gets called with `i32=1`; the then-branch
+  counter increments; the invoked-list shows the export name without
+  the spec.
+- `invoke_with_args_arity_mismatch_errors`: spec with 1 value vs
+  2-param export errors with both counts named.
+- `cargo test --workspace --release` — **49 unit tests + 8
+  integration tests + 0 failures**.
+- `cargo clippy --all-targets -D warnings` clean.
+
+### Notes for v0.9.x — Tier 1 still pending
+
+- **Per-target br_table decision reconstruction** — half-implemented;
+  finishing it lifts httparse and json_lite numbers without API
+  changes. Next.
+- **Trace-buffer overflow telemetry + `WITNESS_TRACE_PAGES`** —
+  comment promises the env override; code doesn't honour it yet.
+- **Per-DWARF-inlined-context outcome tracking** — the original
+  v0.8.3 fold-in target.
+
 ## [0.9.5] — 2026-04-27
 
 ### Added — `witness-harness-v2`: MC/DC-capable subprocess protocol
