@@ -298,3 +298,44 @@ pre.stub {
   overflow-x: auto;
   border: 1px solid var(--border);
 }
+
+/* v0.9.2 — coverage bar component */
+.cov-bar {
+  display: inline-flex;
+  width: 160px;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  vertical-align: middle;
+}
+.cov-bar.empty::after {
+  content: "—";
+  color: var(--text-muted);
+  margin: auto;
+  font-size: 0.85em;
+}
+.cov-bar .seg-proved { background: linear-gradient(180deg, #2ea043 0%, #238636 100%); }
+.cov-bar .seg-gap    { background: linear-gradient(180deg, #d2a106 0%, #9e7a00 100%); }
+.cov-bar .seg-dead   { background: linear-gradient(180deg, #6e7681 0%, #484f58 100%); }
+.cov-bar > span { height: 100%; }
+
+@media (prefers-color-scheme: dark) {
+  .cov-bar .seg-proved { background: linear-gradient(180deg, #3fb950 0%, #2ea043 100%); }
+  .cov-bar .seg-gap    { background: linear-gradient(180deg, #f0b400 0%, #c8961a 100%); }
+  .cov-bar .seg-dead   { background: linear-gradient(180deg, #8b949e 0%, #6e7681 100%); }
+}
+
+/* Total-row visual emphasis */
+tr.total-row {
+  font-weight: 600;
+  border-top: 2px solid var(--accent);
+  background: var(--bg-alt);
+}
+
+/* Make full-MC/DC cell stand out */
+table td:nth-child(4) {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}

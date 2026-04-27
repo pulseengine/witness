@@ -65,6 +65,7 @@ VERDICTS=(
     nom_numbers:28
     state_machine:27
     json_lite:28
+    base64_decode:24
 )
 
 mkdir -p "$OUT_DIR"

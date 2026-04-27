@@ -7,6 +7,72 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-04-27
+
+### Added — stacked coverage bars on the dashboard
+
+The verdict scoreboard now ships an inline horizontal bar per row
+showing the proved / gap / dead split visually. The TOTAL row gets
+the same treatment plus a top-border to set it apart. CSS uses
+gradient fills (light vs dark mode) — looks good in both color
+schemes, no JS, no images.
+
+```
+verdict          branches  decisions  full MC/DC  coverage           proved  gap  dead
+httparse         473       67         7/67        [██░░░░░░░░░]      28      46   108
+nom_numbers      20        3          3/3         [██████████]       6       0    0
+state_machine    14        5          4/5         [████████░░]       11      1    0
+```
+
+The bar is `width: 160px; height: 14px;` — fits in a table cell
+without distorting the row height. Hover for `title` tooltip with
+exact counts. The "full MC/DC" cell is now a fraction (`7/67`) so
+the ratio is one glance away.
+
+### Added — `base64_decode` verdict (12th fixture)
+
+A new real-application verdict at `verdicts/base64_decode/`. Drives
+the well-known `base64` v0.22 crate (with `default-features = false`,
+`#![no_std]`) through 24 rows covering:
+
+- STANDARD encoding (padded + unpadded)
+- URL_SAFE alphabet (with the `-_` substitutions)
+- Malformed input (invalid chars, misplaced padding, garbage)
+- Edge cases (empty, single-char, all-pad)
+
+Witness reconstructs **36 decisions** across the engine + alphabet
+code paths. First run shows 11 proved / 19 gap / 70 dead conditions
+— the gap and dead numbers reflect the same inlined-context issue
+v0.9.3 will address (the `Engine::decode_slice` function inlines into
+many call sites). Documented in the v0.9.x scoreboard.
+
+Verdict count: **11 → 12**. Real-application fixtures: 4 → 5.
+
+### Added — visual emphasis on the TOTAL row
+
+`tr.total-row` now carries a 2px accent border-top + bg-alt
+background, so the bottom row of the scoreboard reads as a summary
+rather than another verdict.
+
+### Notes for v0.9.x
+
+- v0.9.3 — per-DWARF-inlined-context outcome tracking. The httparse
+  7/67 and base64_decode 0/36 numbers both reflect this limit; the
+  fix is the next single-number-bumping change.
+- v0.9.x — visualiser self-witnessing CI step + gate ratchet
+  (REQ-040). Foundations in place via the Playwright suite; the CI
+  step needs a wasm32-wasip2 build of witness-viz first.
+- v0.9.x — search box on the dashboard (`/search?q=`). Markup is
+  HTMX-ready; design pending.
+
+### Implements / Verifies
+
+- 30 Playwright tests pass against the polished dashboard. New
+  `tr.total-row` and `cov-bar` markup verified by Playwright (the
+  existing `verdicts count` test now uses
+  `a[href^="/verdict/"]` which is unambiguous).
+- New verdict builds clean (658 KB wasm, 36 decisions reconstructed).
+
 ## [0.9.1] — 2026-04-27
 
 ### Added — gap drill-down view (`/gap/{verdict}/{decision}/{condition}`)

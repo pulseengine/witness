@@ -60,6 +60,7 @@ pub async fn index(State(state): State<AppState>) -> Response {
         "branches",
         "decisions",
         "full MC/DC",
+        "coverage",
         "proved",
         "gap",
         "dead",
@@ -73,14 +74,20 @@ pub async fn index(State(state): State<AppState>) -> Response {
         let o = &v.report.overall;
         let branches = data::branch_count(state.reports_dir(), v);
         total_branches = total_branches.saturating_add(u64::from(branches));
+        let bar = render_coverage_bar(
+            o.conditions_proved,
+            o.conditions_gap,
+            o.conditions_dead,
+        );
         let _ = write!(
             body,
-            r#"<tr><td><a href="/verdict/{href}"><code>{name}</code></a></td><td>{branches}</td><td>{dt}</td><td>{df}</td><td class="proved">{cp}</td><td class="gap">{cg}</td><td class="dead">{cd}</td></tr>"#,
+            r#"<tr><td><a href="/verdict/{href}"><code>{name}</code></a></td><td>{branches}</td><td>{dt}</td><td>{df}/{dt}</td><td>{bar}</td><td class="proved">{cp}</td><td class="gap">{cg}</td><td class="dead">{cd}</td></tr>"#,
             href = escape(&v.name),
             name = escape(&v.name),
             branches = branches,
             dt = o.decisions_total,
             df = o.decisions_full_mcdc,
+            bar = bar,
             cp = o.conditions_proved,
             cg = o.conditions_gap,
             cd = o.conditions_dead,
@@ -88,12 +95,18 @@ pub async fn index(State(state): State<AppState>) -> Response {
         body.push('\n');
     }
 
+    let total_bar = render_coverage_bar(
+        u32_or_max(conditions_proved),
+        u32_or_max(conditions_gap),
+        u32_or_max(conditions_dead),
+    );
     let _ = write!(
         body,
-        r#"<tr class="total-row"><td>TOTAL</td><td>{tb}</td><td>{dt}</td><td>{df}</td><td>{cp}</td><td>{cg}</td><td>{cd}</td></tr>"#,
+        r#"<tr class="total-row"><td>TOTAL</td><td>{tb}</td><td>{dt}</td><td>{df}/{dt}</td><td>{bar}</td><td>{cp}</td><td>{cg}</td><td>{cd}</td></tr>"#,
         tb = total_branches,
         dt = decisions_total,
         df = decisions_full,
+        bar = total_bar,
         cp = conditions_proved,
         cg = conditions_gap,
         cd = conditions_dead,
@@ -385,6 +398,41 @@ fn render_gap_tutorial(
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────
+
+/// Render a stacked horizontal bar showing the proved / gap / dead
+/// split of conditions for a verdict (or total). Pure inline-styled
+/// HTML — no extra CSS dependency, embeds in any table cell.
+fn render_coverage_bar(proved: u32, gap: u32, dead: u32) -> String {
+    let total = proved.saturating_add(gap).saturating_add(dead);
+    if total == 0 {
+        return String::from(r#"<div class="cov-bar empty"></div>"#);
+    }
+    let p_pct = (u64::from(proved).saturating_mul(100)) / u64::from(total);
+    let g_pct = (u64::from(gap).saturating_mul(100)) / u64::from(total);
+    let d_pct = 100u64.saturating_sub(p_pct).saturating_sub(g_pct);
+    format!(
+        r#"<div class="cov-bar" title="proved {proved} / gap {gap} / dead {dead}">
+<span class="seg-proved" style="width:{pp}%"></span><span class="seg-gap" style="width:{gp}%"></span><span class="seg-dead" style="width:{dp}%"></span>
+</div>"#,
+        proved = proved,
+        gap = gap,
+        dead = dead,
+        pp = p_pct,
+        gp = g_pct,
+        dp = d_pct,
+    )
+}
+
+fn u32_or_max(v: u64) -> u32 {
+    if v > u64::from(u32::MAX) {
+        u32::MAX
+    } else {
+        // SAFETY: bounds-checked above.
+        #[allow(clippy::cast_possible_truncation)]
+        let r = v as u32;
+        r
+    }
+}
 
 fn render_cards(items: &[(&str, u64)]) -> String {
     let mut out = String::from("<div class=\"cards\">\n");

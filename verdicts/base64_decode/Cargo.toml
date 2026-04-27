@@ -1,0 +1,23 @@
+[package]
+name = "verdict-base64-decode"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Witness verdict: base64 RFC 4648 decoder driven by 24 rows covering valid, padded, urlsafe, and malformed inputs."
+license = "Apache-2.0 OR MIT"
+
+# Standalone — not part of the witness workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+base64 = { version = "0.22", default-features = false }
+
+[profile.release]
+debug = true
+strip = false
+codegen-units = 1
+lto = false
+panic = "abort"
