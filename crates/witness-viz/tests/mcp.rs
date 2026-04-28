@@ -291,3 +291,62 @@ async fn list_uncovered_conditions_returns_array() {
 
     server.abort();
 }
+
+/// v0.9.11 — MCP `initialize` handshake. Spec-compliant clients
+/// (Claude Desktop, Cursor, the official rmcp client) send `initialize`
+/// before any other call. v0.9.10 returned -32601 here, breaking every
+/// off-the-shelf client; v0.9.11 must answer with serverInfo +
+/// capabilities + protocolVersion echo. Tester reproduction case.
+#[tokio::test]
+async fn initialize_handshake_returns_server_info() {
+    let (base, server, _dir) = spawn().await;
+    let client = reqwest::Client::new();
+
+    // Standard MCP client opening message.
+    let resp = rpc(
+        &client,
+        &base,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": { "name": "test-client", "version": "0.1.0" }
+            }
+        }),
+    )
+    .await;
+
+    let result = resp.get("result").expect("initialize must succeed");
+    assert_eq!(result["protocolVersion"], "2024-11-05",
+        "echo client's protocol version when supported");
+    assert_eq!(result["serverInfo"]["name"], "witness-viz");
+    assert!(
+        result["serverInfo"]["version"].as_str().is_some(),
+        "serverInfo.version must be a string"
+    );
+    assert!(
+        result["capabilities"]["tools"].is_object(),
+        "must advertise tools capability so clients enable tool listing"
+    );
+
+    // The post-init notification (no id, JSON-RPC notification shape).
+    // Returning anything spec-tolerant is acceptable — clients ignore.
+    let ack = rpc(
+        &client,
+        &base,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        }),
+    )
+    .await;
+    assert!(
+        ack.get("error").is_none(),
+        "notifications/initialized must not error"
+    );
+
+    server.abort();
+}

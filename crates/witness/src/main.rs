@@ -302,6 +302,22 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Instrument { input, output } => {
             witness_core::instrument::instrument_file(&input, &output)?;
+            // v0.9.11 — chatty success. Tester review found instrument /
+            // run / predicate / attest were silent on success while
+            // keygen / verify were chatty; the asymmetry made users
+            // re-run commands thinking they had failed.
+            let manifest_path = witness_core::instrument::Manifest::path_for(&output);
+            // SAFETY-REVIEW: this is the user-facing CLI; print is the
+            // intended channel.
+            #[allow(clippy::print_stdout)]
+            {
+                println!(
+                    "wrote {} ({} bytes)",
+                    output.display(),
+                    std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0)
+                );
+                println!("wrote {} (manifest)", manifest_path.display());
+            }
         }
         Command::Run {
             module,
@@ -324,6 +340,15 @@ fn main() -> Result<()> {
                 harness,
             };
             run::run_module(&options)?;
+            // v0.9.11 — chatty success.
+            #[allow(clippy::print_stdout)]
+            {
+                println!(
+                    "wrote {} ({} bytes)",
+                    output.display(),
+                    std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0)
+                );
+            }
         }
         Command::Report { input, format } => {
             // SAFETY-REVIEW: CLI's job is to write the report to stdout;
@@ -374,6 +399,15 @@ fn main() -> Result<()> {
                 harness.as_deref(),
             )?;
             witness_core::predicate::save_statement(&stmt, &output)?;
+            // v0.9.11 — chatty success.
+            #[allow(clippy::print_stdout)]
+            {
+                println!(
+                    "wrote {} ({} bytes)",
+                    output.display(),
+                    std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0)
+                );
+            }
         }
         Command::Diff {
             base,
@@ -409,6 +443,19 @@ fn main() -> Result<()> {
                 &output,
                 key_id.as_deref(),
             )?;
+            // v0.9.11 — chatty success (matches keygen / verify).
+            #[allow(clippy::print_stdout)]
+            {
+                println!(
+                    "wrote {} ({} bytes, DSSE envelope)",
+                    output.display(),
+                    std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0)
+                );
+                println!(
+                    "verify with: witness verify --envelope {} --public-key <path>",
+                    output.display()
+                );
+            }
         }
         Command::Keygen { secret, public } => {
             witness_core::attest::generate_keypair_files(&secret, &public)?;
@@ -549,10 +596,11 @@ fn scaffold_fixture(parent: &std::path::Path, name: &str, force: bool) -> Result
         println!();
         println!("  cd {}", project_dir.display());
         println!("  ./build.sh         # builds verdict_{snake}.wasm");
-        println!("  ./run.sh           # instruments + runs + reports");
+        println!("  ./run.sh           # instruments + runs + reports + bundles");
+        println!("  witness viz --reports-dir verdict-evidence");
         println!();
         println!(
-            "Five rows drive the leap-year predicate. Expected MC/DC: 1/1 decisions full, 2 conditions proved (rustc fuses the third)."
+            "Single typed-arg export (`is_leap`) driven by 5 years; 1/1 decisions\n  full MC/DC, 2 conditions proved (rustc fuses the third condition)."
         );
     }
 
@@ -599,51 +647,39 @@ const SCAFFOLD_LIB_RS: &str = r#"//! Witness fixture: scaffolded by `witness new
 //! plain `(a && b) || c` over bools. Witness reconstructs **one
 //! decision with two conditions** (rustc fuses the `% 400 == 0`
 //! check into the same `br_if` chain as the first two), and the five
-//! rows below prove independent effect of those two conditions under
-//! masking MC/DC (DO-178C accepted).
+//! rows in run.sh prove independent effect of those two conditions
+//! under masking MC/DC (DO-178C accepted).
+//!
+//! v0.9.11+: this fixture exports a single `is_leap` function and
+//! drives it via `--invoke-with-args` (v0.9.6 typed-arg form). That
+//! puts the runtime input through the export's parameter rather than
+//! `core::hint::black_box`, so DWARF line attribution lands on the
+//! predicate's source line (`lib.rs` here) instead of `hint.rs:491`.
 
 #![no_std]
-
-use core::hint::black_box;
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
+/// The decision under test. Marked `#[inline(never)]` so the call
+/// site keeps a stable DWARF line entry — without this the inliner
+/// fuses the predicate into each invocation and the truth table loses
+/// its consistent attribution.
 #[inline(never)]
 fn is_leap_year(year: u32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
-// Row 0 — year=2001  →  c0=F                      → outcome F.
+// Single typed-arg export. Drive it from run.sh with
+// `--invoke-with-args 'is_leap:2001'` (year passed as i32 → cast to
+// u32 inside). The wasm signature is `(param i32) (result i32)`;
+// witness reads parameter types from `func.ty()` so no annotation is
+// needed in the spec.
 #[unsafe(no_mangle)]
-pub extern "C" fn run_row_0() -> i32 {
-    is_leap_year(black_box(2001)) as i32
-}
-
-// Row 1 — year=2004  →  c0=T, c1=T                → outcome T.
-#[unsafe(no_mangle)]
-pub extern "C" fn run_row_1() -> i32 {
-    is_leap_year(black_box(2004)) as i32
-}
-
-// Row 2 — year=2100  →  c0=T, c1=F, c2=F          → outcome F.
-#[unsafe(no_mangle)]
-pub extern "C" fn run_row_2() -> i32 {
-    is_leap_year(black_box(2100)) as i32
-}
-
-// Row 3 — year=2000  →  c0=T, c1=F, c2=T          → outcome T.
-#[unsafe(no_mangle)]
-pub extern "C" fn run_row_3() -> i32 {
-    is_leap_year(black_box(2000)) as i32
-}
-
-// Row 4 — year=1900  →  c0=T, c1=F, c2=F          → outcome F.
-#[unsafe(no_mangle)]
-pub extern "C" fn run_row_4() -> i32 {
-    is_leap_year(black_box(1900)) as i32
+pub extern "C" fn is_leap(year: i32) -> i32 {
+    is_leap_year(year as u32) as i32
 }
 "#;
 
@@ -666,8 +702,12 @@ echo "built: $SCRIPT_DIR/verdict_{{NAME_SNAKE}}.wasm ($(wc -c < "$SCRIPT_DIR/ver
 
 const SCAFFOLD_RUN_SH: &str = r#"#!/usr/bin/env bash
 # End-to-end pipeline: build → instrument → run → report.
-# Expected outcome: 1 decision reconstructed; 3 conditions proved
-# (full MC/DC under masking).
+# Expected outcome: 1 decision reconstructed; 2 conditions proved
+# under masking MC/DC (rustc fuses the third — see lib.rs comment).
+#
+# v0.9.11+: also emits the verdict-evidence/{{NAME_SNAKE}}/ layout
+# that `witness viz` consumes, so the next step ("./run.sh && witness
+# viz --reports-dir verdict-evidence") works without any glue.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -676,14 +716,37 @@ WITNESS="${WITNESS:-witness}"
 
 ./build.sh
 "$WITNESS" instrument verdict_{{NAME_SNAKE}}.wasm -o instrumented.wasm
+# v0.9.11+: typed-arg form. Each --invoke-with-args call passes one
+# i32 to `is_leap`. Five years cover the truth table:
+#   2001  → c0=F                      → outcome F
+#   2004  → c0=T, c1=T                → outcome T (a&&b carries)
+#   2100  → c0=T, c1=F, c2=F          → outcome F
+#   2000  → c0=T, c1=F, c2=T          → outcome T (% 400 fused with a&&b)
+#   1900  → c0=T, c1=F, c2=F          → outcome F (independent of 2100)
 "$WITNESS" run instrumented.wasm \
-    --invoke run_row_0 --invoke run_row_1 --invoke run_row_2 \
-    --invoke run_row_3 --invoke run_row_4 \
+    --invoke-with-args 'is_leap:2001' \
+    --invoke-with-args 'is_leap:2004' \
+    --invoke-with-args 'is_leap:2100' \
+    --invoke-with-args 'is_leap:2000' \
+    --invoke-with-args 'is_leap:1900' \
     -o run.json
 "$WITNESS" report --input run.json --format mcdc
+
+# v0.9.11 — emit the bundle layout `witness viz` expects, so a fresh
+# user goes from `witness new` → `./run.sh` → `witness viz` with no
+# manual glue. Each verdict gets its own subdir under verdict-evidence/.
+EVIDENCE_DIR="verdict-evidence/{{NAME_SNAKE}}"
+mkdir -p "$EVIDENCE_DIR"
+"$WITNESS" report --input run.json --format mcdc-json \
+    > "$EVIDENCE_DIR/report.json"
+cp instrumented.wasm.witness.json "$EVIDENCE_DIR/manifest.json"
+echo
+echo "Bundle written under verdict-evidence/. Browse with:"
+echo "  witness viz --reports-dir verdict-evidence"
 "#;
 
-const SCAFFOLD_GITIGNORE: &str = "target/\nCargo.lock\n*.wasm\n*.witness.json\nrun.json\n";
+const SCAFFOLD_GITIGNORE: &str =
+    "target/\nCargo.lock\n*.wasm\n*.witness.json\nrun.json\nverdict-evidence/\n";
 
 fn run_viz(reports_dir: &std::path::Path, port: u16, bind: &str) -> Result<()> {
     let bin = std::env::var_os("WITNESS_VIZ_BIN")

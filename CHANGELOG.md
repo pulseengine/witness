@@ -7,6 +7,138 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.11] — 2026-04-28
+
+### Five tester-feedback items in one release
+
+A second round of fresh-eyes evaluations on v0.9.10 (one
+safety-critical Rust, one Go/Python new to wasm, one curious
+side-project, one rmcp-migration assessor) surfaced three blockers
+plus polish. v0.9.11 closes all five items the rmcp evaluator's
+deferral recommendation kept in the v0.9.x line.
+
+### Added — `witness new` scaffold writes the `verdict-evidence/` layout
+
+Tester blocker #1: `witness new` produced `run.json` +
+`instrumented.wasm.witness.json`, but `witness viz` wanted
+`verdict-evidence/<name>/{report.json, manifest.json}`. No bridge.
+Fresh users got stuck.
+
+Now `run.sh` ends with:
+
+```bash
+EVIDENCE_DIR="verdict-evidence/<name>"
+mkdir -p "$EVIDENCE_DIR"
+witness report --input run.json --format mcdc-json > "$EVIDENCE_DIR/report.json"
+cp instrumented.wasm.witness.json "$EVIDENCE_DIR/manifest.json"
+echo "Bundle written under verdict-evidence/. Browse with:"
+echo "  witness viz --reports-dir verdict-evidence"
+```
+
+Three commands from `witness new` to a running visualiser:
+
+```sh
+witness new my-fixture
+cd my-fixture && ./run.sh
+witness viz --reports-dir verdict-evidence
+```
+
+### Changed — `witness new` scaffolds the typed-args form by default
+
+Tester blocker #3: the v0.9.10 scaffold used `core::hint::black_box`
+inside zero-arg `run_row_*` exports. This poisoned DWARF line
+attribution to `hint.rs:491` after any user edit (also propagating
+to LCOV `BRDA` records). The v0.9.6 `--invoke-with-args` path does
+NOT have this problem.
+
+v0.9.11 scaffolds **one typed-arg export**:
+
+```rust
+#[unsafe(no_mangle)]
+pub extern "C" fn is_leap(year: i32) -> i32 {
+    is_leap_year(year as u32) as i32
+}
+```
+
+Driven from `run.sh` via `--invoke-with-args 'is_leap:2001'` ×5.
+Line attribution lands on the predicate's source line, not on
+`hint.rs`.
+
+### Added — MCP `initialize` handshake (and `notifications/initialized`)
+
+Tester blocker #2: spec-compliant MCP clients (Claude Desktop,
+Cursor, the official rmcp client) send `initialize` before any
+other call. v0.9.10 returned `-32601 method not found`, breaking
+every off-the-shelf client. The 17-line patch advertises tools
+capability + serverInfo + protocolVersion echo, supporting
+`2024-11-05`, `2025-03-26`, and `2025-06-18`:
+
+```json
+{
+  "jsonrpc": "2.0", "id": 1,
+  "result": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": { "tools": { "listChanged": false } },
+    "serverInfo": { "name": "witness-viz", "version": "0.9.11" }
+  }
+}
+```
+
+`notifications/initialized`, `notifications/cancelled`, and `ping`
+are also handled. Hand-rolled rather than rmcp-based per the
+migration evaluation (saved 6-8 hours, avoided 14+ transitive
+crates, deferred to v0.10.0+ if a real MCP feature need surfaces).
+
+### Changed — chatty success messages
+
+Tester polish item: `instrument`, `run`, `predicate`, `attest` were
+silent on success while `keygen`, `verify` were chatty. Same
+asymmetry made evaluators re-run commands thinking they had failed.
+Now all five print a `wrote <path> (<bytes> bytes)` line on
+success. `attest` additionally hints the verify command.
+
+### Added — `docs/quickstart.md`
+
+Landed the QUICKSTART.md draft from the first-round evaluation as
+the canonical 10-minute guide. 200+ lines covering: install,
+scaffold, modify-and-rerun, sign + verify, visualise, MCP smoke,
+LCOV. Updated for v0.9.11 specifics (typed-args default, auto-
+bundle, chatty success, MCP initialize working).
+
+### Verified
+
+- 7/7 MCP tests pass including new `initialize_handshake_returns_server_info`.
+- 50 unit + 8 integration tests pass.
+- Scaffold end-to-end: `witness new` → `./run.sh` → `witness viz` works
+  with no manual glue. Verified against the live binary.
+- MCP initialize live-tested: `protocolVersion: "2025-06-18"`,
+  `serverInfo.name: "witness-viz"` returned.
+- Three independent fresh-eyes evaluations (safety-critical / Go-Python /
+  curious side-project) ran against v0.9.10 + the QUICKSTART.md
+  draft. All three deliverables landed friction logs that informed
+  the v0.9.12 / v0.10.0 backlog.
+
+### Notes for v0.9.12 / v0.10.0
+
+Substantive findings from the safety-critical evaluator that
+deferred (need design):
+
+- **Signed predicate carries branch coverage, not MC/DC truth tables.**
+  `witness predicate` builds the `witness-coverage/v1` Statement
+  from the branch report, leaving the MC/DC report unsigned. The
+  "signed evidence chain for MC/DC" pitch isn't fully delivered by
+  the artefact. v0.10.0 should add a `witness-mcdc/v1` predicate
+  type carrying the truth tables.
+- **Truth-table polarity needs documentation.** `c0=T` in the truth
+  table is the wasm-level br_if value (taken/not-taken),
+  not the source-level condition value. Reviewers reading the
+  report cold can be confused. v0.9.12 doc fix.
+- **Release-binary provenance.** `SHA256SUMS.txt` is unsigned. For a
+  tool whose pitch is signed evidence, the tool's own release
+  pipeline has no signed evidence. v0.10.0 — sigstore-OIDC.
+
+Other smaller items go into v0.9.12.
+
 ## [0.9.10] — 2026-04-28
 
 ### Added — `witness new <fixture>` template scaffold

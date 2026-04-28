@@ -84,6 +84,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.9.11** | scaffold→viz bridge (auto-emit `verdict-evidence/`) + typed-args default + MCP `initialize` handshake + chatty success + `docs/quickstart.md` |
 | **v0.9.10** | `witness new <fixture>` — template scaffold (Cargo.toml + lib.rs + build.sh + run.sh) eliminating the fiddly first-run setup |
 | **v0.9.9** | Composite GitHub Action (`pulseengine/witness/.github/actions/witness@v1`) + ISSUE_TEMPLATE + `witness-reporter-component` artefact rename |
 | **v0.9.8** | `WITNESS_TRACE_PAGES` env override at instrument time + `TraceHealth.bytes_used`/`pages_allocated` telemetry |

@@ -62,6 +62,52 @@ pub async fn handler(State(state): State<AppState>, Json(body): Json<Value>) -> 
     };
 
     match method {
+        // v0.9.11 — MCP handshake. Spec-compliant clients (Claude
+        // Desktop, Cursor, the official rmcp client) send `initialize`
+        // before any other call. Pre-v0.9.11 we returned -32601 here,
+        // which broke every off-the-shelf client (tester report).
+        // We echo the client's protocolVersion when supported, advertise
+        // tools capability, and ship server identity. The post-init
+        // `notifications/initialized` is a JSON-RPC notification (no
+        // id, no response expected) so we acknowledge with HTTP 204
+        // semantics by returning an empty result.
+        "initialize" => {
+            let params = body.get("params").cloned().unwrap_or(Value::Null);
+            let client_proto = params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or(MCP_PROTOCOL_VERSION);
+            // Echo the client's version if it's one we know about,
+            // otherwise advertise our own. Per spec, the server MAY
+            // negotiate down but should not pick a higher version.
+            let proto = if SUPPORTED_PROTOCOL_VERSIONS.contains(&client_proto) {
+                client_proto
+            } else {
+                MCP_PROTOCOL_VERSION
+            };
+            Json(rpc_ok(
+                id,
+                json!({
+                    "protocolVersion": proto,
+                    "capabilities": {
+                        "tools": { "listChanged": false },
+                    },
+                    "serverInfo": {
+                        "name": "witness-viz",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                }),
+            ))
+        }
+        // Notifications carry no id. Per JSON-RPC, notifications must
+        // not have responses, but axum's Json handler always returns —
+        // we return an empty-result envelope which spec-compliant
+        // clients ignore and lenient ones tolerate.
+        "notifications/initialized" | "notifications/cancelled" => {
+            Json(rpc_ok(id, Value::Null))
+        }
+        // Spec calls these out as ping/health. Always answer.
+        "ping" => Json(rpc_ok(id, json!({}))),
         "tools/list" => Json(rpc_ok(id, tools_list())),
         "tools/call" => {
             let params = body.get("params").cloned().unwrap_or(Value::Null);
@@ -84,6 +130,17 @@ pub async fn handler(State(state): State<AppState>, Json(body): Json<Value>) -> 
         }
     }
 }
+
+/// MCP protocol versions we understand. We answer `initialize` with the
+/// client's version when it's in this list; otherwise we suggest
+/// [`MCP_PROTOCOL_VERSION`] (our preferred). Update when the spec rev
+/// bumps and we've validated the wire format.
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
+
+/// Default protocol version we advertise when initialize comes in
+/// without a version, or with an unknown one. Track the latest we've
+/// validated against the rmcp reference implementation.
+const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
 /// JSON-RPC success envelope.
 fn rpc_ok(id: Value, result: Value) -> Value {
