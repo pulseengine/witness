@@ -204,6 +204,28 @@ enum Command {
         overview: PathBuf,
     },
 
+    /// Scaffold a new witness fixture project (v0.9.10+). Writes a
+    /// working `Cargo.toml`, `src/lib.rs`, `build.sh`, `run.sh`, and
+    /// `.gitignore` into `<dir>/<name>/` (default dir: cwd). The
+    /// fixture is a minimal `no_std` Rust crate with five no-arg
+    /// `run_row_*` exports wired to a 3-condition decision so
+    /// reviewers can see witness reconstruct full MC/DC end-to-end.
+    /// Eliminates the fiddly setup of cdylib + wasm32-unknown-unknown
+    /// + debuginfo=2 + panic=abort + black_box that new users hit.
+    New {
+        /// Fixture project name; becomes the directory name + crate
+        /// name (kebab-case in Cargo.toml, snake_case in module
+        /// references).
+        name: String,
+        /// Parent directory to create the project under. Default: cwd.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Overwrite if `<dir>/<name>/` already exists. Without this
+        /// flag, witness refuses rather than clobber.
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Boot the witness-viz HTMX visualiser against a compliance bundle
     /// (v0.9.0). Renders truth tables for every decision in the bundle
     /// at http://127.0.0.1:3037 by default. Spawns the `witness-viz`
@@ -422,6 +444,10 @@ fn main() -> Result<()> {
             let record = witness_core::run_record::RunRecord::load(&run)?;
             witness_core::lcov::emit_lcov_files(&manifest_loaded, &record, &output, &overview)?;
         }
+        Command::New { name, dir, force } => {
+            let parent = dir.unwrap_or_else(|| std::path::PathBuf::from("."));
+            scaffold_fixture(&parent, &name, force)?;
+        }
         Command::Viz {
             reports_dir,
             port,
@@ -452,6 +478,212 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+/// v0.9.10 — scaffold a new witness fixture under `parent/<name>/`.
+///
+/// Embeds five small text templates: `Cargo.toml`, `src/lib.rs`,
+/// `build.sh`, `run.sh`, `.gitignore`. Substitutes `{{NAME}}` for the
+/// kebab-case crate name and `{{NAME_SNAKE}}` for the snake-case
+/// module name. Writes them with `0644` (or `0755` for the shell
+/// scripts) and prints a one-screen "next steps" message.
+fn scaffold_fixture(parent: &std::path::Path, name: &str, force: bool) -> Result<()> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        anyhow::bail!(
+            "fixture name `{name}` must be ASCII alphanumeric / '-' / '_' (it becomes the crate name)"
+        );
+    }
+    let project_dir = parent.join(name);
+    if project_dir.exists() && !force {
+        anyhow::bail!(
+            "{} already exists (pass --force to overwrite)",
+            project_dir.display()
+        );
+    }
+
+    let snake = name.replace('-', "_");
+    let kebab = name.replace('_', "-");
+
+    let cargo_toml = SCAFFOLD_CARGO_TOML
+        .replace("{{NAME}}", &kebab)
+        .replace("{{NAME_SNAKE}}", &snake);
+    let lib_rs = SCAFFOLD_LIB_RS
+        .replace("{{NAME}}", &kebab)
+        .replace("{{NAME_SNAKE}}", &snake);
+    let build_sh = SCAFFOLD_BUILD_SH
+        .replace("{{NAME}}", &kebab)
+        .replace("{{NAME_SNAKE}}", &snake);
+    let run_sh = SCAFFOLD_RUN_SH
+        .replace("{{NAME}}", &kebab)
+        .replace("{{NAME_SNAKE}}", &snake);
+    let gitignore = SCAFFOLD_GITIGNORE.to_string();
+
+    std::fs::create_dir_all(project_dir.join("src"))?;
+    std::fs::write(project_dir.join("Cargo.toml"), cargo_toml)?;
+    std::fs::write(project_dir.join("src").join("lib.rs"), lib_rs)?;
+    let build_path = project_dir.join("build.sh");
+    let run_path = project_dir.join("run.sh");
+    std::fs::write(&build_path, build_sh)?;
+    std::fs::write(&run_path, run_sh)?;
+    std::fs::write(project_dir.join(".gitignore"), gitignore)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut p = std::fs::metadata(&build_path)?.permissions();
+        p.set_mode(0o755);
+        std::fs::set_permissions(&build_path, p)?;
+        let mut p = std::fs::metadata(&run_path)?.permissions();
+        p.set_mode(0o755);
+        std::fs::set_permissions(&run_path, p)?;
+    }
+
+    // SAFETY-REVIEW: this is the user-facing scaffold output; print to
+    // stdout is the intended channel.
+    #[allow(clippy::print_stdout)]
+    {
+        println!("Created witness fixture at {}", project_dir.display());
+        println!();
+        println!("  cd {}", project_dir.display());
+        println!("  ./build.sh         # builds verdict_{snake}.wasm");
+        println!("  ./run.sh           # instruments + runs + reports");
+        println!();
+        println!(
+            "Five rows drive the leap-year predicate. Expected MC/DC: 1/1 decisions full, 2 conditions proved (rustc fuses the third)."
+        );
+    }
+
+    Ok(())
+}
+
+const SCAFFOLD_CARGO_TOML: &str = r#"[package]
+name = "verdict-{{NAME}}"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Witness fixture: scaffolded by `witness new`."
+license = "Apache-2.0 OR MIT"
+
+# Standalone — not part of any parent workspace. witness instruments
+# core modules (wasm32-unknown-unknown produces these); using
+# wasm32-wasip2 here would emit a Component witness can't yet
+# instrument.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+# debuginfo = true is REQUIRED — DWARF data is what witness uses to
+# group br_if branches into source-level decisions. Without it the
+# manifest still contains branches, but they don't merge into multi-
+# condition Decisions and MC/DC reconstruction degrades to per-
+# branch counter coverage.
+[profile.release]
+debug = true
+strip = false
+codegen-units = 1
+lto = false
+panic = "abort"
+"#;
+
+const SCAFFOLD_LIB_RS: &str = r#"//! Witness fixture: scaffolded by `witness new {{NAME}}`.
+//!
+//! Decision under test:  `(year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)`
+//!
+//! This is the textbook ISO leap-year rule — three short-circuit
+//! conditions in mixed AND/OR shape. Modular arithmetic blocks the
+//! constant-fold + bitwise-collapse rustc would otherwise apply to
+//! plain `(a && b) || c` over bools. Witness reconstructs **one
+//! decision with two conditions** (rustc fuses the `% 400 == 0`
+//! check into the same `br_if` chain as the first two), and the five
+//! rows below prove independent effect of those two conditions under
+//! masking MC/DC (DO-178C accepted).
+
+#![no_std]
+
+use core::hint::black_box;
+
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+
+#[inline(never)]
+fn is_leap_year(year: u32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+// Row 0 — year=2001  →  c0=F                      → outcome F.
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_0() -> i32 {
+    is_leap_year(black_box(2001)) as i32
+}
+
+// Row 1 — year=2004  →  c0=T, c1=T                → outcome T.
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_1() -> i32 {
+    is_leap_year(black_box(2004)) as i32
+}
+
+// Row 2 — year=2100  →  c0=T, c1=F, c2=F          → outcome F.
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_2() -> i32 {
+    is_leap_year(black_box(2100)) as i32
+}
+
+// Row 3 — year=2000  →  c0=T, c1=F, c2=T          → outcome T.
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_3() -> i32 {
+    is_leap_year(black_box(2000)) as i32
+}
+
+// Row 4 — year=1900  →  c0=T, c1=F, c2=F          → outcome F.
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_4() -> i32 {
+    is_leap_year(black_box(1900)) as i32
+}
+"#;
+
+const SCAFFOLD_BUILD_SH: &str = r#"#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# wasm32-unknown-unknown produces a *core* module (witness's input
+# format). wasm32-wasip2 would produce a Component, which witness
+# instrument refuses with v0.9.4's preflight error.
+TARGET="${TARGET:-wasm32-unknown-unknown}"
+
+cargo build --release --target "$TARGET"
+BUILT="target/${TARGET}/release/verdict_{{NAME_SNAKE}}.wasm"
+[ -f "$BUILT" ] || { echo "build did not produce $BUILT" >&2; exit 1; }
+cp "$BUILT" "$SCRIPT_DIR/verdict_{{NAME_SNAKE}}.wasm"
+echo "built: $SCRIPT_DIR/verdict_{{NAME_SNAKE}}.wasm ($(wc -c < "$SCRIPT_DIR/verdict_{{NAME_SNAKE}}.wasm") bytes)"
+"#;
+
+const SCAFFOLD_RUN_SH: &str = r#"#!/usr/bin/env bash
+# End-to-end pipeline: build → instrument → run → report.
+# Expected outcome: 1 decision reconstructed; 3 conditions proved
+# (full MC/DC under masking).
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+WITNESS="${WITNESS:-witness}"
+
+./build.sh
+"$WITNESS" instrument verdict_{{NAME_SNAKE}}.wasm -o instrumented.wasm
+"$WITNESS" run instrumented.wasm \
+    --invoke run_row_0 --invoke run_row_1 --invoke run_row_2 \
+    --invoke run_row_3 --invoke run_row_4 \
+    -o run.json
+"$WITNESS" report --input run.json --format mcdc
+"#;
+
+const SCAFFOLD_GITIGNORE: &str = "target/\nCargo.lock\n*.wasm\n*.witness.json\nrun.json\n";
 
 fn run_viz(reports_dir: &std::path::Path, port: u16, bind: &str) -> Result<()> {
     let bin = std::env::var_os("WITNESS_VIZ_BIN")

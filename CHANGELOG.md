@@ -7,6 +7,73 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.10] — 2026-04-28
+
+### Added — `witness new <fixture>` template scaffold
+
+Tester review Tier 3 #1: `witness new` drops a working fixture
+project (Cargo.toml + src/lib.rs + build.sh + run.sh + .gitignore)
+into `<dir>/<name>/` so first-time users skip the fiddly setup that
+trips everyone:
+
+- `[lib] crate-type = ["cdylib"]` (not the rustc default)
+- `[profile.release] debug = true` (DWARF is what witness uses to
+  group br_ifs into decisions)
+- `panic = "abort"` (no_std)
+- `#![no_std]` + `#[panic_handler]` plumbing
+- `core::hint::black_box` around inputs (else rustc constant-folds
+  the predicate and the row records nothing)
+- `wasm32-unknown-unknown` target (else the Component Model preflight
+  introduced in v0.9.4 rejects the input)
+
+```sh
+$ witness new my-fixture
+Created witness fixture at ./my-fixture
+
+  cd ./my-fixture
+  ./build.sh         # builds verdict_my_fixture.wasm
+  ./run.sh           # instruments + runs + reports
+
+Five rows drive the leap-year predicate. Expected MC/DC: 1/1
+decisions full, 2 conditions proved (rustc fuses the third).
+```
+
+The scaffolded predicate is the textbook ISO leap-year rule. Modular
+arithmetic blocks rustc's constant-fold-to-bitwise transformation
+that `(a && b) || c` over plain bools triggers (the same hazard
+that makes `range_overlap` and `mixed_or_and` zero-decision in our
+verdict suite). End-to-end on the scaffolded fixture: 1 decision
+reconstructed at `lib.rs:40`, both reconstructed conditions proved
+under masking MC/DC.
+
+CLI flags: `--dir <parent>` (default cwd), `--force` (overwrite an
+existing target). Names must be ASCII alphanumeric / `-` / `_` so
+they're valid crate names.
+
+### Verified
+
+- `witness new test-fixture --dir /tmp` → builds clean, runs end-to-
+  end, reports 1/1 full MC/DC + 2 proved.
+- 50 unit + 8 integration tests pass.
+- `cargo fmt --check` + `cargo clippy --all-targets -D warnings`
+  both clean.
+
+### Notes for v0.9.x — what remains pending
+
+After v0.9.10, the tester-review item list is largely closed for the
+v0.9.x line. Open items:
+
+- Tier 1 — **Per-DWARF-inlined-context outcome tracking**. Largest
+  remaining functional gap; needs a design pass before implementation.
+- Tier 2 — sigstore-OIDC release signing; qualifiable MC/DC checker
+  crate extraction; differential testing against rustc-mcdc; JSON
+  schemas in `docs/schemas/`.
+- Tier 3 — README split into 5-min-pitch + concepts + cli +
+  qualification; viz API completeness (`/openapi.json`).
+
+These cluster naturally into v0.10.0 (qualification + schemas) and
+v0.10.x (docs + viz polish).
+
 ## [0.9.9] — 2026-04-27
 
 ### Added — `pulseengine/witness/.github/actions/witness@v1`
