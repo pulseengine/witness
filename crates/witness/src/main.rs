@@ -204,6 +204,14 @@ enum Command {
         overview: PathBuf,
     },
 
+    /// Print the embedded quickstart guide to stdout (v0.9.12+).
+    /// The full `docs/quickstart.md` is bundled in the binary at
+    /// build time via `include_str!`, so users on a fresh machine
+    /// without the repo can still get the 10-minute walkthrough:
+    /// `witness quickstart | less` or pipe to a file. The same text
+    /// ships at https://github.com/pulseengine/witness/blob/main/docs/quickstart.md.
+    Quickstart,
+
     /// Scaffold a new witness fixture project (v0.9.10+). Writes a
     /// working `Cargo.toml`, `src/lib.rs`, `build.sh`, `run.sh`, and
     /// `.gitignore` into `<dir>/<name>/` (default dir: cwd). The
@@ -491,6 +499,13 @@ fn main() -> Result<()> {
             let record = witness_core::run_record::RunRecord::load(&run)?;
             witness_core::lcov::emit_lcov_files(&manifest_loaded, &record, &output, &overview)?;
         }
+        Command::Quickstart => {
+            // SAFETY-REVIEW: stdout is the intended channel for end-user docs.
+            #[allow(clippy::print_stdout)]
+            {
+                print!("{}", QUICKSTART_TEXT);
+            }
+        }
         Command::New { name, dir, force } => {
             let parent = dir.unwrap_or_else(|| std::path::PathBuf::from("."));
             scaffold_fixture(&parent, &name, force)?;
@@ -606,6 +621,12 @@ fn scaffold_fixture(parent: &std::path::Path, name: &str, force: bool) -> Result
 
     Ok(())
 }
+
+/// v0.9.12 — quickstart guide embedded at build time. Lets users on
+/// a fresh machine without the repo still run `witness quickstart`
+/// and get the full 10-minute walkthrough. Source of truth lives at
+/// `docs/quickstart.md`; the binary just bundles it.
+const QUICKSTART_TEXT: &str = include_str!("../../../docs/quickstart.md");
 
 const SCAFFOLD_CARGO_TOML: &str = r#"[package]
 name = "verdict-{{NAME}}"

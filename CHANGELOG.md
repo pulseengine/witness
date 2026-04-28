@@ -7,6 +7,64 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.12] — 2026-04-28
+
+### Added — `witness quickstart` embedded subcommand
+
+The 200-line `docs/quickstart.md` is now bundled in the binary via
+`include_str!`. Users on a fresh machine without the repo can run:
+
+```sh
+witness quickstart | less
+witness quickstart > my-notes.md
+```
+
+…and get the full 10-minute walkthrough — install, scaffold,
+modify-and-rerun, sign, visualise, MCP smoke, LCOV. Same source of
+truth as `docs/quickstart.md` and the GitHub-hosted copy.
+
+### Added — `docs/proposals/v0.10.0.md`
+
+The v0.10.0 release proposal lands in the repo. Synthesised from
+four independent v0.9.10 evaluations (safety-critical Rust lens,
+Go/Python fresh-user lens, curious side-project lens, rmcp
+migration assessment). 7 sections, 21 items across must-ship /
+should-ship / nice-to-ship tiers, 5-phase sequencing plan, risk
+register, acceptance criteria.
+
+Headline framing for v0.10.0: **"signed evidence chain, end to
+end."** Closes three structural gaps three of the four evaluators
+converged on:
+
+1. Signed predicate carries branch coverage only; MC/DC truth tables
+   sit unsigned next to it. v0.10.0 ships a `witness-mcdc/v1`
+   predicate type carrying truth tables.
+2. Truth-table polarity is wasm-level (br_if value) but reads as if
+   source-level. Either normalise on emit or document the inversion
+   table — proposal flags this as the design decision the user
+   makes before Phase C starts.
+3. Release tarballs themselves have no provenance. v0.10.0 wires
+   sigstore-OIDC release signing for the witness binary.
+
+The blog post for next week's pulseengine.eu drop ("witness ships
+the truth table, not the percentage") is staged at
+`pulseengine.eu/content/blog/2026-05-05-...md` (sibling repo,
+draft=true). Adapted from the curious-side-project evaluator's
+draft into maintainer's-voice build-in-public framing.
+
+### Verified
+
+- `witness quickstart` prints all 200 lines of `docs/quickstart.md`
+  with no runtime cost (data is included at compile time).
+- 50 unit + 8 integration + 7 mcp tests pass.
+- workspace `cargo fmt --check` + `cargo clippy --all-targets -D warnings` clean.
+
+### Notes for v0.10.0
+
+The proposal is the next release's source of truth. v0.9.x is
+otherwise scope-locked — feedback items from the four evaluations
+that were not closed in v0.9.11 are explicitly deferred to v0.10.0.
+
 ## [0.9.11] — 2026-04-28
 
 ### Five tester-feedback items in one release
