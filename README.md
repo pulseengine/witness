@@ -23,13 +23,59 @@ is structurally the same move as *"post-rustc Wasm"*.
 
 ## Status
 
-**v0.9.0 is the current release line.** The v0.6.x ratcheted from
+**v0.10.x is the current release line.** v0.6.x ratcheted from
 "consumer-side schema only" up to a complete signed-evidence
 pipeline. v0.7.x added the trace-buffer primitive that lifts the
-per-row-globals limit on loop-bearing programs. v0.8.0 adds
+per-row-globals limit on loop-bearing programs. v0.8.0 added
 chain-direction analysis + three new real-application fixtures.
-**v0.9.0 ships the visualiser, the MCP server, and the agent
-contract** — see "The reviewer experience" section below.
+v0.9.0 shipped the visualiser, the MCP server, and the agent
+contract. **v0.10.0 closes the signed-evidence chain end to end**
+(the MC/DC truth tables themselves are signed, not just the branch
+summary; release tarballs are cosign-signed via GitHub OIDC) and
+adds the `docs/concepts.md` glossary that names the polarity
+convention and the post-codegen view explicitly.
+
+### What witness measures (and what it doesn't)
+
+Witness counts branches **after rustc + LLVM finish lowering**. That
+matters: rustc may *fuse* multiple source-level conditions into a
+single `br_if` chain, eliminate dead arms, or constant-fold the
+predicate to bitwise arithmetic when the inputs let it. The truth
+tables you see are **the post-codegen reality**, not the source
+shape. The scaffolded leap-year fixture is the canonical example:
+`(year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)` is three
+boolean conditions in source; rustc fuses the third into the same
+chain, and witness reports two. It's correct — just measured at the
+layer where the runtime actually executes. See
+[docs/concepts.md](docs/concepts.md) §3-§4 for the worked example
+and the polarity convention (the truth-table column `c0=T` records
+the wasm `br_if` value, not the source-level condition value).
+
+This is the same move DO-178C made for "post-preprocessor C" in
+1992: measure what the compiler emits, not what the engineer typed.
+
+### Stability contract — v0.10.x
+
+| Surface | Stability |
+|---|---|
+| Schema URLs (`witness-mcdc/v1`, `witness-coverage/v1`, …) | **Stable from v0.10.** Breaking changes bump the version path. |
+| CLI flags + subcommands | **Stable from v0.10** unless the CHANGELOG calls out an explicit deprecation. |
+| `witness-mcdc-checker` crate (qualifiable kernel) | **Stable from v0.10** — kept deliberately tiny so it can be audited. |
+| `RunRecord` / `Manifest` JSON shape | **Stable from v0.10** with serde aliases for v0.9.x field names (e.g. `ambiguous_rows` → `trace_parser_active`). |
+| Rust public API of `witness-core` and `witness-viz` | **Use at your own risk** until v1.0. Major bumps may change types. |
+| MCP wire (`/mcp` JSON-RPC) | Stable from v0.10. rmcp adoption deferred to v0.11+ if a real spec-feature need surfaces. |
+
+v1.0 ships the **Check-It qualification artifact** — a small
+qualified checker (the `witness-mcdc-checker` crate today)
+validates witness output, audited under DO-330 instead of trying
+to qualify the whole pipeline. Until v1.0, witness is positioned as
+**supplementary evidence** in a qualification dossier, not primary.
+
+The release cadence is high (witness shipped 16 tagged releases in
+its first month). The discipline is: every fix lands in a numbered
+release with green CI, signed binaries, and a CHANGELOG entry. If
+you're tracking witness for production, **pin to a v0.10.x patch**
+and read the CHANGELOG before bumping.
 
 ### The reviewer experience — v0.9.0
 
@@ -84,6 +130,8 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.10.2** | Tester caveats — post-codegen framing in README, harness mode lifted into `docs/quickstart.md` §7, prominent Gatekeeper note + cosign verify command, "Stability contract" table |
+| **v0.10.1** | Windows path-stripping fix + SOURCE_DATE_EPOCH test race fix |
 | **v0.10.0** | "Signed evidence chain, end to end": `witness predicate --kind mcdc` + sigstore-OIDC release signing + `interpretation_polarity` field + `docs/concepts.md` + `witness-mcdc-checker` crate + 4 published JSON schemas + `SOURCE_DATE_EPOCH` |
 | **v0.9.12** | `witness quickstart` embedded subcommand + `docs/proposals/v0.10.0.md` + 2026-05-05 blog draft staged in pulseengine.eu |
 | **v0.9.11** | scaffold→viz bridge (auto-emit `verdict-evidence/`) + typed-args default + MCP `initialize` handshake + chatty success + `docs/quickstart.md` |
