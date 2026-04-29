@@ -8,6 +8,27 @@ against it, and emits a coverage report you can read, compare, or feed into
 and into [sigil](https://github.com/pulseengine/sigil) as an in-toto coverage
 predicate.
 
+> **New here?** [`docs/quickstart.md`](docs/quickstart.md) walks the install
+> through first MC/DC truth table in 10 minutes. [`docs/concepts.md`](docs/concepts.md)
+> defines every term used in this README — *MC/DC, masking, unique-cause,
+> br_if, post-codegen, polarity inversion, DSSE envelope, in-toto* — with
+> a worked leap-year example. New users should start there.
+
+### Is this for you?
+
+Witness is **for** you if any of these match: you ship a Wasm module
+into a regulated context (avionics, medical, automotive); you want
+to know which match arms / branches your test corpus actually
+exercises in the form the runtime executes; you want a signed
+coverage envelope an auditor can trust; you want an MCP-callable
+tool surface so AI agents can close gaps end to end.
+
+Witness is **probably not** for you if you want line/statement
+coverage on idiomatic Rust code in a non-regulated context (use
+[cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) or
+[tarpaulin](https://github.com/xd009642/tarpaulin) instead — both
+do a great job and witness deliberately doesn't try to replace them).
+
 The argument for why this tool exists lives in two blog posts:
 
 - [Spec-driven development is half the loop](https://pulseengine.eu/blog/spec-driven-development-is-half-the-loop/)
@@ -130,6 +151,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.10.4** | Round-3 evaluator bugs: SOURCE_DATE_EPOCH expression fixed; Action sha256-verifies the tarball; `@v0.10.4` pinned in docs; "Is this for you?" framing |
 | **v0.10.3** | DSSE error variants (no more "wasm runtime error" mistag); `seq_debug` stable string; compliance bundle de-nested; `witness rivet-evidence` + GH Action sections in quickstart |
 | **v0.10.2** | Tester caveats — post-codegen framing in README, harness mode lifted into `docs/quickstart.md` §7, prominent Gatekeeper note + cosign verify command, "Stability contract" table |
 | **v0.10.1** | Windows path-stripping fix + SOURCE_DATE_EPOCH test race fix |
