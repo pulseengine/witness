@@ -219,7 +219,11 @@ pub struct BranchEntry {
     /// `.wasm` file).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub byte_offset: Option<u32>,
-    /// Walrus `InstrSeqId` encoded as a debug string — diagnostic only.
+    /// Walrus `InstrSeqId` rendered as a stable u32 string. v0.9.x and
+    /// earlier emitted Rust `Debug` formatting (`"Id { idx: 1 }"`) which
+    /// leaked an unstable internal representation into the manifest
+    /// schema — flagged by E1 BUG-4. v0.10.3 emits just the integer
+    /// (e.g. `"1"`); diagnostic-only field, no consumer parses it.
     pub seq_debug: String,
 }
 
@@ -402,6 +406,26 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
 /// branches, plus an exported `__witness_row_reset` function that the
 /// runner calls between row invocations. `BrTable*` branches keep
 /// counter-only instrumentation per DEC-015.
+/// v0.10.3 — render a walrus `InstrSeqId` as a stable string. The
+/// `Debug` impl emits `"Id { idx: N }"` which leaks Rust formatting
+/// into the manifest schema (E1 BUG-4). Parsing the integer back out
+/// of the Debug output is the only forward-compat path; walrus does
+/// not expose `idx` directly. The format is "Id { idx: <u32> }" and
+/// has been stable across walrus versions in our MSRV window.
+fn walrus_seq_id_to_stable_string(id: walrus::ir::InstrSeqId) -> String {
+    let dbg = format!("{id:?}");
+    // Strip the literal "Id { idx: " prefix and " }" suffix to extract
+    // the integer. Falls back to the full Debug string if walrus ever
+    // changes the format — the field is diagnostic-only so a
+    // non-numeric fallback is acceptable.
+    if let Some(rest) = dbg.strip_prefix("Id { idx: ")
+        && let Some(num) = rest.strip_suffix(" }")
+    {
+        return num.to_string();
+    }
+    dbg
+}
+
 pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Vec<BranchEntry>> {
     let scans: Vec<FunctionScan> = collect_scans(module);
 
@@ -468,7 +492,10 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
                 instr_index: branch.instr_index,
                 target_index: branch.target_index,
                 byte_offset: branch.byte_offset,
-                seq_debug: format!("{:?}", branch.seq_id),
+                // v0.10.3 — strip Rust Debug formatting; emit just the
+                // integer index from `Id { idx: N }` so the manifest
+                // schema stays cross-toolchain-stable.
+                seq_debug: walrus_seq_id_to_stable_string(branch.seq_id),
             });
         }
     }

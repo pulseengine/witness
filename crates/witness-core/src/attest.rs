@@ -89,24 +89,26 @@ pub fn verify_envelope_file(envelope_path: &Path, public_key_path: &Path) -> Res
 /// Verify a DSSE envelope produced by [`sign_statement`] against the
 /// matching Ed25519 public key. Returns the inner Statement on success.
 pub fn verify_envelope(envelope_bytes: &[u8], public_key_bytes: &[u8]) -> Result<Statement> {
-    let envelope: DsseEnvelope = serde_json::from_slice(envelope_bytes).map_err(Error::Serde)?;
-    let public_key = ed25519_compact::PublicKey::from_slice(public_key_bytes).map_err(|e| {
-        Error::Runtime(anyhow::anyhow!(
-            "public key must be 32 bytes (Ed25519): {e}"
-        ))
-    })?;
+    // v0.10.3 — error messages no longer wrap as "wasm runtime error"
+    // (E1 BUG-5/BUG-6). Each failure mode gets a dedicated Error
+    // variant so reviewers can tell envelope corruption from
+    // signature mismatch from key shape.
+    let envelope: DsseEnvelope = serde_json::from_slice(envelope_bytes)
+        .map_err(|e| Error::EnvelopeMalformed(e.to_string()))?;
+    let public_key = ed25519_compact::PublicKey::from_slice(public_key_bytes)
+        .map_err(|e| Error::KeyMalformed(e.to_string()))?;
     let valid = envelope
         .verify_ed25519(&public_key)
-        .map_err(|e| Error::Runtime(anyhow::anyhow!("DSSE verify failed: {e:?}")))?;
+        .map_err(|e| Error::SignatureInvalid(format!("{e:?}")))?;
     if !valid {
-        return Err(Error::Runtime(anyhow::anyhow!(
-            "DSSE signature did not verify against the supplied public key"
-        )));
+        return Err(Error::SignatureInvalid(
+            "envelope's signature failed Ed25519 verification".to_string(),
+        ));
     }
     let payload = envelope
         .payload_bytes()
-        .map_err(|e| Error::Runtime(anyhow::anyhow!("DSSE payload decode: {e:?}")))?;
-    serde_json::from_slice(&payload).map_err(Error::Serde)
+        .map_err(|e| Error::PayloadDecode(format!("{e:?}")))?;
+    serde_json::from_slice(&payload).map_err(|e| Error::EnvelopeMalformed(e.to_string()))
 }
 
 #[cfg(test)]

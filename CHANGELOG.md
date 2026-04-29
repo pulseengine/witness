@@ -7,6 +7,74 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.3] — 2026-04-29
+
+Five quick-wins from the v0.10.0 proposal's should-ship + nice-to-ship
+tiers. Each S effort, all low-risk.
+
+### Fixed — DSSE error messages no longer wrap as "wasm runtime error"
+
+E1 BUG-5 / BUG-6 / F5: pre-v0.10.3 `witness verify` reported
+envelope corruption + signature mismatch + key-shape errors via
+`Error::Runtime(anyhow!(...))`, which formatted as `wasm runtime
+error: DSSE verify failed: ...`. Misleading — no wasm runtime is
+involved.
+
+v0.10.3 adds four dedicated `Error` variants:
+
+```rust
+EnvelopeMalformed(String)   // file isn't valid DSSE JSON
+SignatureInvalid(String)    // verify failed against the supplied key
+KeyMalformed(String)        // public key isn't 32 bytes Ed25519
+PayloadDecode(String)       // signature ok but base64 decode failed
+```
+
+The shape is the same; reviewers reading `witness verify` errors
+now see the right category at a glance.
+
+### Fixed — `seq_debug` field emits stable integer string
+
+E1 BUG-4: every manifest entry carried `seq_debug: "Id { idx: 1 }"`
+— Rust `Debug` formatting leaked into the schema. v0.10.3 strips
+the wrapper; manifests now emit `"seq_debug": "1"`. Diagnostic-only
+field (no consumer parses it), so this is a docs-friendly cleanup
+rather than a schema break. The helper handles future walrus
+versions gracefully — falls back to the full Debug string if the
+prefix changes.
+
+### Fixed — compliance bundle no longer double-nests
+
+E1 BUG-10 / F13: `tar -xzf witness-vX-compliance-evidence.tar.gz
+-C compliance` previously produced `compliance/compliance/...` —
+the `.github/actions/compliance/action.yml` packager included the
+output dir's basename as a top-level entry. v0.10.3 packages flat
+(`tar -czf bundle.tar.gz -C "$OUTPUT_DIR" .`) so extraction into
+any target dir produces the contents directly with no extra
+nesting.
+
+### Added — `witness rivet-evidence` quickstart example
+
+Item 17 from the proposal. Pre-v0.10.3 the `witness rivet-evidence`
+command was discoverable only via `--help`. v0.10.3 adds §8 of
+`docs/quickstart.md` with a 4-line `requirement-map.yaml` and the
+single-command invocation. Schema lives at
+`docs/schemas/witness-rivet-evidence-v1.json`.
+
+### Added — GitHub Action quickstart pointer
+
+Item 21 from the proposal. The composite Action shipped in v0.9.9
+(`pulseengine/witness/.github/actions/witness@v1`) lets any Rust
+crate adopt the witness pipeline in 8 lines of YAML, but it wasn't
+in the quickstart. v0.10.3 adds §9 with a copy-paste workflow step
+and a pointer to `.github/actions/witness/README.md`.
+
+### Verified
+
+- 100 tests pass; clippy + fmt clean.
+- New error variants don't break existing callers (the `Error::Runtime`
+  paths in non-DSSE code are untouched).
+- `witness quickstart` (the embedded version) now carries §8 and §9.
+
 ## [0.10.2] — 2026-04-29
 
 ### Tester caveats from the v0.10.1 review — docs only

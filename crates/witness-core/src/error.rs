@@ -82,6 +82,29 @@ pub enum Error {
         source: anyhow::Error,
     },
 
+    /// v0.10.3 — DSSE envelope verification or parsing failure. v0.9.x
+    /// routed all of these through `Error::Runtime`, so reviewers saw
+    /// "wasm runtime error: DSSE verify failed" — misleading because
+    /// no wasm runtime is involved. E1 BUG-5 / BUG-6 / F5.
+    ///
+    /// Distinct messages:
+    /// - `EnvelopeMalformed` — file isn't valid DSSE JSON (probably
+    ///   truncated, mis-encoded, or not an envelope at all).
+    /// - `SignatureInvalid` — envelope is well-formed but the
+    ///   signature does not verify against the supplied public key.
+    /// - `KeyMalformed` — the public-key file is the wrong size or
+    ///   shape (Ed25519 keys must be exactly 32 bytes).
+    /// - `PayloadDecode` — signature is fine, but the inner payload
+    ///   couldn't be base64-decoded.
+    #[error("DSSE envelope is malformed or truncated: {0}")]
+    EnvelopeMalformed(String),
+    #[error("DSSE signature did not verify against the supplied public key: {0}")]
+    SignatureInvalid(String),
+    #[error("Ed25519 public key is malformed (must be exactly 32 bytes): {0}")]
+    KeyMalformed(String),
+    #[error("DSSE payload could not be decoded: {0}")]
+    PayloadDecode(String),
+
     #[error("io error")]
     Io(#[from] std::io::Error),
 

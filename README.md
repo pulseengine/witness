@@ -130,6 +130,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.10.3** | DSSE error variants (no more "wasm runtime error" mistag); `seq_debug` stable string; compliance bundle de-nested; `witness rivet-evidence` + GH Action sections in quickstart |
 | **v0.10.2** | Tester caveats — post-codegen framing in README, harness mode lifted into `docs/quickstart.md` §7, prominent Gatekeeper note + cosign verify command, "Stability contract" table |
 | **v0.10.1** | Windows path-stripping fix + SOURCE_DATE_EPOCH test race fix |
 | **v0.10.0** | "Signed evidence chain, end to end": `witness predicate --kind mcdc` + sigstore-OIDC release signing + `interpretation_polarity` field + `docs/concepts.md` + `witness-mcdc-checker` crate + 4 published JSON schemas + `SOURCE_DATE_EPOCH` |
