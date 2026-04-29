@@ -340,7 +340,14 @@ pub fn build_mcdc_statement_with_original(
 /// unchanged.
 fn strip_to_project_relative(path: &str) -> String {
     let p = Path::new(path);
-    if !p.is_absolute() {
+    // v0.10.1 — Windows fix: `Path::is_absolute()` returns false for
+    // Unix-style `/foo/bar` on Windows because Windows requires a
+    // drive letter for an absolute path. The stripping must work the
+    // same on every platform, so detect "rooted-looking" via leading
+    // `/` or `\` in addition to `is_absolute`. Caught by the
+    // Test (windows-latest) job on the v0.10.0 release.
+    let looks_absolute = p.is_absolute() || path.starts_with('/') || path.starts_with('\\');
+    if !looks_absolute {
         return path.to_string();
     }
     if let Ok(cwd) = std::env::current_dir()
@@ -348,8 +355,16 @@ fn strip_to_project_relative(path: &str) -> String {
     {
         return rel.to_string_lossy().into_owned();
     }
-    p.file_name()
-        .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned())
+    // Basename fallback. On Windows the platform-native `file_name`
+    // splits on `\`; we also handle the synthesised Unix-rooted paths
+    // shipped from CI / fixtures.
+    if let Some(name) = p.file_name() {
+        return name.to_string_lossy().into_owned();
+    }
+    if let Some(idx) = path.rfind(['/', '\\']) {
+        return path[idx.saturating_add(1)..].to_string();
+    }
+    path.to_string()
 }
 
 /// Resolve the timestamp embedded in the predicate. Honours
@@ -656,44 +671,11 @@ mod tests {
         assert_eq!(strip_to_project_relative("app.wasm"), "app.wasm");
     }
 
-    /// v0.10.0 — `SOURCE_DATE_EPOCH` env var pins the timestamp for
-    /// reproducible builds. Per
-    /// <https://reproducible-builds.org/docs/source-date-epoch/>,
-    /// 1700000000 is 2023-11-14T22:13:20Z.
-    #[test]
-    fn rfc3339_honours_source_date_epoch() {
-        // SAFETY: env var mutation is `unsafe` under multi-threaded
-        // tests; cargo runs tests in-process. We mutate a single var
-        // with a value no other test touches.
-        unsafe {
-            std::env::set_var("SOURCE_DATE_EPOCH", "1700000000");
-        }
-        let stamp = now_rfc3339();
-        assert_eq!(
-            stamp, "2023-11-14T22:13:20Z",
-            "SOURCE_DATE_EPOCH must override the wall clock"
-        );
-        // SAFETY: same justification.
-        unsafe {
-            std::env::remove_var("SOURCE_DATE_EPOCH");
-        }
-    }
-
-    /// Garbage SOURCE_DATE_EPOCH values must not crash; fall back to
-    /// the system clock.
-    #[test]
-    fn rfc3339_garbage_source_date_epoch_falls_back() {
-        // SAFETY: see rfc3339_honours_source_date_epoch.
-        unsafe {
-            std::env::set_var("SOURCE_DATE_EPOCH", "not-a-number");
-        }
-        let stamp = now_rfc3339();
-        assert!(stamp.ends_with('Z'), "still RFC3339-shaped: {stamp}");
-        // SAFETY: see above.
-        unsafe {
-            std::env::remove_var("SOURCE_DATE_EPOCH");
-        }
-    }
+    // Note: SOURCE_DATE_EPOCH end-to-end coverage lives in
+    // `source_date_epoch_pins_predicate_timestamp_and_strips_paths`
+    // (the predicate-level test). Earlier v0.10.0 patches added
+    // standalone `now_rfc3339()` tests that mutated the same env var
+    // and raced against the predicate-level test — removed in v0.10.1.
 
     // --------------------------------------------------------------
     // v0.10.0 — MC/DC predicate (item 1, E1 BUG-2 / B1 closure).

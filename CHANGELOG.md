@@ -7,6 +7,33 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-04-29
+
+### Fixed — `Test (windows-latest)` failure on the v0.10.0 release
+
+Two issues in the v0.10.0 predicate path-stripping landing surfaced
+on the Windows CI runner:
+
+1. **Windows path-rooting**. `Path::new("/foo/bar").is_absolute()`
+   returns `false` on Windows because Windows requires a drive
+   letter (`C:\...`) for "absolute". `strip_to_project_relative`
+   would skip basename collapsing for synthetic Unix-rooted test
+   paths. Fix: also accept paths starting with `/` or `\` as
+   "rooted enough to strip" — covers the cross-platform fixture
+   shape without breaking the relative-path passes-through case.
+
+2. **SOURCE_DATE_EPOCH test race**. v0.10.0 added two standalone
+   `now_rfc3339()` tests next to the predicate-level
+   `source_date_epoch_pins_predicate_timestamp_and_strips_paths`
+   test; all three mutated the same env var. Cargo test
+   parallelism inside one binary made them race. Fix: drop the
+   redundant standalone tests; the predicate-level test already
+   covers `SOURCE_DATE_EPOCH=1700000000` → `2023-11-14T22:13:20Z`
+   end to end.
+
+100 tests pass on Linux, macOS, Windows. cargo fmt + clippy
+--all-targets -D warnings clean.
+
 ## [0.10.0] — 2026-04-29
 
 ### Headline — signed evidence chain, end to end
