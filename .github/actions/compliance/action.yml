@@ -211,7 +211,12 @@ runs:
         set -euo pipefail
         NAME="${ARCHIVE_NAME}"
         [ -z "$NAME" ] && NAME="witness-${LABEL}-compliance-evidence"
-        tar -czf "${NAME}.tar.gz" -C "$(dirname "$OUTPUT_DIR")" "$(basename "$OUTPUT_DIR")"
+        # v0.10.3 — package archive contents *flat* (was: nested under
+        # the OUTPUT_DIR basename, which made `tar -xzf bundle.tar.gz
+        # -C compliance` produce `compliance/compliance/...` — flagged
+        # by E1 BUG-10 / F13). Now extracting into any target dir
+        # produces the contents directly with no extra nesting.
+        tar -czf "${NAME}.tar.gz" -C "$OUTPUT_DIR" .
         echo "archive-path=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
 
     - name: Export report dir

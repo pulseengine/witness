@@ -304,7 +304,60 @@ state. v2 produces truth tables identical to embedded mode.
 Backward compat: v1 harnesses keep working unchanged in v0.10.x.
 Schema dispatch picks the right path at parse time.
 
+## 8. Rivet-evidence (requirement-to-test traceability)
+
+If you also use [rivet](https://github.com/pulseengine/rivet) to
+track REQ → FEAT → DEC artefacts, witness can emit coverage as
+rivet-shaped YAML. Map each branch ID to a rivet artefact in a
+small YAML file, then:
+
+```sh
+cat > requirement-map.yaml <<'EOF'
+mappings:
+  - artifact: REQ-014
+    branches: [0, 1]
+  - artifact: REQ-015
+    branches: [2]
+EOF
+
+witness rivet-evidence \
+    --run run.json \
+    --requirement-map requirement-map.yaml \
+    -o coverage-evidence.yaml
+```
+
+The output is a `witness-rivet-evidence/v1` document rivet's
+`CoverageStore` consumes. Schema lives at
+[`docs/schemas/witness-rivet-evidence-v1.json`](schemas/witness-rivet-evidence-v1.json).
+
+## 9. CI in 8 lines — the witness GitHub Action
+
+`pulseengine/witness/.github/actions/witness@v1` is a composite
+Action that downloads the latest release tarball, runs the full
+pipeline, and (on tag push) attaches outputs to the matching
+GitHub release:
+
+```yaml
+- uses: pulseengine/witness/.github/actions/witness@v1
+  with:
+    module: build/app.wasm
+    invoke: |
+      run_row_0
+      run_row_1
+      run_row_2
+    upload-to-release: ${{ startsWith(github.ref, 'refs/tags/') }}
+```
+
+That's it. No witness compile cost in your CI; the action pulls the
+prebuilt witness + witness-viz binaries, runs instrument → run →
+predicate → attest, optionally uploads the signed envelope + verifying
+key to your release. Documented at
+[`.github/actions/witness/README.md`](https://github.com/pulseengine/witness/blob/main/.github/actions/witness/README.md).
+
 ## What's missing from this guide
 
-- `witness merge` for multi-run aggregation.
+- `witness merge` for multi-run aggregation across test binaries.
 - `witness diff` for PR-shaped coverage deltas.
+- `witness viz` MCP tool reference (the dashboard's JSON-RPC
+  endpoint exposes `get_decision_truth_table`,
+  `find_missing_witness`, and `list_uncovered_conditions` to agents).
