@@ -36,9 +36,37 @@ Both binaries ship in the same tarball. `witness viz` spawns
 `witness-viz`, so they need to live next to each other on `$PATH`,
 or you set `WITNESS_VIZ_BIN=/abs/path/to/witness-viz`.
 
-The arm64-darwin binary is unsigned — Gatekeeper may quarantine it
-on first launch. Run `xattr -d com.apple.quarantine witness
-witness-viz` if the OS refuses to execute.
+### macOS Gatekeeper note (read me first if you're on macOS)
+
+The macOS binaries are **not yet** Apple Developer ID-signed
+(planned; see the v0.10.x stability contract). On first launch
+Gatekeeper will refuse with *"witness cannot be opened because the
+developer cannot be verified."* Two options:
+
+```sh
+# Option 1: clear the quarantine attribute Apple's Safari/curl set on download.
+xattr -d com.apple.quarantine witness witness-viz
+
+# Option 2: tell Gatekeeper to allow once via System Preferences.
+# Open System Settings → Privacy & Security → scroll to "witness was
+# blocked..." → Allow Anyway.
+```
+
+The release tarballs ARE cosign-signed (sigstore-OIDC). Verify
+provenance in CI/CD before trusting the binary:
+
+```sh
+cosign verify-blob \
+  --certificate-identity 'https://github.com/pulseengine/witness/.github/workflows/release.yml@refs/tags/v0.10.1' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  --signature witness-v0.10.1-aarch64-apple-darwin.tar.gz.sig \
+  --certificate witness-v0.10.1-aarch64-apple-darwin.tar.gz.cert \
+  witness-v0.10.1-aarch64-apple-darwin.tar.gz
+```
+
+A successful verify proves the tarball was produced by the
+`pulseengine/witness/.github/workflows/release.yml` workflow on the
+named tag. No long-term key custody.
 
 ## 2. Scaffold a fixture
 
@@ -189,12 +217,94 @@ LCOV `BRDA` records are attributed to your source file. Older
 fixtures using `core::hint::black_box` wrappers attribute to
 `hint.rs`; switch to typed-args to fix.
 
+## 7. Harness mode — running on a non-wasmtime runtime
+
+Embedded mode (everything above) loads the instrumented module
+under wasmtime. If your target is a different runtime — Node WASI,
+WAMR on an in-vehicle ECU, WasmEdge, a custom embedder — switch to
+**harness mode**:
+
+```sh
+witness run app.instrumented.wasm --harness "node tests/runner.mjs"
+```
+
+witness spawns the harness with three env vars:
+
+```
+WITNESS_MODULE   absolute path to the instrumented .wasm
+WITNESS_MANIFEST absolute path to <module>.witness.json
+WITNESS_OUTPUT   absolute path the harness must write before exit
+```
+
+The harness loads the module, exercises it, and writes a JSON
+snapshot to `$WITNESS_OUTPUT`. Two schema versions:
+
+### v1 — counters only (~10-line harness, branch coverage)
+
+```json
+{
+  "schema": "witness-harness-v1",
+  "counters": { "0": 7, "1": 0, "2": 12 }
+}
+```
+
+Keys are the per-branch decimal IDs from the manifest's
+`branches[].id`. Values are u64 hit counts. v1 produces branch
+coverage; **MC/DC reconstruction degrades** because per-iteration
+condition values aren't shipped.
+
+```js
+// harness.mjs — minimal v1 implementation
+import fs from "node:fs/promises";
+import { WASI } from "node:wasi";
+const mod = await WebAssembly.compile(
+  await fs.readFile(process.env.WITNESS_MODULE),
+);
+const wasi = new WASI({ version: "preview1" });
+const inst = await WebAssembly.instantiate(mod, {
+  wasi_snapshot_preview1: wasi.wasiImport,
+});
+inst.exports.run_row_0(); /* ... drive your rows ... */
+const counters = {};
+for (const [name, val] of Object.entries(inst.exports)) {
+  if (name.startsWith("__witness_counter_") && typeof val.value === "bigint") {
+    counters[name.replace("__witness_counter_", "")] = Number(val.value);
+  }
+}
+await fs.writeFile(process.env.WITNESS_OUTPUT, JSON.stringify({
+  schema: "witness-harness-v1", counters,
+}));
+```
+
+### v2 — full MC/DC capable (v0.9.5+)
+
+Same wire format extended with per-row snapshots carrying brvals,
+brcnts, and base64-encoded trace memory:
+
+```json
+{
+  "schema": "witness-harness-v2",
+  "counters": { "0": 7 },
+  "rows": [
+    {
+      "name": "run_row_0",
+      "outcome": 1,
+      "brvals": { "0": 1 },
+      "brcnts": { "0": 1 },
+      "trace_b64": "AAAA..."
+    }
+  ]
+}
+```
+
+The harness must call `__witness_trace_reset` and
+`__witness_row_reset` between rows so each entry carries isolated
+state. v2 produces truth tables identical to embedded mode.
+
+Backward compat: v1 harnesses keep working unchanged in v0.10.x.
+Schema dispatch picks the right path at parse time.
+
 ## What's missing from this guide
 
-- Custom harness mode (`witness run --harness ...`) — the README's
-  "Harness-mode protocol" section is the right reference. Minimum
-  viable harness is ~10 lines; just write a JSON snapshot to
-  `$WITNESS_OUTPUT` matching `{"schema":"witness-harness-v1",
-  "counters":{"<id>":<u64>,...}}`.
 - `witness merge` for multi-run aggregation.
 - `witness diff` for PR-shaped coverage deltas.

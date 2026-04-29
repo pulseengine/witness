@@ -7,6 +7,79 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-04-29
+
+### Tester caveats from the v0.10.1 review — docs only
+
+A second-round reviewer flagged four caveats. Three are fixable by
+docs alone; the fourth (macOS Developer ID signing + notarisation)
+needs Apple Developer Program plumbing and is parked pending the
+maintainer wiring in the cert + API key. Three doc patches ship
+here.
+
+#### Caveat 1 — post-codegen view, named explicitly in the README
+
+The leap-year fixture reports 2 conditions where the source has 3
+because rustc fuses `% 400 == 0` into the same `br_if` chain as the
+first two. Pre-v0.10.2 this was buried in `--help`, `lib.rs`
+comments, and `docs/concepts.md` §3-§4. v0.10.2 lands a "What
+witness measures" subsection at the top of the README's Status
+section: rustc may fuse, eliminate, or constant-fold; we count what
+the runtime actually executes; this is the post-preprocessor C
+parallel from 1992. Readers who skim the front page no longer
+need to discover the convention themselves.
+
+#### Caveat 2 — harness mode lifted into `docs/quickstart.md` §7
+
+Pre-v0.10.2 the `docs/quickstart.md` (which the binary embeds via
+`witness quickstart`) handwaved harness mode in "What's missing
+from this guide" and pointed at the README's full reference.
+Readers who only have the quickstart hit a dead end. v0.10.2 lifts
+both the v1 (counters only) and v2 (full MC/DC) wire formats into a
+proper §7 with the 10-line Node WASI reference implementation
+inline. `witness quickstart` now prints the harness reference too.
+
+#### Caveat 3 (doc half) — Gatekeeper note made prominent
+
+The macOS arm64 binaries are not yet Apple Developer ID-signed.
+Pre-v0.10.2 the `xattr -d com.apple.quarantine` workaround was a
+two-line aside in the install section. v0.10.2 expands it into a
+"macOS Gatekeeper note (read me first if you're on macOS)"
+subsection that explains both options (xattr and System Settings)
+plus the `cosign verify-blob` command that proves provenance
+regardless of Gatekeeper status. Apple Developer ID signing +
+notarisation is the planned completion path; the workflow
+plumbing is documented in the v0.10.x stability contract.
+
+#### Caveat 4 — Stability contract section in README
+
+The reviewer noted: "Project is young — first release April 2026,
+0 stars, 1 open issue. Velocity is high but production adoption
+should track v0.10.x stability." Fair. v0.10.2 lands a "Stability
+contract — v0.10.x" table in the README naming what's stable from
+v0.10 (schema URLs, CLI flags, the `witness-mcdc-checker` crate,
+the JSON shapes — with serde aliases for v0.9.x field names) and
+what's "use at your own risk until v1.0" (Rust public API). v1.0
+is positioned as the Check-It qualification artifact.
+
+### Caveat 3 (cert half) — deferred
+
+macOS Developer ID signing + Apple notary submission needs:
+- a Developer ID Application certificate exported as `.p12`
+- App Store Connect API Key (`.p8` + key ID + issuer ID)
+- five GitHub repo secrets
+
+Maintainer has the Apple Developer Program membership; the cert is
+installed locally. Plumbing wires up on the next signed-and-
+notarised release once secrets are configured. The cosign-OIDC
+chain (already shipped in v0.10.0) provides cryptographic
+provenance regardless.
+
+### Verified
+
+- 100 tests pass; clippy + fmt clean.
+- `witness quickstart` now embeds the harness mode reference.
+
 ## [0.10.1] — 2026-04-29
 
 ### Fixed — `Test (windows-latest)` failure on the v0.10.0 release
