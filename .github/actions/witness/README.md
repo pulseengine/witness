@@ -4,10 +4,24 @@ Composite GitHub Action: instrument a Wasm module, run it, emit a
 signed in-toto coverage predicate, and (optionally) attach the
 evidence to a GitHub release.
 
+## Versioning
+
+Pin to a release tag. The composite action ships in lockstep with
+the witness binary it downloads; both bump together.
+
+```yaml
+# Recommended for production — exact version pin, reproducible.
+- uses: pulseengine/witness/.github/actions/witness@v0.10.4
+
+# Convenience form — track the latest v0.10.x patch (mutable, but
+# scoped to one major). Update the path when v0.11 ships.
+- uses: pulseengine/witness/.github/actions/witness@v0.10
+```
+
 ## 8-line adoption
 
 ```yaml
-- uses: pulseengine/witness/.github/actions/witness@v1
+- uses: pulseengine/witness/.github/actions/witness@v0.10.4
   with:
     module: build/app.wasm
     invoke: |

@@ -7,6 +7,92 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.4] — 2026-04-29
+
+Bug fixes from the v0.10.3 round-3 evaluator pass (5 fresh-eyes
+personas, all desk-only after Bash sandbox denials).
+
+### Fixed — `SOURCE_DATE_EPOCH` expression in release.yml was inverted
+
+P5 (security/SLSA evaluator) caught: the v0.10.0 expression
+`${{ github.event.head_commit.timestamp && '' || '1700000000' }}`
+returns `''` (empty) when a head_commit exists — i.e. always on
+tag push — so SOURCE_DATE_EPOCH was effectively unset and
+predicate.rs's wall-clock fallback ran. *Plus* `head_commit.timestamp`
+is an ISO-8601 string, not the Unix-epoch integer
+SOURCE_DATE_EPOCH expects.
+
+v0.10.4 removes the broken workflow-level expression and adds a
+per-job step that computes the epoch from the tag commit's Unix
+timestamp via `git log -1 --pretty=%ct`, exporting it via
+`$GITHUB_ENV`. End-user reproducibility (the actual claim) was
+unaffected — predicate.rs honoured the env var when set.
+
+### Fixed — composite Action header read "v0.9.9 — first cut"
+
+P3 (DevOps evaluator) caught: `.github/actions/witness/action.yml`
+header described its initial v0.9.9 cut despite v0.10.x changes.
+Updated to reflect the v0.10.4 additions (sha256 verification of
+the tarball download, real version number).
+
+### Fixed — README + docs referenced a non-existent `@v1` tag
+
+P3 caught: copy-pasting the README's example
+`uses: pulseengine/witness/.github/actions/witness@v1` failed
+because no `v1` tag existed. v0.10.4 updates docs to use a pinned
+release tag (`@v0.10.4`) and documents the rolling `@v0.10` form
+for adopters who want patch-level updates within a major.
+
+A rolling `v1` tag may ship later as the GitHub-Actions-marketplace
+convention; for now, **explicit version pinning is the documented
+path** and matches the safety-critical adoption posture the
+v0.10.x stability contract describes.
+
+### Fixed — Action `curl`'d the tarball with no checksum
+
+P3 caught: the action downloaded `witness-${VERSION}-${TARGET}.tar.gz`
+and `chmod +x`'d its contents with no integrity check. v0.10.4
+adds a SHA-256 verification step: download `SHA256SUMS.txt`
+alongside the tarball, compute the local digest, fail with a clear
+`::error::` if they don't match. The cosign-OIDC envelope on the
+release is still the gold-standard proof; the SHA check catches
+the much-cheaper "tarball was truncated mid-download" + "release
+was published incomplete" cases without a cosign install.
+
+### Fixed — README front-paragraph jargon
+
+P1 (junior-dev evaluator) caught: the README's first paragraph
+landed `MC/DC`, `WebAssembly components`, `in-toto coverage
+predicate` before any glossary link, and the first reference to
+`docs/concepts.md` was at line 50. v0.10.4 adds a "New here?"
+callout in the first 12 lines pointing at quickstart + concepts,
+plus an "Is this for you?" subsection that says when *not* to
+reach for witness (line/statement coverage on plain Rust → use
+cargo-llvm-cov or tarpaulin).
+
+### Verified
+
+- 100 tests pass; clippy + fmt clean.
+- The action's sha256 verification step runs locally against a
+  v0.10.3 release: SHA256SUMS.txt download succeeds, awk filter
+  finds the platform-specific line, comparison passes.
+
+### Notes for v0.10.x and v0.11
+
+Documentation drift items deferred (need design pass):
+- SECURITY.md describes v0.6.x ephemeral-Ed25519 chain, not the
+  v0.10.0 cosign-OIDC chain (P5 finding).
+- Predicate carries `witness_version` only — no Rust toolchain,
+  wasmtime version, or test-case-ID-to-row map (P2 architect-lens
+  finding).
+- DO-330 Tool Qualification Plan + TQL classification + Tool
+  Operational Requirements (P2): blocked on the v1.0 Check-It
+  artefact design.
+
+These are real gaps, but addressing them right requires a design
+pass and (for SECURITY.md) coordinated reframing of the threat
+model. v0.11 territory.
+
 ## [0.10.3] — 2026-04-29
 
 Five quick-wins from the v0.10.0 proposal's should-ship + nice-to-ship

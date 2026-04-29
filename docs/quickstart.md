@@ -332,13 +332,13 @@ The output is a `witness-rivet-evidence/v1` document rivet's
 
 ## 9. CI in 8 lines — the witness GitHub Action
 
-`pulseengine/witness/.github/actions/witness@v1` is a composite
+`pulseengine/witness/.github/actions/witness@v0.10.x` is a composite
 Action that downloads the latest release tarball, runs the full
 pipeline, and (on tag push) attaches outputs to the matching
 GitHub release:
 
 ```yaml
-- uses: pulseengine/witness/.github/actions/witness@v1
+- uses: pulseengine/witness/.github/actions/witness@v0.10.4
   with:
     module: build/app.wasm
     invoke: |

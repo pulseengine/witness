@@ -16,10 +16,20 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # v0.10.0 — reproducible-build clock for the predicate timestamps.
-  # Honours upstream `SOURCE_DATE_EPOCH` per
-  # https://reproducible-builds.org/docs/source-date-epoch/.
-  SOURCE_DATE_EPOCH: ${{ github.event.head_commit.timestamp && '' || '1700000000' }}
+
+# v0.10.0 introduced a workflow-level SOURCE_DATE_EPOCH expression
+# that was *inverted* — `${{ A && '' || B }}` evaluates to `''` when
+# A is truthy, so when a head_commit existed (always, on tag push)
+# the var was set to an empty string and predicate.rs's wall-clock
+# fallback kicked in. Worse, `head_commit.timestamp` is an ISO-8601
+# string, not the Unix-epoch integer SOURCE_DATE_EPOCH expects.
+#
+# Caught by the v0.10.3 round-3 security evaluator (P5). v0.10.4
+# fix: compute the epoch from the tag commit at workflow time and
+# export it via $GITHUB_ENV in a per-job step (see "Set
+# SOURCE_DATE_EPOCH" below). End-user reproducibility (the actual
+# claim in the README) is unaffected — predicate.rs honours
+# SOURCE_DATE_EPOCH whenever it's set in the runtime env.
 
 jobs:
   build-binaries:
@@ -125,6 +135,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Need the tag's commit, not the merge ref, so the timestamp
+          # is the user-visible commit timestamp.
+          ref: ${{ github.ref }}
+      # v0.10.4 — set SOURCE_DATE_EPOCH from the tag commit's Unix
+      # timestamp so every reproducible rebuild of the same tag
+      # produces byte-identical predicate envelopes. predicate.rs
+      # honours this variable when set; falls back to wall-clock
+      # otherwise.
+      - name: Set SOURCE_DATE_EPOCH from tag commit
+        run: |
+          EPOCH=$(git log -1 --pretty=%ct "${GITHUB_SHA}")
+          echo "SOURCE_DATE_EPOCH=${EPOCH}" >> "$GITHUB_ENV"
+          echo "::notice::Reproducible-build clock SOURCE_DATE_EPOCH=${EPOCH} (tag commit)"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/compliance
