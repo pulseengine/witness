@@ -7,6 +7,174 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-04-29
+
+### Headline — signed evidence chain, end to end
+
+v0.10.0 closes the gap three of four v0.9.10 evaluators converged on:
+the predicate carried branch-coverage *summary*, not the MC/DC truth
+tables. Now `witness predicate --kind mcdc` emits a Statement whose
+payload is the per-decision truth table itself, content-bound by a
+sha256 of the canonical JSON. The release tarballs themselves are
+signed via cosign-OIDC. The vocabulary that confused fresh-eyes
+evaluators (masking, unique-cause, polarity, ambiguous_rows) gets a
+431-line `docs/concepts.md` page with worked examples.
+
+### Added — `witness-mcdc/v1` predicate type
+
+`witness predicate --kind mcdc` builds an in-toto Statement carrying:
+
+- The full `McdcReport` (overall counts + per-decision verdicts +
+  truth tables + condition pairs + interpretation strings).
+- A `report_sha256` binding the envelope payload to a content hash,
+  so signature verification implies truth-table integrity.
+- Two subjects: the instrumented module + the original (pre-
+  instrument) module, both with sha256 digests.
+- Standard in-toto Statement frame.
+
+Old `witness predicate` (now `--kind coverage`, the default) keeps
+its `witness-coverage/v1` shape unchanged. Subjects: instrumented
+plus original (when present).
+
+### Added — `original_module` populated on every predicate
+
+`witness instrument` now records the SHA-256 of the input
+(pre-instrumentation) module in the manifest as
+`original_module_sha256`. `witness predicate` reads it and emits a
+second Statement subject automatically. Closes the long-standing
+"original_module: null on every envelope" gap (E1 BUG-3).
+
+`#[serde(default)]` on the new manifest field, so v0.9.x manifests
+keep loading.
+
+### Added — sigstore-OIDC keyless release signing
+
+`.github/workflows/release.yml` adds a cosign step after the
+flatten + before the GitHub-release create. Each asset gets a `.sig`
++ `.cert` pair. Verify downstream:
+
+```sh
+cosign verify-blob \
+  --certificate-identity 'https://github.com/pulseengine/witness/.github/workflows/release.yml@refs/tags/v0.10.0' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  --signature witness-v0.10.0-x86_64-apple-darwin.tar.gz.sig \
+  --certificate witness-v0.10.0-x86_64-apple-darwin.tar.gz.cert \
+  witness-v0.10.0-x86_64-apple-darwin.tar.gz
+```
+
+No long-term key custody — signatures are bound to the workflow
+identity via the GitHub OIDC token. Closes E1 blocker B3 / DOCS-2.
+
+### Added — `interpretation_polarity` field on every MC/DC report
+
+The truth-table `c0=T` columns record the **wasm br_if value**
+(post-`i32.eqz; br_if` lowering), not the source-level condition
+value. v0.9.x reports left this convention undocumented; reviewers
+reading reports cold confused themselves. v0.10.0 adds an
+`interpretation_polarity: "wasm-early-exit"` field on every
+`McdcReport` so consumers can detect the convention. The full
+explanation, with worked examples, lives at `docs/concepts.md` §4.
+
+This is non-breaking: the on-the-wire semantics don't change, just
+the documentation. v0.10.x may add an opt-in
+`witness report --polarity source` that emits source-equivalent
+outcomes (with the inversion table baked in) once the conversion
+is fully tested across the verdict suite.
+
+### Added — `docs/concepts.md` glossary + worked examples
+
+431 lines closing E2's docs gap. Seven sections:
+
+1. The 60-second pitch (Go/Python register, no Rust jargon).
+2. **Vocabulary table** — 22 rows, plain-English definitions, examples,
+   landing version cited from CHANGELOG.
+3. The leap-year fixture walked row by row, sentence-by-sentence.
+4. **The polarity inversion, named explicitly** with worked F-then-T
+   example proving columns invert exactly.
+5. The MC/DC criterion in plain language.
+6. The signed evidence chain — what v0.9.x signs vs what v0.10.0
+   signs.
+7. DO-178C / post-preprocessor C lineage in three paragraphs.
+
+### Added — `witness-mcdc-checker` extracted crate
+
+The MC/DC pair-finder (`find_independent_effect_pair`, ~70 LoC) is
+lifted into a no-deps crate auditors can read in isolation:
+
+- `crates/witness-mcdc-checker/Cargo.toml` — pure `Vec` + `BTreeMap`
+  + primitives, no runtime deps. Workspace member.
+- `crates/witness-mcdc-checker/src/lib.rs` — `Row`, `Interpretation`,
+  `find_independent_effect_pair` lifted verbatim.
+- `crates/witness-mcdc-checker/tests/properties.rs` — 4 `proptest`
+  property tests (256 cases each): outcome-differs, target-differs,
+  non-target-compatibility, masking-vs-unique-cause interpretation.
+
+`witness-core::mcdc_report` re-exports the function so callers
+upstream don't need to migrate. Original tester Tier 2 #2.
+
+### Added — Four published JSON Schemas at `docs/schemas/`
+
+JSON Schema draft 2020-12 documents for every URL-stable schema:
+
+- `witness-mcdc-v1.json` — McdcReport + nested types, includes the
+  v0.9.7 `br-table-arm` interpretation extension and the v0.10.0
+  `interpretation_polarity` field.
+- `witness-coverage-v1.json` — in-toto Statement + Subject + Digests
+  + Coverage predicate body.
+- `witness-rivet-evidence-v1.json` — rivet evidence YAML schema
+  (JSON-schema-validated after YAML→JSON conversion).
+- `witness-trace-matrix-v1.json` — V-model traceability matrix.
+
+`docs/schemas/README.md` lists each schema, its purpose, the URL,
+and a `curl | jq` validation example. CI gains a (non-gating)
+`schemas` job that validates each shipped fixture against the
+matching schema. Closes original Tier 2 #4.
+
+### Added — `SOURCE_DATE_EPOCH` honoured in predicate timestamps
+
+When `SOURCE_DATE_EPOCH` is set in the environment, `witness
+predicate` (both kinds) uses it as the `measured_at` timestamp.
+Reviewers re-running the same instrumented module + harness against
+the same epoch get a byte-identical predicate. Per
+<https://reproducible-builds.org/docs/source-date-epoch/>.
+
+Path stripping: absolute module paths get reduced to project-
+relative when they fall under cwd, otherwise basename. Predicates
+no longer leak machine-specific paths into the signed body.
+
+### Changed — `TraceHealth.ambiguous_rows` → `trace_parser_active`
+
+The old name was misleading: both fully-proved and fully-gap runs
+set it to `true` whenever trace memory had data, which reviewers
+read as an *error* indicator. New name: `trace_parser_active` —
+"the trace-buffer parser produced per-iteration rows."
+
+`#[serde(alias = "ambiguous_rows")]` on the field so v0.9.x
+run.json files keep loading. The legacy alias sunsets in v0.11.
+
+### Verified
+
+- 100 tests pass across the workspace (8 + 0 + 8 + 8 + 60 + 10 + 4 +
+  doc-tests). Includes 5 new predicate tests, 14 new
+  `witness-mcdc-checker` tests (10 unit + 4 property), 2 new
+  `SOURCE_DATE_EPOCH` tests.
+- `cargo fmt --check` + `cargo clippy --all-targets --release -- -D warnings`
+  clean across 5 crates (witness, witness-core, witness-mcdc-checker,
+  witness-viz, witness-component).
+- End-to-end live smoke verified: `witness new` → `./run.sh` →
+  `verdict-evidence/` bundle → `witness predicate --kind mcdc` →
+  output Statement carries 2 subjects + report + report_sha256 +
+  `predicateType: https://pulseengine.eu/witness-mcdc/v1`.
+
+### Notes for v0.10.x and beyond
+
+The proposal at `docs/proposals/v0.10.0.md` carries 21 items across
+must-ship / should-ship / nice-to-ship tiers. v0.10.0 ships the must-
+ship tier in full plus several should-ship items. The remaining
+backlog (rmcp migration, per-DWARF-inlined-context outcomes,
+non-Rust frontend, full README rewrite) is tracked for v0.10.x and
+v0.11.
+
 ## [0.9.12] — 2026-04-28
 
 ### Added — `witness quickstart` embedded subcommand

@@ -7,9 +7,19 @@ on:
 
 permissions:
   contents: write
+  # v0.10.0 — keyless cosign signing via GitHub OIDC. The build job
+  # exchanges a short-lived id-token for a Fulcio code-signing
+  # certificate bound to this workflow's identity, signs each release
+  # asset, and attaches the .sig + .cert pair next to the asset on
+  # the GitHub Release. No long-term key custody.
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
+  # v0.10.0 — reproducible-build clock for the predicate timestamps.
+  # Honours upstream `SOURCE_DATE_EPOCH` per
+  # https://reproducible-builds.org/docs/source-date-epoch/.
+  SOURCE_DATE_EPOCH: ${{ github.event.head_commit.timestamp && '' || '1700000000' }}
 
 jobs:
   build-binaries:
@@ -170,6 +180,10 @@ jobs:
     name: Create GitHub Release
     needs: [build-binaries, compliance, wasm-component]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Required for keyless cosign signing via Fulcio.
+      id-token: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
@@ -181,6 +195,34 @@ jobs:
           mkdir -p release-assets
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.wasm" \) -exec cp {} release-assets/ \;
           cd release-assets && sha256sum * > SHA256SUMS.txt
+
+      # v0.10.0 — keyless cosign signing. Each asset gets a `.sig`
+      # (the signature) and `.cert` (the Fulcio code-signing certificate
+      # tying the signature to this workflow's OIDC identity). Verify
+      # downstream with:
+      #   cosign verify-blob \
+      #     --certificate-identity 'https://github.com/pulseengine/witness/.github/workflows/release.yml@refs/tags/<TAG>' \
+      #     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+      #     --signature <asset>.sig --certificate <asset>.cert <asset>
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Sign release assets (keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cd release-assets
+          for asset in *; do
+            # Skip already-generated signatures/certs from a previous loop
+            case "$asset" in *.sig|*.cert) continue ;; esac
+            cosign sign-blob --yes \
+              --output-signature "${asset}.sig" \
+              --output-certificate "${asset}.cert" \
+              "$asset"
+          done
+          ls -la *.sig *.cert | head -20
 
       - name: Create Release
         env:

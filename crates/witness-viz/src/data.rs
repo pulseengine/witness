@@ -54,7 +54,11 @@ pub struct TruthRow {
 pub struct TraceHealth {
     pub overflow: bool,
     pub rows: u32,
-    pub ambiguous_rows: bool,
+    /// v0.10.0 — renamed from `ambiguous_rows` upstream. Accept both
+    /// names on deserialise so v0.9.x reports keep loading; emit with
+    /// the new name.
+    #[serde(alias = "ambiguous_rows")]
+    pub trace_parser_active: bool,
 }
 
 pub struct VerdictBundle {

@@ -88,10 +88,20 @@ pub struct TraceHealth {
     /// Total rows captured.
     #[serde(default)]
     pub rows: u64,
-    /// True if any decision had a row whose outcome could not be
-    /// determined (e.g. function panicked or returned mid-chain).
-    #[serde(default)]
-    pub ambiguous_rows: bool,
+    /// v0.10.0 — renamed from `ambiguous_rows` (E1 BUG-11 / B5).
+    /// Now: True when the trace-buffer parser produced per-iteration
+    /// rows (post-v0.7.3 instrumentation with kind=0 + kind=2 records).
+    /// Pre-v0.7.3 modules and harness-v1 snapshots leave this `false`
+    /// because they only ship counter aggregates. The old name was
+    /// misleading — both fully-proved and fully-gap runs would set it
+    /// to `true` so long as trace memory had data. Reviewers reading
+    /// the field cold thought it indicated *errors*.
+    ///
+    /// The legacy name `ambiguous_rows` is still accepted on
+    /// deserialise (via `#[serde(alias)]`) so v0.9.x run.json files
+    /// keep loading; it will be removed in v0.11.
+    #[serde(default, alias = "ambiguous_rows")]
+    pub trace_parser_active: bool,
     /// v0.9.8 — total trace memory bytes consumed across all rows
     /// (sum of `cursor - TRACE_HEADER_BYTES` per row). Lets reviewers
     /// see how close they got to the trace memory cap. Zero means no
@@ -305,7 +315,7 @@ pub fn merge_records(records: &[RunRecord]) -> Result<RunRecord> {
     let merged_health = TraceHealth {
         overflow: records.iter().any(|r| r.trace_health.overflow),
         rows: records.iter().map(|r| r.trace_health.rows).sum(),
-        ambiguous_rows: records.iter().any(|r| r.trace_health.ambiguous_rows),
+        trace_parser_active: records.iter().any(|r| r.trace_health.trace_parser_active),
         // v0.9.8 — sum bytes-used across merged runs, but take the max
         // pages_allocated since that's a fixed-per-module value (any
         // disagreement here means the inputs were instrumented with

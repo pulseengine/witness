@@ -28,6 +28,25 @@ pub struct McdcReport {
     pub overall: McdcOverall,
     pub decisions: Vec<DecisionVerdict>,
     pub trace_health: TraceHealth,
+    /// v0.10.0 — declares the polarity convention the truth-table
+    /// `c0=T` columns use. v0.9.x reports recorded the **wasm
+    /// br_if value** (a Rust `if a { ... }` lowers to
+    /// `i32.eqz; br_if`, so the br_if fires when `a` is FALSE; we
+    /// recorded that value). v0.10.0 keeps the same on-the-wire
+    /// semantics (changing it would silently invert thousands of
+    /// existing reports) but adds this field so consumers can detect
+    /// the convention. See `docs/concepts.md` §4 for a worked example.
+    ///
+    /// Always `"wasm-early-exit"` in v0.10.0. v0.10.x may add
+    /// `"source-equivalent"` as an opt-in (`witness report
+    /// --polarity source`) once the inversion table is fully tested.
+    /// Field is `#[serde(default)]` so v0.9.x reports keep loading.
+    #[serde(default = "default_polarity")]
+    pub interpretation_polarity: String,
+}
+
+fn default_polarity() -> String {
+    "wasm-early-exit".to_string()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -185,6 +204,7 @@ impl McdcReport {
             overall,
             decisions,
             trace_health: record.trace_health.clone(),
+            interpretation_polarity: default_polarity(),
         }
     }
 
@@ -586,6 +606,12 @@ fn analyse_decision(
 /// Find a pair of rows that prove condition `target_idx` independently
 /// affects the decision outcome under masking MC/DC.
 ///
+/// v0.10.0 — the search algorithm itself lives in the
+/// [`witness_mcdc_checker`] crate so safety-critical adopters can audit
+/// the qualifiable kernel (~70 LoC, no I/O, no DWARF, no walrus) in
+/// isolation. This wrapper bridges from `DecisionRow` (the run-record
+/// shape) to `witness_mcdc_checker::Row` (the kernel shape).
+///
 /// Pair criterion:
 /// 1. Both rows have `target_idx` evaluated.
 /// 2. The two rows' values for `target_idx` differ.
@@ -597,83 +623,21 @@ fn analyse_decision(
 /// Returns `(row_id_1, row_id_2, interpretation)`. Interpretation is
 /// `unique-cause` when both rows fully evaluate every condition (no
 /// missing indices), `masking` otherwise. Prefers `unique-cause` pairs.
-///
-// SAFETY-REVIEW: arithmetic on `i + 1` and `i32`/`u32` index bumps is
-// bounded by `rows.len()` (Vec length, fits in usize) and
-// `total_conditions` (manifest entry count, fits in u32 by construction).
-// Wraparound is impossible for any non-degenerate input.
-#[allow(clippy::arithmetic_side_effects)]
 fn find_independent_effect_pair(
     rows: &[DecisionRow],
     target_idx: u32,
     total_conditions: usize,
 ) -> Option<(u32, u32, String)> {
-    let mut best: Option<(u32, u32, String)> = None;
-    for i in 0..rows.len() {
-        for j in (i + 1)..rows.len() {
-            // SAFETY-REVIEW: `i` and `j` are bounded by `rows.len()`.
-            #[allow(clippy::indexing_slicing)]
-            let (r1, r2) = (&rows[i], &rows[j]);
-            let v1 = match r1.evaluated.get(&target_idx) {
-                Some(v) => *v,
-                None => continue,
-            };
-            let v2 = match r2.evaluated.get(&target_idx) {
-                Some(v) => *v,
-                None => continue,
-            };
-            if v1 == v2 {
-                continue;
-            }
-            let (o1, o2) = match (r1.outcome, r2.outcome) {
-                (Some(a), Some(b)) => (a, b),
-                _ => continue,
-            };
-            if o1 == o2 {
-                continue;
-            }
-            // Check non-target compatibility under masking.
-            let mut compatible = true;
-            for idx in 0..u32::try_from(total_conditions).unwrap_or(0) {
-                if idx == target_idx {
-                    continue;
-                }
-                match (r1.evaluated.get(&idx), r2.evaluated.get(&idx)) {
-                    (Some(a), Some(b)) if a != b => {
-                        compatible = false;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            if !compatible {
-                continue;
-            }
-            // Determine interpretation.
-            let r1_full = r1.evaluated.len() == total_conditions;
-            let r2_full = r2.evaluated.len() == total_conditions;
-            let interp = if r1_full && r2_full {
-                "unique-cause"
-            } else {
-                "masking"
-            };
-            // Prefer unique-cause when found; remember it and continue
-            // searching only if the current best is masking.
-            match (&best, interp) {
-                (None, _) => {
-                    best = Some((r1.row_id, r2.row_id, interp.to_string()));
-                }
-                (Some((_, _, current)), "unique-cause") if current != "unique-cause" => {
-                    best = Some((r1.row_id, r2.row_id, interp.to_string()));
-                }
-                _ => {}
-            }
-            if best.as_ref().map(|(_, _, k)| k.as_str()) == Some("unique-cause") {
-                return best;
-            }
-        }
-    }
-    best
+    let kernel_rows: Vec<witness_mcdc_checker::Row> = rows
+        .iter()
+        .map(|r| witness_mcdc_checker::Row {
+            row_id: r.row_id,
+            evaluated: r.evaluated.clone(),
+            outcome: r.outcome,
+        })
+        .collect();
+    witness_mcdc_checker::find_independent_effect_pair(&kernel_rows, target_idx, total_conditions)
+        .map(|(a, b, interp)| (a, b, interp.to_string()))
 }
 
 /// When no proving pair exists, recommend a row that would close the

@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulseengine.eu/witness-mcdc/v1",
+  "title": "witness-mcdc/v1",
+  "description": "MC/DC report — per-decision truth tables, condition-level independent-effect verdicts under masking MC/DC (DO-178C accepted variant), and row-closure recommendations for conditions that lack a proving pair. Derived from witness-core/src/mcdc_report.rs (McdcReport).",
+  "type": "object",
+  "required": ["schema", "witness_version", "module", "overall", "decisions", "trace_health"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "Schema URL identifying this document. Always equal to the URL `https://pulseengine.eu/witness-mcdc/v1`.",
+      "type": "string",
+      "const": "https://pulseengine.eu/witness-mcdc/v1"
+    },
+    "witness_version": {
+      "description": "Version of the witness toolchain that produced this report (Cargo package version).",
+      "type": "string"
+    },
+    "module": {
+      "description": "Path of the instrumented Wasm module the report was produced from. May be project-relative when SOURCE_DATE_EPOCH and path normalisation are active.",
+      "type": "string"
+    },
+    "overall": {
+      "$ref": "#/$defs/McdcOverall"
+    },
+    "decisions": {
+      "description": "Per-decision verdicts in manifest order.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/DecisionVerdict" }
+    },
+    "trace_health": {
+      "$ref": "#/$defs/TraceHealth"
+    }
+  },
+  "$defs": {
+    "McdcOverall": {
+      "description": "Aggregate counts across the run. Boolean-decision counts (decisions_total, decisions_full_mcdc) exclude br_table-shape decisions because per-arm coverage is the honest measurement for those (see v0.9.7 br-table-arm interpretation).",
+      "type": "object",
+      "required": [
+        "decisions_total",
+        "decisions_full_mcdc",
+        "conditions_total",
+        "conditions_proved",
+        "conditions_gap",
+        "conditions_dead"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "decisions_total": { "type": "integer", "minimum": 0 },
+        "decisions_full_mcdc": { "type": "integer", "minimum": 0 },
+        "conditions_total": { "type": "integer", "minimum": 0 },
+        "conditions_proved": { "type": "integer", "minimum": 0 },
+        "conditions_gap": { "type": "integer", "minimum": 0 },
+        "conditions_dead": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "DecisionVerdict": {
+      "description": "One source-level decision's verdict.",
+      "type": "object",
+      "required": ["id", "conditions", "truth_table", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Decision id; matches manifest.decisions[].id.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_file": {
+          "description": "Source file (DWARF) the decision was reconstructed from. Absent when DWARF source location is unavailable.",
+          "type": "string"
+        },
+        "source_line": {
+          "description": "1-based source line number the decision starts on. Absent when DWARF source location is unavailable.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "conditions": {
+          "description": "Per-condition verdicts in evaluation order (index 0..N-1).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConditionVerdict" }
+        },
+        "truth_table": {
+          "description": "Read-only view of every observed condition vector + outcome for this decision.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/RowView" }
+        },
+        "status": { "$ref": "#/$defs/DecisionStatus" }
+      }
+    },
+    "DecisionStatus": {
+      "description": "Decision-level verdict.\n- `full_mcdc` — every condition has an independent-effect witness pair.\n- `partial` — some conditions are proved, others have gaps or are dead.\n- `no_witness` — decision was reached but no conditions could be proved (e.g. only one row, or all rows have the same condition vector).\n- `unreached` — decision had zero rows in the run.",
+      "type": "string",
+      "enum": ["full_mcdc", "partial", "no_witness", "unreached"]
+    },
+    "ConditionVerdict": {
+      "description": "Verdict for one condition within a decision.",
+      "type": "object",
+      "required": ["index", "branch_id", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "description": "Condition index (0..N-1) within the decision.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "branch_id": {
+          "description": "Manifest branch id this condition corresponds to.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": { "$ref": "#/$defs/ConditionStatus" },
+        "interpretation": {
+          "description": "Pair interpretation when status is `proved`. Values:\n- `unique-cause` — both rows of the proving pair fully evaluated every condition (no short-circuiting).\n- `masking` — at least one row of the pair short-circuited a non-target condition (DO-178C masking variant).\n- `unique-cause-plus-masking` — reserved for the in-between case (currently unused; kept for forward compatibility).\n- `br-table-arm` — v0.9.7 — decision is br_table-shaped (mutually exclusive arms). Each condition is an arm and `proved` means the arm hit count is > 0; standard MC/DC pair-finding does not apply.",
+          "type": "string",
+          "enum": ["unique-cause", "masking", "unique-cause-plus-masking", "br-table-arm"]
+        },
+        "pair": {
+          "description": "Row ids of the proving pair when status is `proved`. Absent when no pair was found.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "gap_closure": {
+          "description": "Recommended row to close the missing pair when status is `gap`. Absent for `proved` and `dead`.",
+          "$ref": "#/$defs/GapClosure"
+        }
+      }
+    },
+    "ConditionStatus": {
+      "description": "Condition-level verdict.\n- `proved` — independent effect demonstrated by an existing row pair.\n- `gap` — condition was evaluated in at least one row but no proving pair exists; an additional test row would close it.\n- `dead` — condition was never evaluated across any row in the run (no test exercises it).",
+      "type": "string",
+      "enum": ["proved", "gap", "dead"]
+    },
+    "GapClosure": {
+      "description": "Recommendation for closing a `gap`-status condition by flipping the target value relative to an existing row.",
+      "type": "object",
+      "required": ["paired_with_row", "evaluated"],
+      "additionalProperties": false,
+      "properties": {
+        "paired_with_row": {
+          "description": "Row id this recommendation pairs against.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "evaluated": {
+          "description": "Recommended condition vector (target condition flipped from paired_with_row's value, others identical). Object whose keys are stringified u32 condition indices and values are booleans.",
+          "type": "object",
+          "patternProperties": {
+            "^[0-9]+$": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "outcome_must_differ_from": {
+          "description": "Outcome of paired_with_row. The recommended row's outcome must differ from this value to close the pair under masking MC/DC.",
+          "type": ["boolean", "null"]
+        }
+      }
+    },
+    "RowView": {
+      "description": "One observation of a decision's condition vector under short-circuit evaluation.",
+      "type": "object",
+      "required": ["row_id", "evaluated"],
+      "additionalProperties": false,
+      "properties": {
+        "row_id": {
+          "description": "Stable row identifier carried back in the proving-pair tuple.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "evaluated": {
+          "description": "Sparse map of condition_index (stringified) -> evaluated boolean. Conditions short-circuited in this row are absent.",
+          "type": "object",
+          "patternProperties": {
+            "^[0-9]+$": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "outcome": {
+          "description": "Decision outcome when observed. `null` when the decision was reached but the boolean result was not observed (e.g. function panicked or returned mid-chain).",
+          "type": ["boolean", "null"]
+        }
+      }
+    },
+    "TraceHealth": {
+      "description": "Health of the per-row capture path. Reporters MUST refuse to emit MC/DC verdicts when `overflow` is true.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "overflow": {
+          "description": "True if any per-condition counter saturated between row markers (degenerate condition: a row evaluated the same condition more than once).",
+          "type": "boolean"
+        },
+        "rows": {
+          "description": "Total rows captured across all decisions.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "ambiguous_rows": {
+          "description": "True if any decision had a row whose outcome could not be determined (e.g. function panicked or returned mid-chain).",
+          "type": "boolean"
+        },
+        "bytes_used": {
+          "description": "v0.9.8 — total trace memory bytes consumed across all rows.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "pages_allocated": {
+          "description": "v0.9.8 — number of Wasm memory pages the instrumented module allocates for its trace buffer (default 16 = 1 MiB).",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

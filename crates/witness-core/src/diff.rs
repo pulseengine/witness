@@ -346,6 +346,7 @@ mod tests {
             schema_version: "2".to_string(),
             witness_version: "test".to_string(),
             module_source: "x.wasm".to_string(),
+            original_module_sha256: None,
             branches,
             decisions: vec![],
         };
