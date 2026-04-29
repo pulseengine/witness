@@ -1,0 +1,23 @@
+[package]
+name = "witness-mcdc-checker"
+description = "Pure-stdlib MC/DC independent-effect pair finder. The qualifiable kernel of witness — no I/O, no DWARF, no walrus, ~70 LoC of decision logic that safety-critical adopters can audit standalone. Implements masking MC/DC (DO-178C accepted variant)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["mcdc", "coverage", "do-178c", "safety-critical", "qualification"]
+categories = ["development-tools::testing"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Intentionally empty: this crate is the auditable kernel. No serde, no
+# anyhow, no allocator other than std. Inputs are plain `Row` structs;
+# outputs are tuples of u32 + a small enum lifted to &'static str.
+
+[dev-dependencies]
+proptest = { workspace = true }

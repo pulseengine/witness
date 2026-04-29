@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulseengine.eu/witness-rivet-evidence/v1",
+  "title": "witness-rivet-evidence/v1",
+  "description": "Rivet-shape coverage evidence file. Witness emits this when a requirement-mapping YAML is supplied; rivet's CoverageStore consumer ingests the file directly. On-disk format is YAML in production; this schema also describes its JSON projection (the same field names and shapes apply). Derived from witness-core/src/rivet_evidence.rs (EvidenceFile).",
+  "type": "object",
+  "required": ["schema", "version", "witness_version", "run", "module", "evidence"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "Schema URL identifying this document. Always `https://pulseengine.eu/witness-rivet-evidence/v1`.",
+      "type": "string",
+      "const": "https://pulseengine.eu/witness-rivet-evidence/v1"
+    },
+    "version": {
+      "description": "Sub-version inside the v1 namespace; bumped on breaking content changes (e.g. additional required fields).",
+      "type": "string"
+    },
+    "witness_version": {
+      "description": "Version of the witness toolchain that produced this file (Cargo package version).",
+      "type": "string"
+    },
+    "run": { "$ref": "#/$defs/RunMetadata" },
+    "module": { "$ref": "#/$defs/ModuleRef" },
+    "evidence": {
+      "description": "Per-artefact coverage evidence, one entry per requirement / artefact id grouped from the input map.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/CoverageEvidence" }
+    }
+  },
+  "$defs": {
+    "RunMetadata": {
+      "type": "object",
+      "required": ["id", "timestamp", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Stable identifier for this run; default form is `witness-<timestamp>`.",
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "RFC 3339 timestamp of when the evidence file was written. Honours SOURCE_DATE_EPOCH for reproducibility.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Free-text label naming the run source (e.g. \"cargo test\", \"witness run\", \"ci\").",
+          "type": "string"
+        },
+        "environment": {
+          "description": "Optional environment label (e.g. \"ci\", \"local\", \"qa\").",
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "description": "Optional commit SHA / version reference.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "ModuleRef": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Path of the instrumented Wasm module the evidence was measured against.",
+          "type": "string"
+        },
+        "digest": {
+          "description": "Optional SHA-256 digest of the module bytes.",
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/Digests" }
+          ]
+        }
+      }
+    },
+    "Digests": {
+      "type": "object",
+      "required": ["sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "CoverageEvidence": {
+      "description": "One artefact's coverage evidence: total branches mapped, how many were covered, hit counts, and the list of uncovered branch ids.",
+      "type": "object",
+      "required": [
+        "artifact",
+        "coverage_type",
+        "total",
+        "covered",
+        "percentage",
+        "hits",
+        "uncovered_branch_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "description": "Rivet artefact id (e.g. `REQ-001`) this evidence row corresponds to.",
+          "type": "string"
+        },
+        "coverage_type": { "$ref": "#/$defs/CoverageType" },
+        "total": {
+          "description": "Total number of branches mapped to this artefact.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "covered": {
+          "description": "Number of branches with hit count > 0.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "percentage": {
+          "description": "Coverage ratio as a floating-point percentage (0.0..=100.0). 100.0 when total = 0 (vacuous coverage).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "hits": {
+          "description": "Per-branch hit counts in the same order as the requirement-map mapping.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "uncovered_branch_ids": {
+          "description": "Sorted-ascending list of branch ids that were never hit.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "CoverageType": {
+      "description": "Coverage projection this evidence row represents.\n- `branch` — per-`br_if` / per-arm / per-`br_table`-target branch coverage (what witness emits today).\n- `mcdc` — MC/DC condition decomposition (reserved; not yet emitted into rivet evidence).\n- `line` — source-line coverage (reserved; out of scope for witness today).",
+      "type": "string",
+      "enum": ["branch", "mcdc", "line"]
+    }
+  }
+}

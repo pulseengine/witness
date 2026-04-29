@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulseengine.eu/witness-coverage/v1",
+  "title": "witness-coverage/v1",
+  "description": "in-toto Statement v1.0 carrying a witness branch-coverage predicate. Witness emits an unwrapped Statement (JSON); sigil wraps it in a DSSE envelope and signs it. The Statement's subject is the instrumented Wasm module; the predicate body carries the coverage report, measurement metadata, and an optional original-module digest. Derived from witness-core/src/predicate.rs.",
+  "type": "object",
+  "required": ["_type", "subject", "predicateType", "predicate"],
+  "additionalProperties": false,
+  "properties": {
+    "_type": {
+      "description": "in-toto Statement type URL. Always `https://in-toto.io/Statement/v1`.",
+      "type": "string",
+      "const": "https://in-toto.io/Statement/v1"
+    },
+    "subject": {
+      "description": "Subjects this Statement attests about. Subject 0 is the instrumented Wasm; subject 1 (when present) is the pre-instrumentation module.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Subject" }
+    },
+    "predicateType": {
+      "description": "Predicate type URL identifying this document. Always `https://pulseengine.eu/witness-coverage/v1`.",
+      "type": "string",
+      "const": "https://pulseengine.eu/witness-coverage/v1"
+    },
+    "predicate": { "$ref": "#/$defs/CoveragePredicate" }
+  },
+  "$defs": {
+    "Subject": {
+      "description": "in-toto Subject — name + cryptographic digest of an attestation target.",
+      "type": "object",
+      "required": ["name", "digest"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "digest": { "$ref": "#/$defs/Digests" }
+      }
+    },
+    "Digests": {
+      "description": "Cryptographic digests of an artefact. v0.10.0 uses SHA-256 only; additional algorithms may land later as additional fields.",
+      "type": "object",
+      "required": ["sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "description": "Lowercase hex-encoded SHA-256 (64 chars).",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "CoveragePredicate": {
+      "description": "Predicate body — coverage report + measurement metadata + optional pre-instrumentation digest.",
+      "type": "object",
+      "required": ["coverage", "measurement"],
+      "additionalProperties": false,
+      "properties": {
+        "coverage": { "$ref": "#/$defs/Report" },
+        "measurement": { "$ref": "#/$defs/Measurement" },
+        "original_module": {
+          "description": "Pre-instrumentation module reference. Populated when the instrument step recorded the original SHA-256 in the manifest (v0.10.0+) and the predicate-build path passed it through. `null` when no chain back to the source module is available.",
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/OriginalModule" }
+          ]
+        }
+      }
+    },
+    "Measurement": {
+      "type": "object",
+      "required": ["measured_at", "witness_version"],
+      "additionalProperties": false,
+      "properties": {
+        "harness": {
+          "description": "Free-text label naming the harness that produced the run (e.g. \"cargo test\", \"witness run\"). `null` when not supplied.",
+          "type": ["string", "null"]
+        },
+        "measured_at": {
+          "description": "RFC 3339 timestamp. Honours SOURCE_DATE_EPOCH (Reproducible-Builds spec) for envelope reproducibility.",
+          "type": "string"
+        },
+        "witness_version": {
+          "description": "Witness toolchain version string (Cargo package version).",
+          "type": "string"
+        }
+      }
+    },
+    "OriginalModule": {
+      "description": "Pre-instrumentation module reference: filename + SHA-256.",
+      "type": "object",
+      "required": ["name", "digest"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "digest": { "$ref": "#/$defs/Digests" }
+      }
+    },
+    "Report": {
+      "description": "Branch-coverage summary derived from the run record. Per-function and uncovered-branch lists are sorted deterministically.",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "witness_version",
+        "module",
+        "total_branches",
+        "covered_branches",
+        "per_function",
+        "uncovered"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "type": "string" },
+        "witness_version": { "type": "string" },
+        "module": {
+          "description": "Path of the instrumented Wasm module. Project-relative when path stripping is active (v0.10.0).",
+          "type": "string"
+        },
+        "total_branches": { "type": "integer", "minimum": 0 },
+        "covered_branches": { "type": "integer", "minimum": 0 },
+        "per_function": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FunctionReport" }
+        },
+        "uncovered": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UncoveredBranch" }
+        }
+      }
+    },
+    "FunctionReport": {
+      "type": "object",
+      "required": ["function_index", "total", "covered"],
+      "additionalProperties": false,
+      "properties": {
+        "function_index": { "type": "integer", "minimum": 0 },
+        "function_name": { "type": ["string", "null"] },
+        "total": { "type": "integer", "minimum": 0 },
+        "covered": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "UncoveredBranch": {
+      "type": "object",
+      "required": ["branch_id", "function_index", "instr_index", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "branch_id": { "type": "integer", "minimum": 0 },
+        "function_index": { "type": "integer", "minimum": 0 },
+        "function_name": { "type": ["string", "null"] },
+        "instr_index": { "type": "integer", "minimum": 0 },
+        "kind": { "$ref": "#/$defs/BranchKind" }
+      }
+    },
+    "BranchKind": {
+      "description": "Kind of branch a counter is counting.\n- `br_if` — counter fires when the br_if branch is taken.\n- `if_then` — counter fires when the consequent of an if/else runs.\n- `if_else` — counter fires when the alternative of an if/else runs.\n- `br_table_target` — counter fires when br_table dispatches to a specific target arm.\n- `br_table_default` — counter fires when br_table takes its default arm.",
+      "type": "string",
+      "enum": ["br_if", "if_then", "if_else", "br_table_target", "br_table_default"]
+    }
+  }
+}

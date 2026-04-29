@@ -43,6 +43,7 @@
 
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walrus::ir::{
@@ -52,6 +53,30 @@ use walrus::ir::{
 use walrus::{
     ConstExpr, FunctionBuilder, FunctionId, GlobalId, LocalId, MemoryId, Module, ValType,
 };
+
+/// Lowercase-hex SHA-256 of `bytes`. v0.10.0 — used to capture the
+/// pre-instrumentation module digest so the predicate-builder can emit
+/// `original_module` as an in-toto Statement subject.
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len().saturating_mul(2));
+    for &b in digest.iter() {
+        // SAFETY-REVIEW: `b` is u8 (0..=255); upper/lower nibble are
+        // 0..=15; indexing into a 16-element table cannot panic. The
+        // `as char` cast converts a hex-digit byte (0x30..=0x66) to its
+        // ASCII char — the value range is in the ASCII subset where
+        // the conversion is exact.
+        #[allow(clippy::indexing_slicing, clippy::as_conversions)]
+        {
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            out.push(HEX[usize::from(b >> 4)] as char);
+            out.push(HEX[usize::from(b & 0x0f)] as char);
+        }
+    }
+    out
+}
 
 /// Manifest schema version. v0.1 pinned to "1"; v0.2 bumps to "2" for
 /// per-target `br_table` entries (`target_index` field). Old v0.1 manifests
@@ -265,6 +290,16 @@ pub struct Manifest {
     pub schema_version: String,
     pub witness_version: String,
     pub module_source: String,
+    /// v0.10.0 — SHA-256 of the **pre-instrumentation** input module.
+    /// Captured at `instrument_file` time so the in-toto Statement can
+    /// name the original module as a second subject without requiring
+    /// the source `.wasm` to still be on disk at predicate time.
+    /// Closes E1 BUG-3 / B2: every signed predicate now carries the
+    /// chain back to `source.wasm`. `Option` so v0.9.x manifests
+    /// (which lack the field) deserialise cleanly via `serde(default)`.
+    /// Hex-encoded, lowercase, 64 chars when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_module_sha256: Option<String>,
     pub branches: Vec<BranchEntry>,
     /// Source-level decisions reconstructed from `branches` via DWARF.
     /// Empty when DWARF is absent or reconstruction declined to group.
@@ -339,10 +374,16 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
     // using the per-branch hints captured during instrument_module.
     apply_chain_kinds(&mut decisions);
 
+    // v0.10.0 — record the pre-instrumentation digest so the
+    // predicate-builder can name the original module as a Statement
+    // subject without needing source.wasm on disk later.
+    let original_module_sha256 = Some(sha256_hex(&original_bytes));
+
     let manifest = Manifest {
         schema_version: MANIFEST_SCHEMA_VERSION.to_string(),
         witness_version: env!("CARGO_PKG_VERSION").to_string(),
         module_source: input.to_string_lossy().into_owned(),
+        original_module_sha256,
         branches: entries,
         decisions,
     };
@@ -1973,5 +2014,41 @@ mod tests {
         std::fs::write(tmp.path(), wat::parse_str(wat_src).unwrap()).unwrap();
         let out = tmp.path().with_extension("inst.wasm");
         instrument_file(tmp.path(), &out).expect("core module should pass preflight");
+    }
+
+    /// v0.10.0 (item 2) — `instrument_file` records the
+    /// pre-instrumentation SHA-256 in the manifest. Confirms the
+    /// digest matches `sha256(input bytes)` and `module_source` carries
+    /// the input path so `witness predicate` can reconstruct the
+    /// in-toto subject downstream.
+    #[test]
+    fn manifest_records_pre_instrumentation_digest() {
+        use sha2::{Digest, Sha256};
+        let wat_src = r#"(module (func (export "f")))"#;
+        let original_bytes = wat::parse_str(wat_src).unwrap();
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), &original_bytes).unwrap();
+        let out = tmp.path().with_extension("inst.wasm");
+        instrument_file(tmp.path(), &out).expect("instrument_file");
+
+        let manifest_path = Manifest::path_for(&out);
+        let manifest = Manifest::load(&manifest_path).expect("manifest");
+        let recorded = manifest
+            .original_module_sha256
+            .expect("v0.10.0 manifest must record the pre-instrumentation digest");
+        assert_eq!(recorded.len(), 64);
+        assert!(recorded.chars().all(|c| c.is_ascii_hexdigit()));
+
+        // Independently compute sha256(original) and compare.
+        let mut hasher = Sha256::new();
+        hasher.update(&original_bytes);
+        let expected_bytes = hasher.finalize();
+        let expected_hex: String = expected_bytes.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(recorded, expected_hex);
+
+        // module_source must point at the input path so the predicate
+        // builder can use it as the OriginalModule's `name` (basename).
+        assert_eq!(manifest.module_source, tmp.path().to_string_lossy());
     }
 }

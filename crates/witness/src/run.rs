@@ -319,11 +319,10 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     record.trace_health = TraceHealth {
         overflow: trace_overflow_seen,
         rows: row_total,
-        // v0.7.2: ambiguous_rows now means "trace memory recorded data
-        // beyond what the per-row globals could capture — likely loops".
-        // v0.7.3 will replace this with the actual per-iteration row
-        // emission. For now, the watermark itself is the signal.
-        ambiguous_rows: trace_bytes_total > 0,
+        // v0.10.0 — field renamed from `ambiguous_rows`. Same meaning
+        // (trace-buffer parser produced per-iteration rows), clearer
+        // name. v0.9.x run.json files still load via serde alias.
+        trace_parser_active: trace_bytes_total > 0,
         bytes_used: trace_bytes_total,
         pages_allocated,
     };
@@ -752,7 +751,7 @@ fn harness_v2_to_run_record(
     record.trace_health = TraceHealth {
         overflow: trace_overflow_seen,
         rows: row_total,
-        ambiguous_rows: trace_bytes_total > 0,
+        trace_parser_active: trace_bytes_total > 0,
         bytes_used: trace_bytes_total,
         // v0.9.8 — harness mode can't directly query the wasm memory;
         // we'd need the harness to ship pages explicitly in v3 of the
@@ -992,6 +991,7 @@ mod tests {
             schema_version: "1".to_string(),
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
             branches: entries,
             decisions: vec![],
         };
@@ -1044,6 +1044,7 @@ mod tests {
             schema_version: "1".to_string(),
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
             branches: entries,
             decisions: vec![],
         };
@@ -1088,6 +1089,7 @@ mod tests {
             schema_version: "1".to_string(),
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
             branches: entries,
             decisions: vec![],
         };
@@ -1142,6 +1144,7 @@ EOF"#;
             schema_version: "1".to_string(),
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
             branches: entries,
             decisions: vec![],
         };
@@ -1187,6 +1190,7 @@ EOF"#;
             schema_version: "1".to_string(),
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
             branches: entries,
             decisions: vec![],
         };
@@ -1239,6 +1243,7 @@ EOF"#;
             schema_version: "1".to_string(),
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
             branches: entries,
             decisions: vec![],
         };
@@ -1309,6 +1314,7 @@ EOF"#
             schema_version: "1".to_string(),
             witness_version: "test".to_string(),
             module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
             branches: entries,
             decisions: vec![],
         };
@@ -1343,6 +1349,7 @@ EOF"#;
             schema_version: "1".to_string(),
             witness_version: "test".to_string(),
             module_source: "fake".to_string(),
+            original_module_sha256: None,
             branches: vec![],
             decisions: vec![],
         };

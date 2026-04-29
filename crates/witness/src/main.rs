@@ -101,24 +101,40 @@ enum Command {
         output: PathBuf,
     },
 
-    /// Emit an in-toto Statement (unwrapped) carrying the coverage as a
-    /// `https://pulseengine.eu/witness-coverage/v1` predicate. Sigil
-    /// wraps and signs the statement; witness produces the body.
+    /// Emit an in-toto Statement (unwrapped) carrying coverage or MC/DC
+    /// data as a witness predicate. Sigil wraps and signs the statement;
+    /// witness produces the body.
+    ///
+    /// `--kind coverage` (default) emits the
+    /// `https://pulseengine.eu/witness-coverage/v1` branch-summary
+    /// predicate. `--kind mcdc` (v0.10.0) emits the
+    /// `https://pulseengine.eu/witness-mcdc/v1` predicate carrying the
+    /// full per-decision truth tables, condition pairs, interpretation,
+    /// and a sha256 binding the envelope to the canonical-JSON report
+    /// — closing the long-standing gap that left the MC/DC verdict
+    /// unsigned next to the signed branch summary.
     Predicate {
         /// Path to a run JSON (typically the output of `witness merge`).
         #[arg(long)]
         run: PathBuf,
         /// Path to the instrumented Wasm module (its digest is the
-        /// Statement's subject).
+        /// Statement's first subject).
         #[arg(long)]
         module: PathBuf,
-        /// Optional: path to the original (pre-instrumentation) module;
-        /// its digest is recorded in the predicate body.
+        /// Optional: path to the original (pre-instrumentation) module.
+        /// When the manifest sitting next to `--module` records
+        /// `original_module_sha256` (v0.10.0+ instrument), this flag
+        /// can be omitted — the digest is read from the manifest.
+        /// When supplied, the file's bytes are re-hashed and the
+        /// computed digest takes precedence.
         #[arg(long)]
         original: Option<PathBuf>,
         /// Optional: harness command, recorded in the measurement metadata.
         #[arg(long)]
         harness: Option<String>,
+        /// Predicate kind.
+        #[arg(long, value_enum, default_value_t = PredicateKind::Coverage)]
+        kind: PredicateKind,
         /// Output path for the JSON Statement.
         #[arg(short, long, default_value = "witness-predicate.json")]
         output: PathBuf,
@@ -303,6 +319,18 @@ enum DiffFormat {
     Text,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum PredicateKind {
+    /// `https://pulseengine.eu/witness-coverage/v1` — branch summary
+    /// (total / covered / per-function / uncovered). v0.9.x default.
+    Coverage,
+    /// `https://pulseengine.eu/witness-mcdc/v1` — MC/DC truth tables,
+    /// condition pairs, interpretation, gap-closure recommendations,
+    /// plus a sha256 binding the envelope to the canonical-JSON report.
+    /// v0.10.0; closes E1 BUG-2 / B1.
+    Mcdc,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
@@ -397,15 +425,69 @@ fn main() -> Result<()> {
             module,
             original,
             harness,
+            kind,
             output,
         } => {
-            let report = witness_core::report::from_run_file(&run)?;
-            let stmt = witness_core::predicate::build_statement(
-                &report,
-                &module,
-                original.as_deref(),
-                harness.as_deref(),
-            )?;
+            // v0.10.0 — when `--original` is omitted, fall back to the
+            // pre-instrumentation digest the manifest captured at
+            // `instrument` time. This ensures every predicate emitted
+            // for an instrumented module carries the chain back to
+            // `source.wasm` (E1 BUG-3 / B2 closure).
+            let original_module = if original.is_some() {
+                None
+            } else {
+                let manifest_path = witness_core::instrument::Manifest::path_for(&module);
+                if manifest_path.exists() {
+                    let manifest = witness_core::instrument::Manifest::load(&manifest_path)?;
+                    manifest.original_module_sha256.map(|sha| {
+                        witness_core::predicate::OriginalModule::from_manifest(
+                            &manifest.module_source,
+                            sha,
+                        )
+                    })
+                } else {
+                    None
+                }
+            };
+
+            let stmt = match kind {
+                PredicateKind::Coverage => {
+                    let report = witness_core::report::from_run_file(&run)?;
+                    if let Some(om) = original_module {
+                        witness_core::predicate::build_statement_with_original(
+                            &report,
+                            &module,
+                            Some(om),
+                            harness.as_deref(),
+                        )?
+                    } else {
+                        witness_core::predicate::build_statement(
+                            &report,
+                            &module,
+                            original.as_deref(),
+                            harness.as_deref(),
+                        )?
+                    }
+                }
+                PredicateKind::Mcdc => {
+                    let mcdc = witness_core::mcdc_report::from_run_file(&run)?;
+                    if let Some(om) = original_module {
+                        witness_core::predicate::build_mcdc_statement_with_original(
+                            &mcdc,
+                            &module,
+                            Some(om),
+                            harness.as_deref(),
+                        )?
+                    } else {
+                        witness_core::predicate::build_mcdc_statement(
+                            &mcdc,
+                            &module,
+                            original.as_deref(),
+                            harness.as_deref(),
+                        )?
+                    }
+                }
+            };
             witness_core::predicate::save_statement(&stmt, &output)?;
             // v0.9.11 — chatty success.
             #[allow(clippy::print_stdout)]
@@ -415,6 +497,8 @@ fn main() -> Result<()> {
                     output.display(),
                     std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0)
                 );
+                println!("  predicate type: {}", stmt.predicate_type);
+                println!("  subjects: {}", stmt.subject.len());
             }
         }
         Command::Diff {
@@ -486,7 +570,16 @@ fn main() -> Result<()> {
                     public_key.display(),
                 );
                 println!("  predicate type: {}", stmt.predicate_type);
-                println!("  subjects: {}", stmt.subject.len());
+                // v0.10.0 — name the predicate type (introspect what
+                // the envelope actually carries) and list each subject
+                // digest so reviewers can spot-check the chain back to
+                // `source.wasm` without re-hashing the artefacts.
+                for subject in &stmt.subject {
+                    println!(
+                        "  subject: {} sha256:{}",
+                        subject.name, subject.digest.sha256,
+                    );
+                }
             }
         }
         Command::Lcov {

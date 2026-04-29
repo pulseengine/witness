@@ -119,11 +119,37 @@ pub fn verify_envelope(envelope_bytes: &[u8], public_key_bytes: &[u8]) -> Result
 mod tests {
     use super::*;
     use crate::predicate::{
-        CoveragePredicate, Digests, Measurement, PREDICATE_TYPE, Statement, Subject,
+        CoveragePredicate, Digests, MCDC_PREDICATE_TYPE, McdcPredicate, Measurement,
+        PREDICATE_TYPE, Statement, Subject, build_mcdc_statement,
     };
     use crate::report::{FunctionReport, Report};
 
     fn fake_statement() -> Statement {
+        // The Statement carries `predicate` as `serde_json::Value` so a
+        // single envelope type round-trips both the coverage and MC/DC
+        // predicate kinds (v0.10.0). Build the typed body and serialise.
+        let predicate = CoveragePredicate {
+            coverage: Report {
+                schema_version: "2".to_string(),
+                witness_version: "0.5.0".to_string(),
+                module: "x.wasm".to_string(),
+                total_branches: 1,
+                covered_branches: 1,
+                per_function: vec![FunctionReport {
+                    function_index: 0,
+                    function_name: None,
+                    total: 1,
+                    covered: 1,
+                }],
+                uncovered: vec![],
+            },
+            measurement: Measurement {
+                harness: None,
+                measured_at: "2026-04-25T00:00:00Z".to_string(),
+                witness_version: "0.5.0".to_string(),
+            },
+            original_module: None,
+        };
         Statement {
             statement_type: "https://in-toto.io/Statement/v1".to_string(),
             subject: vec![Subject {
@@ -133,28 +159,7 @@ mod tests {
                 },
             }],
             predicate_type: PREDICATE_TYPE.to_string(),
-            predicate: CoveragePredicate {
-                coverage: Report {
-                    schema_version: "2".to_string(),
-                    witness_version: "0.5.0".to_string(),
-                    module: "x.wasm".to_string(),
-                    total_branches: 1,
-                    covered_branches: 1,
-                    per_function: vec![FunctionReport {
-                        function_index: 0,
-                        function_name: None,
-                        total: 1,
-                        covered: 1,
-                    }],
-                    uncovered: vec![],
-                },
-                measurement: Measurement {
-                    harness: None,
-                    measured_at: "2026-04-25T00:00:00Z".to_string(),
-                    witness_version: "0.5.0".to_string(),
-                },
-                original_module: None,
-            },
+            predicate: serde_json::to_value(&predicate).unwrap(),
         }
     }
 
@@ -185,5 +190,79 @@ mod tests {
         let stmt = fake_statement();
         let result = sign_statement(&stmt, &[0u8; 16], None);
         assert!(matches!(result, Err(Error::Runtime(_))));
+    }
+
+    /// Integration round-trip for the v0.10.0 MC/DC predicate type:
+    /// build → sign → verify → re-parse the truth tables. Closes E1
+    /// BUG-2 verification side; complements the unit test in
+    /// `predicate.rs`.
+    #[test]
+    fn mcdc_predicate_sign_then_verify_round_trip() {
+        use crate::mcdc_report::McdcReport;
+        use crate::run_record::{DecisionRecord, DecisionRow, RunRecord, TraceHealth};
+        use std::collections::BTreeMap;
+
+        // Minimal RunRecord: one full-MC/DC decision (3 conditions, 4 rows).
+        let row = |id: u32, evaluated: &[(u32, bool)], outcome: Option<bool>| DecisionRow {
+            row_id: id,
+            evaluated: evaluated.iter().copied().collect::<BTreeMap<_, _>>(),
+            outcome,
+        };
+        let record = RunRecord {
+            schema_version: "3".to_string(),
+            witness_version: "test".to_string(),
+            module_path: "app.wasm".to_string(),
+            invoked: vec![],
+            branches: vec![],
+            decisions: vec![DecisionRecord {
+                id: 0,
+                source_file: Some("leap_year.rs".to_string()),
+                source_line: Some(20),
+                condition_branch_ids: vec![100, 101, 102],
+                rows: vec![
+                    row(0, &[(0, false), (2, false)], Some(false)),
+                    row(1, &[(0, true), (1, true)], Some(true)),
+                    row(2, &[(0, true), (1, false), (2, false)], Some(false)),
+                    row(3, &[(0, true), (1, false), (2, true)], Some(true)),
+                ],
+            }],
+            trace_health: TraceHealth::default(),
+        };
+        let mcdc = McdcReport::from_record(&record);
+
+        let dir = tempfile::tempdir().unwrap();
+        let inst = dir.path().join("app.instrumented.wasm");
+        std::fs::write(&inst, b"\x00asm\x01\x00\x00\x00").unwrap();
+
+        let stmt = build_mcdc_statement(&mcdc, &inst, None, Some("cargo test")).unwrap();
+
+        let key_pair = ed25519_compact::KeyPair::generate();
+        let envelope = sign_statement(&stmt, key_pair.sk.as_ref(), Some("v0.10-test")).unwrap();
+
+        let recovered = verify_envelope(&envelope, key_pair.pk.as_ref()).unwrap();
+        assert_eq!(recovered.predicate_type, MCDC_PREDICATE_TYPE);
+        assert_eq!(recovered.subject.len(), 1);
+
+        // Truth tables survived sign + verify intact.
+        let predicate: McdcPredicate = recovered.mcdc_predicate().unwrap();
+        assert_eq!(predicate.report.overall.decisions_full_mcdc, 1);
+        assert_eq!(predicate.report.overall.conditions_proved, 3);
+        assert_eq!(predicate.report.decisions[0].truth_table.len(), 4);
+
+        // Content hash still matches the canonical-JSON serialisation
+        // of the report we recovered — proves the in-envelope binding.
+        let canonical = serde_json::to_vec(&predicate.report).unwrap();
+        let recomputed = {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(&canonical);
+            let bytes = h.finalize();
+            let mut out = String::with_capacity(64);
+            for &b in bytes.iter() {
+                out.push_str(&format!("{b:02x}"));
+            }
+            out
+        };
+        assert_eq!(predicate.report_sha256, recomputed);
     }
 }

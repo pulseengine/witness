@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulseengine.eu/witness-trace-matrix/v1",
+  "title": "witness-trace-matrix/v1",
+  "description": "V-model traceability matrix linking requirements through their satisfying features, supporting design decisions, and verifying verdict suites. Emitted by `.github/actions/compliance/trace-matrix.py` from artifacts/*.yaml plus per-verdict report.json files. Mirrors the JSON output that the compliance bundle ships.",
+  "type": "object",
+  "required": [
+    "schema",
+    "generated_at",
+    "release_label",
+    "totals",
+    "requirements",
+    "verdicts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "Schema URL identifying this document. Always `https://pulseengine.eu/witness-trace-matrix/v1`.",
+      "type": "string",
+      "const": "https://pulseengine.eu/witness-trace-matrix/v1"
+    },
+    "generated_at": {
+      "description": "Commit SHA the matrix was generated from (from GITHUB_SHA), or `\"local\"` for non-CI runs.",
+      "type": "string"
+    },
+    "release_label": {
+      "description": "Release reference name (from GITHUB_REF_NAME), or `\"dev\"` for non-CI runs.",
+      "type": "string"
+    },
+    "totals": { "$ref": "#/$defs/Totals" },
+    "requirements": {
+      "description": "Per-requirement entries, one per requirement listed in artifacts/requirements.yaml, in input order.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/RequirementEntry" }
+    },
+    "verdicts": {
+      "description": "Per-verdict entries — one per verdict suite directory that contains a report.json. Order: lexicographic on directory name.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/VerdictEntry" }
+    }
+  },
+  "$defs": {
+    "Totals": {
+      "type": "object",
+      "required": ["requirements", "features", "design_decisions", "verdicts"],
+      "additionalProperties": false,
+      "properties": {
+        "requirements": { "type": "integer", "minimum": 0 },
+        "features": { "type": "integer", "minimum": 0 },
+        "design_decisions": { "type": "integer", "minimum": 0 },
+        "verdicts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "RequirementEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "status",
+        "tags",
+        "satisfied_by_features",
+        "supporting_decisions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Requirement id (e.g. `REQ-032`).",
+          "type": "string"
+        },
+        "title": { "type": "string" },
+        "status": {
+          "description": "Lifecycle status. Convention values include `approved`, `draft`, `proposed`, `unknown` — schema permits any string for forward compatibility with new states.",
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "satisfied_by_features": {
+          "description": "List of feature artefact ids whose `links` declare a `satisfies` edge to this requirement.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "supporting_decisions": {
+          "description": "List of design-decision artefact ids whose `links` declare a `satisfies` or `refines` edge to this requirement (DEC-* prefix).",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "VerdictEntry": {
+      "description": "A verdict-suite summary. When the report.json could not be parsed, only `name` and `error` are present; otherwise the MC/DC tallies and provenance flags are populated.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Verdict directory name (e.g. `leap_year`, `httparse`).",
+          "type": "string"
+        },
+        "error": {
+          "description": "Error message when the verdict's report.json could not be parsed. Mutually exclusive with the tally / provenance fields below.",
+          "type": "string"
+        },
+        "decisions_total": { "type": "integer", "minimum": 0 },
+        "decisions_full_mcdc": { "type": "integer", "minimum": 0 },
+        "conditions_proved": { "type": "integer", "minimum": 0 },
+        "conditions_gap": { "type": "integer", "minimum": 0 },
+        "conditions_dead": { "type": "integer", "minimum": 0 },
+        "trace_health": {
+          "description": "TraceHealth subtree from the verdict's report.json. See witness-mcdc/v1 for its shape.",
+          "type": "object"
+        },
+        "signed_envelope": {
+          "description": "True if a `signed.dsse.json` envelope file was present alongside the verdict's report.json.",
+          "type": "boolean"
+        },
+        "predicate": {
+          "description": "True if a `predicate.json` file was present alongside the verdict's report.json.",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
