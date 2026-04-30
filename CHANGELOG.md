@@ -7,6 +7,141 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-04-30
+
+### Headline — audit-grade evidence
+
+v0.11 closes the round-3 evaluator deferrals: P2 (avionics
+architect) wanted toolchain provenance + test-case-to-row map in
+the predicate; P3 (DevOps) wanted the Action to fail loudly on
+empty invocations + survive upload failures; P5 (security) wanted
+SECURITY.md rewritten for the v0.10 cosign-OIDC chain. All shipped.
+
+Plus a new `witness verify --check-content` flag that re-derives
+the canonical-JSON sha256 of the embedded report and compares to
+the predicate's `report_sha256`. The signature already protects
+that field (it's inside the signed payload); `--check-content`
+gives auditors a separately-cite-able binding-evidence line.
+
+### Added — predicate `measurement.toolchain` + `measurement.test_cases`
+
+E1/P2 finding: a DO-178C auditor wants to know *which Rust + which
+wasmtime* produced the verdict, not just which witness version
+reported it. `Measurement` gains:
+
+```rust
+pub toolchain: Option<Toolchain>,            // {rust_version, wasmtime_version}
+pub test_cases: Vec<TestCase>,               // [{row_id, invocation}, ...]
+```
+
+`witness predicate` now populates both:
+
+- `toolchain.rust_version` from `rustc --version` at predicate-build
+  time. `None` when rustc isn't on PATH (downloaded-binary use cases).
+- `toolchain.wasmtime_version` from a compile-time constant matching
+  the workspace dep pin (currently `"42"`).
+- `test_cases` from the run record's `invoked` list — preserves the
+  full typed-args spec so `row_id: 2` maps back to `is_leap:2100`,
+  not just `is_leap`.
+
+Both fields are `#[serde(default)]` so v0.10.x envelopes deserialise
+into the v0.11 type without panic. v0.10.x consumers see new fields
+they don't recognise but don't fail.
+
+### Added — `witness verify --check-content`
+
+For `witness-mcdc/v1` envelopes the predicate body carries
+`report_sha256`. v0.11.0 adds a `--check-content` flag that:
+
+1. Verifies the DSSE signature (existing behaviour).
+2. Re-derives the canonical-JSON sha256 of `predicate.report` and
+   compares to the stored `report_sha256`. Mismatch → exit non-zero
+   with `content check failed: stored ... derived ...`.
+
+The signature already protects `report_sha256`, so a mismatch means
+the producer stored a wrong hash, not that the envelope was
+tampered. Auditor logs gain a cite-able binding-evidence line:
+
+```
+OK — DSSE envelope env.json verifies against pk
+  predicate type: https://pulseengine.eu/witness-mcdc/v1
+  subject: instrumented.wasm sha256:1b4903fe...
+  subject: verdict_my_fixture.wasm sha256:64c9375d...
+  content: report sha256 matches stored value (da0ffcfa…)
+```
+
+No-op for `witness-coverage/v1` envelopes (they don't carry
+`report_sha256`); the flag emits a one-liner explaining why.
+
+### Fixed — canonical JSON ordering for `report_sha256`
+
+v0.10.0's `report_sha256` was computed via `serde_json::to_vec(&report)`
+— struct-field-declaration order. The verifier (`--check-content`,
+SECURITY.md sample) recomputes from `stmt.predicate["report"]` whose
+`Map<String, Value>` is `BTreeMap`-sorted. Equal contents, different
+bytes, mismatched sha. v0.11 canonicalises producer-side via
+`to_value()` first so both sides see the same sorted-keys form.
+Existing v0.10.x envelopes now fail `--check-content`; sign a fresh
+envelope under v0.11+ to use the new flag. Sigstore-style content
+binding works going forward.
+
+### Added — `RunRecord.invoked` preserves typed-args specs
+
+Pre-v0.11 the runner pushed bare export names (`"is_leap"`) to
+`invoked`. v0.11 pushes the full spec (`"is_leap:2024"`) for typed-
+args invocations and the bare name for no-arg invocations.
+Downstream `predicate.measurement.test_cases` inherits the change.
+
+### Changed — composite Action: silent-no-op fixes
+
+Three of P3's failure-mode-matrix items closed. New `Validate
+invoke inputs` step fails loudly when both `invoke` and
+`invoke-with-args` are empty (was: green action, zero rows in the
+predicate, evidence shipped empty). New `Warn on non-tag
+upload-to-release` emits a `::warning::` and falls back to
+`actions/upload-artifact@v4` for the workflow-run artefacts panel.
+The `Upload to GitHub Release` step gains `continue-on-error: true`
++ a fallback `actions/upload-artifact@v4` that fires `if: failure()`
+so a failed `gh release upload` no longer orphans evidence on a
+runner about to be reaped.
+
+Version-compat check (P3 #4) deferred — bash version-comparator
+adds ~25 lines for marginal value when `--invoke-with-args` is
+v0.9.6+ and adopters generally pin recent versions.
+
+### Rewritten — `SECURITY.md` for the v0.10 cosign-OIDC chain
+
+P5 finding: the file documented v0.6.x ephemeral-Ed25519 only. v0.11
+ships a 341-line rewrite covering both signing chains as
+complementary signals, the threat model split into addressed /
+not-addressed / deferred-to-v0.11+ buckets, and the verifier's
+exact commands (no truncation). The combined recipe at the end
+ties tarball provenance to predicate integrity in a single CI job
+— the SLSA-reviewer-defensible posture P5 was looking for.
+
+### Verified
+
+- 100 tests pass; clippy + fmt clean.
+- End-to-end: `witness new` → `./run.sh` → `witness predicate
+  --kind mcdc` → `witness verify --check-content` produces:
+  - `toolchain.rust_version: "rustc 1.95.0 ..."`
+  - `toolchain.wasmtime_version: "42"`
+  - 5 test_cases with full specs (`is_leap:2001` through
+    `is_leap:1900`)
+  - `content: report sha256 matches stored value`
+
+### Notes for v0.11.x and v0.12
+
+Deferred:
+- Apple Developer ID signing + notarisation (waiting on user's
+  cert plumbing per the previous walkthrough).
+- Predicate Rekor-binding (cosign-attest for predicate envelopes,
+  not just release tarballs) — substantial integration; v0.12.
+- Differential testing against rustc-mcdc (proposal item 10) —
+  needs nightly rustc + a comparison harness; v0.11.x stretch.
+- `witness new --all-exports` auto-invoke (proposal item 15) —
+  half-scoped in v0.11 thinking; v0.11.x.
+
 ## [0.10.4] — 2026-04-29
 
 Bug fixes from the v0.10.3 round-3 evaluator pass (5 fresh-eyes

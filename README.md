@@ -151,6 +151,7 @@ oracle truth tables for verifier confidence.
 
 | Version | What it added |
 |---|---|
+| **v0.11.0** | Audit-grade evidence: predicate `measurement.toolchain` (rust + wasmtime) + `test_cases` (row_id ↔ invocation map); `witness verify --check-content`; SECURITY.md rewritten for cosign chain; Action silent-no-op fixes |
 | **v0.10.4** | Round-3 evaluator bugs: SOURCE_DATE_EPOCH expression fixed; Action sha256-verifies the tarball; `@v0.10.4` pinned in docs; "Is this for you?" framing |
 | **v0.10.3** | DSSE error variants (no more "wasm runtime error" mistag); `seq_debug` stable string; compliance bundle de-nested; `witness rivet-evidence` + GH Action sections in quickstart |
 | **v0.10.2** | Tester caveats — post-codegen framing in README, harness mode lifted into `docs/quickstart.md` §7, prominent Gatekeeper note + cosign verify command, "Stability contract" table |
