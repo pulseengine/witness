@@ -198,6 +198,17 @@ enum Command {
         /// Path to the Ed25519 public key (32 bytes).
         #[arg(long)]
         public_key: PathBuf,
+        /// v0.11.0 — additionally re-derive the canonical-JSON
+        /// sha256 of the embedded report and compare to the
+        /// `report_sha256` field stored in the predicate body. The
+        /// signature already protects `report_sha256` (it's inside
+        /// the signed payload), so a mismatch here only catches a
+        /// producer that stored the wrong hash. Useful for
+        /// auditors who want explicit binding-evidence in their
+        /// verification log. No-op for `witness-coverage/v1`
+        /// predicates (they don't carry `report_sha256`).
+        #[arg(long)]
+        check_content: bool,
     },
 
     /// Emit LCOV from a run JSON for codecov ingestion.
@@ -488,6 +499,37 @@ fn main() -> Result<()> {
                     }
                 }
             };
+            // v0.11.0 — populate `predicate.measurement.test_cases` from
+            // the run record's `invoked` list. The library-level
+            // builders don't know about RunRecord.invoked (they take a
+            // Report / McdcReport which doesn't carry it), so we
+            // enrich the JSON post-build at the CLI layer where both
+            // pieces are in scope. Closes E1/P2 finding: an auditor
+            // wants row-id ↔ named-export traceability.
+            let mut stmt = stmt;
+            let record = witness_core::run_record::RunRecord::load(&run)?;
+            let test_cases: Vec<serde_json::Value> = record
+                .invoked
+                .iter()
+                .filter(|s| !s.starts_with("__witness_trace_bytes="))
+                .enumerate()
+                .map(|(i, name)| {
+                    serde_json::json!({
+                        "row_id": u32::try_from(i).unwrap_or(u32::MAX),
+                        "invocation": name,
+                    })
+                })
+                .collect();
+            if let Some(measurement) = stmt
+                .predicate
+                .get_mut("measurement")
+                .and_then(|m| m.as_object_mut())
+            {
+                measurement.insert(
+                    "test_cases".to_string(),
+                    serde_json::Value::Array(test_cases),
+                );
+            }
             witness_core::predicate::save_statement(&stmt, &output)?;
             // v0.9.11 — chatty success.
             #[allow(clippy::print_stdout)]
@@ -560,8 +602,45 @@ fn main() -> Result<()> {
         Command::Verify {
             envelope,
             public_key,
+            check_content,
         } => {
             let stmt = witness_core::attest::verify_envelope_file(&envelope, &public_key)?;
+            // v0.11.0 — optional content-binding check. Re-canonicalise
+            // the embedded report and compare its sha256 to the
+            // predicate's `report_sha256`. The signature already
+            // protected `report_sha256` (it's inside the signed
+            // payload), so a mismatch here means the producer stored
+            // a wrong hash, not that the envelope was tampered.
+            // Auditors get a separate cite-able line for the binding
+            // step.
+            let mut content_check_msg: Option<String> = None;
+            if check_content {
+                if let (Some(report), Some(stored_sha)) = (
+                    stmt.predicate.get("report"),
+                    stmt.predicate
+                        .get("report_sha256")
+                        .and_then(|v| v.as_str()),
+                ) {
+                    let canonical = serde_json::to_vec(report)?;
+                    let derived = witness_core::predicate::sha256_hex_pub(&canonical);
+                    if derived != stored_sha {
+                        anyhow::bail!(
+                            "content check failed: stored report_sha256 = {}, derived = {}",
+                            stored_sha,
+                            derived,
+                        );
+                    }
+                    content_check_msg = Some(format!(
+                        "  content: report sha256 matches stored value ({}…)",
+                        &derived[..16]
+                    ));
+                } else {
+                    content_check_msg = Some(
+                        "  content: predicate has no `report_sha256` field (witness-coverage/v1 envelope; check skipped)"
+                            .to_string(),
+                    );
+                }
+            }
             #[allow(clippy::print_stdout)]
             {
                 println!(
@@ -570,15 +649,14 @@ fn main() -> Result<()> {
                     public_key.display(),
                 );
                 println!("  predicate type: {}", stmt.predicate_type);
-                // v0.10.0 — name the predicate type (introspect what
-                // the envelope actually carries) and list each subject
-                // digest so reviewers can spot-check the chain back to
-                // `source.wasm` without re-hashing the artefacts.
                 for subject in &stmt.subject {
                     println!(
                         "  subject: {} sha256:{}",
                         subject.name, subject.digest.sha256,
                     );
+                }
+                if let Some(msg) = content_check_msg {
+                    println!("{msg}");
                 }
             }
         }

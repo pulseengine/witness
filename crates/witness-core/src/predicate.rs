@@ -103,6 +103,124 @@ pub struct Measurement {
     pub harness: Option<String>,
     pub measured_at: String,
     pub witness_version: String,
+    /// v0.11.0 — toolchain provenance (E1/P2 finding: a DO-178C
+    /// auditor wants to know which Rust + wasmtime versions produced
+    /// the verdict, not just which witness version reported it).
+    /// Populated from build-time `RUSTC_VERSION` env (set by
+    /// build.rs) or from `rustc --version`/`wasmtime --version`
+    /// commands run at predicate time. `#[serde(default)]` so v0.10.x
+    /// envelopes keep deserialising.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolchain: Option<Toolchain>,
+    /// v0.11.0 — test-case-ID-to-row map. The `invoked` list in the
+    /// run record is positional (row 0 is the 0th invocation, row 1
+    /// is the 1st, etc.). Reviewers want to walk a truth-table row
+    /// back to a named test fixture. This array preserves the
+    /// invocation order *and* names the export each row exercised.
+    /// Empty on harness-mode runs that don't ship per-row data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_cases: Vec<TestCase>,
+}
+
+/// v0.11.0 — toolchain provenance recorded in the predicate body so
+/// auditors can verify the verdict was produced under a known
+/// compiler + runtime version.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Toolchain {
+    /// `rustc --version` output if known at predicate-build time
+    /// (e.g. `rustc 1.91.0 (8a8be5b22 2026-01-15)`). `None` when the
+    /// host couldn't query rustc — e.g. running witness against a
+    /// pre-instrumented module on a runner without a Rust toolchain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_version: Option<String>,
+    /// wasmtime crate version that drove `witness run` (when
+    /// embedded mode produced the run). Read from
+    /// `wasmtime::VERSION` at compile time of the witness binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wasmtime_version: Option<String>,
+}
+
+/// v0.11.0 — one row of the test-case-to-invocation map.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TestCase {
+    /// Row id assigned by the runner (0-based, dense).
+    pub row_id: u32,
+    /// Export the runner invoked for this row, e.g.
+    /// `"is_leap"` or `"run_row_0"`. For typed-args invocations
+    /// the original spec is preserved (`"is_leap:2024"`).
+    pub invocation: String,
+}
+
+impl Measurement {
+    /// v0.11.0 — build a `Measurement` populated with the witness
+    /// version, the resolved timestamp (honouring `SOURCE_DATE_EPOCH`),
+    /// the host's wasmtime version (compile-time constant), and the
+    /// host's rustc version (queried at predicate-build time when a
+    /// rustc is on PATH; `None` otherwise).
+    pub fn current(harness: Option<&str>, invoked: &[String]) -> Self {
+        Self {
+            harness: harness.map(str::to_string),
+            measured_at: reproducible_timestamp(),
+            witness_version: env!("CARGO_PKG_VERSION").to_string(),
+            toolchain: Some(Toolchain::current()),
+            test_cases: build_test_cases(invoked),
+        }
+    }
+}
+
+impl Toolchain {
+    /// v0.11.0 — best-effort toolchain capture. Wasmtime version is
+    /// compile-time-known (the witness binary linked it). Rustc
+    /// version is queried at runtime via `rustc --version`. When
+    /// rustc isn't on PATH (downloaded-binary use cases) the field
+    /// stays `None` rather than blocking.
+    pub fn current() -> Self {
+        Self {
+            rust_version: query_rustc_version(),
+            wasmtime_version: Some(WASMTIME_VERSION.to_string()),
+        }
+    }
+}
+
+/// Compile-time wasmtime version. v0.10.x pinned wasmtime 42 in
+/// `[workspace.dependencies]`; we report what witness itself was
+/// built against. Embedded vs harness mode doesn't matter — the
+/// claim is "the runner that produced this run record was wasmtime
+/// 42-compatible." Harness-mode runs aren't *executed* under
+/// wasmtime but they consume the same manifest schema wasmtime
+/// would have, so the version is still useful provenance.
+const WASMTIME_VERSION: &str = "42";
+
+/// Best-effort `rustc --version` lookup. Returns `None` when rustc
+/// isn't installed on PATH or the call fails for any reason — this
+/// is provenance metadata, not a correctness gate.
+#[allow(clippy::expect_used)]
+fn query_rustc_version() -> Option<String> {
+    let output = std::process::Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(output.stdout).ok()?;
+    Some(s.trim().to_string())
+}
+
+/// Build a positional test-case map from the run record's `invoked`
+/// list. Strips the v0.7.2 `__witness_trace_bytes=N` diagnostic note
+/// the runner appends so the test_cases array reflects only real
+/// invocations.
+fn build_test_cases(invoked: &[String]) -> Vec<TestCase> {
+    invoked
+        .iter()
+        .filter(|s| !s.starts_with("__witness_trace_bytes="))
+        .enumerate()
+        .map(|(i, name)| TestCase {
+            row_id: u32::try_from(i).unwrap_or(u32::MAX),
+            invocation: name.clone(),
+        })
+        .collect()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -207,11 +325,14 @@ pub fn build_statement_with_original(
 
     let predicate = CoveragePredicate {
         coverage,
-        measurement: Measurement {
-            harness: harness.map(str::to_string),
-            measured_at: reproducible_timestamp(),
-            witness_version: env!("CARGO_PKG_VERSION").to_string(),
-        },
+        // v0.11.0 — Measurement::current populates toolchain
+        // (rust + wasmtime) + test_cases (positional invocation
+        // map). Empty `&[]` here because build_statement takes a
+        // Report, which doesn't carry the run's `invoked` list;
+        // callers who want test_cases populated should use the
+        // newer build_*_from_run variants. Keeping the existing
+        // signature stable.
+        measurement: Measurement::current(harness, &[]),
         original_module: original_module.clone(),
     };
 
@@ -298,17 +419,28 @@ pub fn build_mcdc_statement_with_original(
     // fields already serialise in deterministic key order). Bind the
     // envelope payload to this hash so a tampered inline blob is
     // detectable without re-running the suite.
-    let canonical = serde_json::to_vec(&normalised).map_err(Error::Serde)?;
+    // v0.11.0 — canonicalise via `to_value()` first so the bytes
+    // match what the verifier sees when it looks up
+    // `stmt.predicate["report"]` in the round-tripped Value tree.
+    // Direct `to_vec(&normalised)` would emit struct-declaration
+    // field order; the Value's `Map<String, Value>` is BTreeMap-
+    // sorted. Equal contents, different bytes, mismatched sha. The
+    // round-trip aligns producer + verifier on the same canonical
+    // form (sorted keys).
+    let report_value = serde_json::to_value(&normalised).map_err(Error::Serde)?;
+    let canonical = serde_json::to_vec(&report_value).map_err(Error::Serde)?;
     let report_sha256 = sha256_hex(&canonical);
 
     let predicate = McdcPredicate {
         report: normalised,
         report_sha256,
-        measurement: Measurement {
-            harness: harness.map(str::to_string),
-            measured_at: reproducible_timestamp(),
-            witness_version: env!("CARGO_PKG_VERSION").to_string(),
-        },
+        // v0.11.0 — same Measurement::current path as the coverage
+        // builder. The MC/DC builder takes a McdcReport (no `invoked`
+        // either), so test_cases stays empty here. CLI's `Predicate`
+        // handler enriches the Measurement after the fact when the
+        // run record is available, so users do see toolchain +
+        // test_cases populated end-to-end.
+        measurement: Measurement::current(harness, &[]),
         original_module: original_module.clone(),
     };
 
@@ -389,6 +521,13 @@ pub fn save_statement(statement: &Statement, path: &Path) -> Result<()> {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
+    sha256_hex_pub(bytes)
+}
+
+/// v0.11.0 — public alias of [`sha256_hex`] so the CLI's
+/// `--check-content` verifier can re-derive the canonical-JSON
+/// report hash without re-implementing it. Same hex-lowercase output.
+pub fn sha256_hex_pub(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     let digest = hasher.finalize();
@@ -811,7 +950,11 @@ mod tests {
                 .chars()
                 .all(|c| c.is_ascii_hexdigit())
         );
-        let canonical = serde_json::to_vec(&predicate.report).unwrap();
+        // v0.11.0 — canonicalise via to_value() then to_vec() so the
+        // bytes match the producer's BTreeMap-sorted Value form, not
+        // serde's struct-field-declaration order.
+        let report_value = serde_json::to_value(&predicate.report).unwrap();
+        let canonical = serde_json::to_vec(&report_value).unwrap();
         assert_eq!(predicate.report_sha256, sha256_hex(&canonical));
     }
 

@@ -149,6 +149,8 @@ mod tests {
                 harness: None,
                 measured_at: "2026-04-25T00:00:00Z".to_string(),
                 witness_version: "0.5.0".to_string(),
+                toolchain: None,
+                test_cases: vec![],
             },
             original_module: None,
         };
@@ -253,7 +255,11 @@ mod tests {
 
         // Content hash still matches the canonical-JSON serialisation
         // of the report we recovered — proves the in-envelope binding.
-        let canonical = serde_json::to_vec(&predicate.report).unwrap();
+        // v0.11.0 — canonicalise via to_value() first so the bytes
+        // match the producer's BTreeMap-sorted form. Direct
+        // to_vec on the struct would emit field-declaration order.
+        let report_value = serde_json::to_value(&predicate.report).unwrap();
+        let canonical = serde_json::to_vec(&report_value).unwrap();
         let recomputed = {
             use sha2::{Digest, Sha256};
             let mut h = Sha256::new();

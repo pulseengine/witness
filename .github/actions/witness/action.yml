@@ -175,6 +175,25 @@ runs:
         INSTRUMENTED: ${{ steps.compute-paths.outputs.instrumented }}
       run: witness instrument "$MODULE" -o "$INSTRUMENTED"
 
+    - name: Validate invoke inputs
+      # v0.11.0 — P3 round-3 DevOps audit: silent-no-op gap. If both
+      # `invoke` and `invoke-with-args` are blank, `witness run` would
+      # produce a run.json with zero invocations, the predicate would
+      # ship with zero rows, and the action would exit green. Fail
+      # loudly before we burn cycles. See FAILURE-MODE-MATRIX.md.
+      shell: bash
+      env:
+        INVOKE: ${{ inputs.invoke }}
+        INVOKE_WITH_ARGS: ${{ inputs.invoke-with-args }}
+      run: |
+        # Strip whitespace; treat all-whitespace as empty.
+        INVOKE_TRIMMED=$(printf '%s' "$INVOKE" | tr -d '[:space:]')
+        ARGS_TRIMMED=$(printf '%s' "$INVOKE_WITH_ARGS" | tr -d '[:space:]')
+        if [ -z "$INVOKE_TRIMMED" ] && [ -z "$ARGS_TRIMMED" ]; then
+          echo "::error::Both 'invoke' and 'invoke-with-args' inputs are empty. The action would produce a coverage predicate with zero invocations and exit green. Set at least one --invoke <export> in the 'invoke' input, or one 'name:val,...' line in 'invoke-with-args'."
+          exit 1
+        fi
+
     - name: Run
       shell: bash
       env:
@@ -221,11 +240,51 @@ runs:
           -o "$ENV"
         rm -rf "$SK_DIR"
 
+    - name: Warn on non-tag upload-to-release
+      # v0.11.0 — P3 round-3 DevOps audit: a user who sets
+      # upload-to-release: true on a branch push had no idea the
+      # upload was silently skipped and the evidence was reaped with
+      # the runner. Surface a warning and fall through to the
+      # actions/upload-artifact fallback below.
+      if: ${{ inputs.upload-to-release == 'true' && !startsWith(github.ref, 'refs/tags/') }}
+      shell: bash
+      run: |
+        echo "::warning::upload-to-release=true but this is not a tag push (ref=${GITHUB_REF}). Outputs will be saved via actions/upload-artifact instead — download from the workflow run's Artifacts panel."
+
     - name: Upload to GitHub Release
+      id: release-upload
       if: ${{ inputs.upload-to-release == 'true' && startsWith(github.ref, 'refs/tags/') }}
+      # v0.11.0 — P3 audit: tolerate transient gh upload failures
+      # (network, rate limit, missing release) so the if: failure()
+      # artifact step can preserve the evidence rather than letting
+      # it die on the runner.
+      continue-on-error: true
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ github.ref_name }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
       run: gh release upload "$TAG" "$OUTPUT_DIR"/* --clobber
+
+    - name: Fallback artifact upload (non-tag or release-upload failed)
+      # v0.11.0 — P3 audit fallback. Catches two cases:
+      #   1. upload-to-release=true on a branch push (skipped above).
+      #   2. upload-to-release=true on a tag where gh release upload
+      #      failed (continue-on-error above leaves outcome=failure).
+      # Either way the evidence stays accessible from the workflow
+      # run's Artifacts panel instead of being reaped with the runner.
+      if: |
+        inputs.upload-to-release == 'true' &&
+        (!startsWith(github.ref, 'refs/tags/') || steps.release-upload.outcome == 'failure')
+      uses: actions/upload-artifact@v4
+      with:
+        name: witness-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ inputs.output-dir }}
+        if-no-files-found: error
+        retention-days: 90
+
+    - name: Warn on release-upload failure
+      if: ${{ inputs.upload-to-release == 'true' && startsWith(github.ref, 'refs/tags/') && steps.release-upload.outcome == 'failure' }}
+      shell: bash
+      run: |
+        echo "::warning::gh release upload failed for tag ${GITHUB_REF_NAME}; evidence has been saved as a workflow artifact instead. Investigate (network, rate limit, or missing release) and re-attach manually if needed."

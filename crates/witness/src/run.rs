@@ -177,8 +177,14 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                 .map_err(|e| Error::Runtime(e.into()))?;
         }
 
-        let (export_name, args): (&str, Vec<Val>) = match inv {
-            Invocation::NoArgs(n) => (n.as_str(), Vec::new()),
+        // v0.11.0 — record the full invocation spec (typed-args
+        // form: `is_leap:2024`) instead of bare export name, so the
+        // RunRecord.invoked list — and the predicate.measurement.
+        // test_cases derived from it — preserves the input that
+        // produced each row. Reviewers can map row 2 of a truth
+        // table back to "year=2100" instead of just "is_leap".
+        let (export_name, args, invocation_label): (&str, Vec<Val>, String) = match inv {
+            Invocation::NoArgs(n) => (n.as_str(), Vec::new(), n.clone()),
             Invocation::Typed { name, raw } => {
                 let func = instance.get_func(&mut store, name).ok_or_else(|| {
                     Error::Runtime(anyhow::anyhow!(
@@ -187,7 +193,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                 })?;
                 let ty = func.ty(&store);
                 let parsed = build_typed_args(raw, &ty)?;
-                (name.as_str(), parsed)
+                (name.as_str(), parsed, raw.clone())
             }
         };
         let name = export_name;
@@ -200,7 +206,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         let mut results: Vec<Val> = ty.results().map(|_| Val::I32(0)).collect();
         func.call(&mut store, &args, &mut results)
             .map_err(|e| Error::Runtime(e.into()))?;
-        invoked.push(name.to_string());
+        invoked.push(invocation_label);
 
         // SAFETY-REVIEW: only `i32` is interpretable as a bool outcome.
         // Other Wasm value types (`i64`, `f32`, `f64`, `v128`, ref types)
@@ -1166,10 +1172,13 @@ EOF"#;
             .find(|b| b.kind == BranchKind::IfThen)
             .expect("then branch");
         assert_eq!(then_hit.hits, 1, "i32=1 should pick the then branch");
-        // Invoked list must show the export name (without the spec).
+        // v0.11.0: invoked list preserves the full typed-args spec
+        // (was bare "take_branch" pre-v0.11) so a reviewer can map
+        // each row in the truth table back to the input that
+        // produced it. Used by predicate.measurement.test_cases.
         assert_eq!(
             record.invoked.first().map(String::as_str),
-            Some("take_branch")
+            Some("take_branch:1")
         );
     }
 
