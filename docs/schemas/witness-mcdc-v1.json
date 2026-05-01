@@ -30,6 +30,11 @@
     },
     "trace_health": {
       "$ref": "#/$defs/TraceHealth"
+    },
+    "interpretation_polarity": {
+      "description": "v0.10.0 — names the polarity convention the truth-table cells use. Always `wasm-early-exit` in v0.10.x: `c_i=true` means \"the wasm br_if value at condition i was true,\" which inverts source-level `c_i` for any condition lowered through `i32.eqz`. Lets viewers explain the `(year % 4 == 0) && ...` row vector at the right level of abstraction. v0.10.x may add `source-equivalent` as an opt-in. Omitted on v0.9.x reports.",
+      "type": "string",
+      "enum": ["wasm-early-exit", "source-equivalent"]
     }
   },
   "$defs": {
@@ -196,9 +201,14 @@
           "type": "integer",
           "minimum": 0
         },
-        "ambiguous_rows": {
-          "description": "True if any decision had a row whose outcome could not be determined (e.g. function panicked or returned mid-chain).",
+        "trace_parser_active": {
+          "description": "v0.10.0 — renamed from `ambiguous_rows` (the legacy field name was misleading: it described whether the trace-buffer parser produced per-iteration rows, not whether outcomes were ambiguous). True when post-v0.7.3 instrumentation produced kind=0/kind=2 trace records the parser could decode into rows. Pre-v0.7.3 modules and harness-v1 snapshots leave this `false` (only counter aggregates). Witness still accepts the legacy `ambiguous_rows` name on input via serde alias; producers emit only `trace_parser_active`.",
           "type": "boolean"
+        },
+        "ambiguous_rows": {
+          "description": "Deprecated v0.9.x alias of `trace_parser_active`. Witness deserialises this name for back-compat with v0.9.x run-record loads but never emits it; consumers SHOULD prefer `trace_parser_active`.",
+          "type": "boolean",
+          "deprecated": true
         },
         "bytes_used": {
           "description": "v0.9.8 — total trace memory bytes consumed across all rows.",

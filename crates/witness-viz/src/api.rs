@@ -94,10 +94,7 @@ pub async fn verdicts(State(state): State<AppState>) -> Response {
 }
 
 /// GET /api/v1/verdict/{name} — full report.
-pub async fn verdict_detail(
-    Path(name): Path<String>,
-    State(state): State<AppState>,
-) -> Response {
+pub async fn verdict_detail(Path(name): Path<String>, State(state): State<AppState>) -> Response {
     match data::find_verdict(state.reports_dir(), &name) {
         Ok(Some(b)) => Json::<McdcReport>(b.report).into_response(),
         Ok(None) => json_err(StatusCode::NOT_FOUND, "verdict not found"),
@@ -112,7 +109,12 @@ pub async fn decision_detail(
 ) -> Response {
     match data::find_verdict(state.reports_dir(), &verdict_name) {
         Ok(Some(bundle)) => {
-            match bundle.report.decisions.into_iter().find(|d| d.id == decision_id) {
+            match bundle
+                .report
+                .decisions
+                .into_iter()
+                .find(|d| d.id == decision_id)
+            {
                 Some(d) => Json::<DecisionReport>(d).into_response(),
                 None => json_err(StatusCode::NOT_FOUND, "decision not found"),
             }

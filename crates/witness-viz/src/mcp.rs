@@ -53,7 +53,11 @@ pub async fn handler(State(state): State<AppState>, Json(body): Json<Value>) -> 
     let id = body.get("id").cloned().unwrap_or(Value::Null);
 
     if body.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return Json(rpc_error(id, ERR_INVALID_REQUEST, "jsonrpc must be \"2.0\""));
+        return Json(rpc_error(
+            id,
+            ERR_INVALID_REQUEST,
+            "jsonrpc must be \"2.0\"",
+        ));
     }
 
     let method = match body.get("method").and_then(Value::as_str) {
@@ -103,9 +107,7 @@ pub async fn handler(State(state): State<AppState>, Json(body): Json<Value>) -> 
         // not have responses, but axum's Json handler always returns —
         // we return an empty-result envelope which spec-compliant
         // clients ignore and lenient ones tolerate.
-        "notifications/initialized" | "notifications/cancelled" => {
-            Json(rpc_ok(id, Value::Null))
-        }
+        "notifications/initialized" | "notifications/cancelled" => Json(rpc_ok(id, Value::Null)),
         // Spec calls these out as ping/health. Always answer.
         "ping" => Json(rpc_ok(id, json!({}))),
         "tools/list" => Json(rpc_ok(id, tools_list())),
@@ -405,7 +407,11 @@ fn format_row(row: &TruthRow, keys: &[String]) -> String {
             None => "?".to_string(),
         })
         .collect();
-    format!("[{}]→{}", cells.join(","), if row.outcome { "T" } else { "F" })
+    format!(
+        "[{}]→{}",
+        cells.join(","),
+        if row.outcome { "T" } else { "F" }
+    )
 }
 
 fn format_needed_row(row: &[Value]) -> String {
