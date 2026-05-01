@@ -74,11 +74,7 @@ pub async fn index(State(state): State<AppState>) -> Response {
         let o = &v.report.overall;
         let branches = data::branch_count(state.reports_dir(), v);
         total_branches = total_branches.saturating_add(u64::from(branches));
-        let bar = render_coverage_bar(
-            o.conditions_proved,
-            o.conditions_gap,
-            o.conditions_dead,
-        );
+        let bar = render_coverage_bar(o.conditions_proved, o.conditions_gap, o.conditions_dead);
         let _ = write!(
             body,
             r#"<tr><td><a href="/verdict/{href}"><code>{name}</code></a></td><td>{branches}</td><td>{dt}</td><td>{df}/{dt}</td><td>{bar}</td><td class="proved">{cp}</td><td class="gap">{cg}</td><td class="dead">{cd}</td></tr>"#,
@@ -154,11 +150,7 @@ pub async fn verdict(Path(name): Path<String>, State(state): State<AppState>) ->
         body.push_str("</tr></thead>\n<tbody>\n");
 
         for d in &bundle.report.decisions {
-            let gap_count = d
-                .conditions
-                .iter()
-                .filter(|c| c.status == "gap")
-                .count();
+            let gap_count = d.conditions.iter().filter(|c| c.status == "gap").count();
             let _ = write!(
                 body,
                 r#"<tr><td><a href="/decision/{verdict}/{id}">#{id}</a></td><td><code>{src}:{line}</code></td><td><span class="status status-{status}">{status_disp}</span></td><td>{nc}</td><td>{gap}</td></tr>"#,
@@ -248,7 +240,11 @@ pub async fn gap(
         None => return not_found("decision", &format!("#{decision_id} in {verdict_name}")),
     };
 
-    let condition = match decision.conditions.iter().find(|c| c.index == condition_index) {
+    let condition = match decision
+        .conditions
+        .iter()
+        .find(|c| c.index == condition_index)
+    {
         Some(c) => c,
         None => {
             return not_found(
@@ -270,9 +266,9 @@ pub async fn gap(
         br = condition.branch_id,
     );
 
-    let _ = write!(
+    let _ = writeln!(
         body,
-        "<p>Status: <span class=\"status status-{cls}\">{up}</span></p>\n",
+        "<p>Status: <span class=\"status status-{cls}\">{up}</span></p>",
         cls = escape(&condition.status),
         up = escape(&condition.status.to_ascii_uppercase()),
     );
@@ -282,9 +278,9 @@ pub async fn gap(
             body.push_str("<div class=\"box\">\n");
             if let Some(pair) = condition.pair {
                 let interp = condition.interpretation.as_deref().unwrap_or("");
-                let _ = write!(
+                let _ = writeln!(
                     body,
-                    "<p>Already proved by rows <code>{a}</code> and <code>{b}</code> ({interp}). No action needed.</p>\n",
+                    "<p>Already proved by rows <code>{a}</code> and <code>{b}</code> ({interp}). No action needed.</p>",
                     a = pair.first().copied().unwrap_or(0),
                     b = pair.get(1).copied().unwrap_or(0),
                     interp = escape(interp),
@@ -342,9 +338,9 @@ fn render_gap_tutorial(
         Some(row) => {
             let current = row.evaluated.get(&key).copied().unwrap_or(false);
             let needed = !current;
-            let _ = write!(
+            let _ = writeln!(
                 body,
-                "<p>To prove condition <code>c{ci}</code> independently affects the decision, you need a row where <code>c{ci} = {needed}</code> and the outcome differs from row <code>{rid}</code> (where <code>c{ci} = {current}</code>).</p>\n",
+                "<p>To prove condition <code>c{ci}</code> independently affects the decision, you need a row where <code>c{ci} = {needed}</code> and the outcome differs from row <code>{rid}</code> (where <code>c{ci} = {current}</code>).</p>",
                 ci = condition.index,
                 needed = if needed { "T" } else { "F" },
                 current = if current { "T" } else { "F" },
@@ -363,7 +359,7 @@ fn render_gap_tutorial(
                         None => "*",
                     }
                 };
-                let _ = write!(body, "  c{idx} = {val}\n", idx = c.index, val = val);
+                let _ = writeln!(body, "  c{idx} = {val}", idx = c.index, val = val);
             }
             body.push_str("</pre>\n");
 
@@ -509,7 +505,11 @@ fn row_class_for(row: &TruthRow, gap_indices: &std::collections::BTreeSet<u32>) 
 fn render_conditions(decision: &DecisionReport, verdict_name: &str) -> String {
     let mut out = String::from("<ul class=\"conditions\">\n");
     for c in &decision.conditions {
-        let _ = write!(out, "<li class=\"cond-{status}\">", status = escape(&c.status));
+        let _ = write!(
+            out,
+            "<li class=\"cond-{status}\">",
+            status = escape(&c.status)
+        );
         let status_upper = c.status.to_ascii_uppercase();
         let _ = write!(
             out,
@@ -557,11 +557,7 @@ fn not_found(kind: &str, name: &str) -> Response {
 }
 
 fn error_page(title: &str, msg: &str) -> Response {
-    let body = format!(
-        "<h1>{}</h1>\n<pre>{}</pre>",
-        escape(title),
-        escape(msg),
-    );
+    let body = format!("<h1>{}</h1>\n<pre>{}</pre>", escape(title), escape(msg),);
     let html = page(title, &body);
     (StatusCode::INTERNAL_SERVER_ERROR, Html(html)).into_response()
 }

@@ -7,6 +7,64 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.2] — 2026-04-26
+
+Documentation patch: refreshes the published JSON Schemas at
+`docs/schemas/witness-coverage-v1.json` and
+`docs/schemas/witness-mcdc-v1.json` so they accept the v0.11.0
+envelope shape. Pure docs change; no Rust API or wire-format
+movement; v0.11.0 / v0.11.1 envelopes were already correct, the
+schemas just rejected them.
+
+### Fixed — schemas rejected v0.11 envelopes
+
+v0.11.0 added `Measurement.toolchain` (rustc + wasmtime
+provenance) and `Measurement.test_cases` (positional row→
+invocation map) to the predicate body, plus
+`McdcReport.interpretation_polarity` to MC/DC reports. The shipped
+schemas had `additionalProperties: false` on `Measurement` and no
+top-level polarity field, so any consumer running schema
+validation against `https://pulseengine.eu/witness-coverage/v1` or
+`https://pulseengine.eu/witness-mcdc/v1` rejected v0.11 envelopes
+as invalid.
+
+The CI `schemas` job (informational, `continue-on-error: true` —
+see v0.10.0 item 5) caught this on every v0.11.x build; the
+release was unblocked but the schemas didn't reflect what witness
+actually emitted.
+
+v0.11.2 adds:
+
+- `Measurement.toolchain` (`#/$defs/Toolchain`) — `rust_version`
+  and `wasmtime_version`, both optional best-effort lookups.
+- `Measurement.test_cases` (array of `#/$defs/TestCase` with
+  `row_id` + `invocation`) — positional row → invocation map.
+- `McdcReport.interpretation_polarity` (top-level enum:
+  `wasm-early-exit` | `source-equivalent`) — the polarity
+  convention the truth-table cells use, defaulted to
+  `wasm-early-exit` for v0.10.x reports that don't declare it.
+- `TraceHealth.trace_parser_active` — current canonical name.
+  `TraceHealth.ambiguous_rows` is kept as a deprecated alias
+  (`"deprecated": true`) so v0.9.x reports still validate; this
+  matches the runtime serde alias.
+
+### Verified
+
+Both schemas validate cleanly against:
+
+- A synthetic v0.11.1 predicate (toolchain + test_cases populated)
+  → accepted.
+- A synthetic v0.10.4 predicate (no toolchain, no test_cases,
+  `original_module: null`) → still accepted.
+
+### Notes for v0.11.x and v0.12
+
+Unchanged from v0.11.1. Still deferred: macOS Developer ID
+signing + notarisation (waiting on user's cert plumbing);
+predicate Rekor-binding (v0.12); differential testing against
+rustc-mcdc (v0.11.x stretch); `witness new --all-exports`
+auto-invoke (now scheduled for v0.11.3).
+
 ## [0.11.1] — 2026-05-01
 
 ### Fixed — `cargo fmt --check` failure on the v0.11.0 release

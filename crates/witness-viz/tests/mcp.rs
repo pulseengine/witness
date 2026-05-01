@@ -103,10 +103,7 @@ async fn tools_list_returns_three_tools() {
     assert_eq!(resp["id"], 1);
     let tools = resp["result"]["tools"].as_array().expect("tools array");
     assert_eq!(tools.len(), 3, "expected 3 tools, got {}", tools.len());
-    let names: Vec<&str> = tools
-        .iter()
-        .filter_map(|t| t["name"].as_str())
-        .collect();
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     assert!(names.contains(&"get_decision_truth_table"));
     assert!(names.contains(&"find_missing_witness"));
     assert!(names.contains(&"list_uncovered_conditions"));
@@ -204,9 +201,7 @@ async fn find_missing_witness_proved_returns_already_proved() {
         }),
     )
     .await;
-    let text = resp["result"]["content"][0]["text"]
-        .as_str()
-        .expect("text");
+    let text = resp["result"]["content"][0]["text"].as_str().expect("text");
     let inner: Value = serde_json::from_str(text).expect("inner json");
     assert_eq!(inner["status"], "proved");
     let rationale = inner["rationale"].as_str().expect("rationale");
@@ -243,9 +238,7 @@ async fn find_missing_witness_gap_returns_needed_row() {
         }),
     )
     .await;
-    let text = resp["result"]["content"][0]["text"]
-        .as_str()
-        .expect("text");
+    let text = resp["result"]["content"][0]["text"].as_str().expect("text");
     let inner: Value = serde_json::from_str(text).expect("inner json");
     assert_eq!(inner["status"], "gap");
     let needed_row = inner["needed_row"].as_array().expect("needed_row array");
@@ -277,9 +270,7 @@ async fn list_uncovered_conditions_returns_array() {
         }),
     )
     .await;
-    let text = resp["result"]["content"][0]["text"]
-        .as_str()
-        .expect("text");
+    let text = resp["result"]["content"][0]["text"].as_str().expect("text");
     let inner: Value = serde_json::from_str(text).expect("inner json");
     let arr = inner.as_array().expect("array");
     // Fixture has exactly one gap condition (decision 1, condition 1).
@@ -320,8 +311,10 @@ async fn initialize_handshake_returns_server_info() {
     .await;
 
     let result = resp.get("result").expect("initialize must succeed");
-    assert_eq!(result["protocolVersion"], "2024-11-05",
-        "echo client's protocol version when supported");
+    assert_eq!(
+        result["protocolVersion"], "2024-11-05",
+        "echo client's protocol version when supported"
+    );
     assert_eq!(result["serverInfo"]["name"], "witness-viz");
     assert!(
         result["serverInfo"]["version"].as_str().is_some(),

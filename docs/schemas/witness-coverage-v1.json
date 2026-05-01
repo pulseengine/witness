@@ -82,7 +82,41 @@
         "witness_version": {
           "description": "Witness toolchain version string (Cargo package version).",
           "type": "string"
+        },
+        "toolchain": {
+          "description": "v0.11.0 — toolchain provenance (rustc + wasmtime versions that produced the verdict). Optional: omitted by v0.10.x envelopes; populated best-effort by v0.11+ when `rustc` is on PATH at predicate-build time.",
+          "$ref": "#/$defs/Toolchain"
+        },
+        "test_cases": {
+          "description": "v0.11.0 — positional row→invocation map. Lets reviewers trace a truth-table row back to the named export the runner exercised. Empty on harness-mode runs that don't ship per-row data; absent on v0.10.x envelopes.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/TestCase" }
         }
+      }
+    },
+    "Toolchain": {
+      "description": "v0.11.0 — record of the rustc + wasmtime versions used to produce the run record. Both fields are optional best-effort lookups: `rust_version` is queried via `rustc --version` at predicate-build time (omitted when rustc isn't on PATH); `wasmtime_version` is the compile-time wasmtime crate version the witness binary linked against.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rust_version": {
+          "description": "Output of `rustc --version` (e.g. `rustc 1.91.0 (8a8be5b22 2026-01-15)`). Omitted when rustc was not available on PATH.",
+          "type": "string"
+        },
+        "wasmtime_version": {
+          "description": "Wasmtime crate version the witness binary was built against (compile-time constant). Omitted only on builds where the constant could not be captured.",
+          "type": "string"
+        }
+      }
+    },
+    "TestCase": {
+      "description": "v0.11.0 — one entry of the row→invocation map. `row_id` is the dense 0-based row index assigned by the runner; `invocation` is the export the runner called for that row, including the typed-args spec when applicable (e.g. `is_leap:2024`).",
+      "type": "object",
+      "required": ["row_id", "invocation"],
+      "additionalProperties": false,
+      "properties": {
+        "row_id": { "type": "integer", "minimum": 0 },
+        "invocation": { "type": "string" }
       }
     },
     "OriginalModule": {
