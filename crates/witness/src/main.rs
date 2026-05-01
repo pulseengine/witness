@@ -617,9 +617,7 @@ fn main() -> Result<()> {
             if check_content {
                 if let (Some(report), Some(stored_sha)) = (
                     stmt.predicate.get("report"),
-                    stmt.predicate
-                        .get("report_sha256")
-                        .and_then(|v| v.as_str()),
+                    stmt.predicate.get("report_sha256").and_then(|v| v.as_str()),
                 ) {
                     let canonical = serde_json::to_vec(report)?;
                     let derived = witness_core::predicate::sha256_hex_pub(&canonical);
