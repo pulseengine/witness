@@ -69,6 +69,16 @@ enum Command {
         /// Ignored when `--harness` is set.
         #[arg(long)]
         call_start: bool,
+        /// v0.11.3 — auto-invoke every no-arg, non-witness export the
+        /// module exposes. Skips `__witness_*` instrumentation
+        /// exports, `_start`, `_initialize`, memories/globals, and any
+        /// function with parameters (those need explicit
+        /// `--invoke-with-args` specs). Discovered exports are added
+        /// after explicit `--invoke` / `--invoke-with-args` entries.
+        /// Pairs with `witness new --all-exports` for fixtures whose
+        /// `run_row_*` shape is the row-per-export convention.
+        #[arg(long = "invoke-all")]
+        invoke_all: bool,
         /// Subprocess harness command. When set, witness spawns this
         /// command via `sh -c` with WITNESS_MODULE / WITNESS_MANIFEST /
         /// WITNESS_OUTPUT env vars; the harness must write a counter
@@ -259,6 +269,14 @@ enum Command {
         /// flag, witness refuses rather than clobber.
         #[arg(long)]
         force: bool,
+        /// v0.11.3 — scaffold the alternate "row-per-export" fixture
+        /// shape: five no-arg `run_row_*` exports + a run.sh that
+        /// drives them via `witness run --invoke-all`. Useful for
+        /// fixtures that prefer one fixed input per row over the
+        /// typed-args form. Without this flag the default scaffold
+        /// is the v0.9.11+ single typed-arg `is_leap` shape.
+        #[arg(long = "all-exports")]
+        all_exports: bool,
     },
 
     /// Boot the witness-viz HTMX visualiser against a compliance bundle
@@ -373,6 +391,7 @@ fn main() -> Result<()> {
             invoke,
             invoke_with_args,
             call_start,
+            invoke_all,
             harness,
         } => {
             let manifest =
@@ -384,6 +403,7 @@ fn main() -> Result<()> {
                 invoke,
                 invoke_with_args,
                 call_start,
+                invoke_all,
                 harness,
             };
             run::run_module(&options)?;
@@ -675,9 +695,14 @@ fn main() -> Result<()> {
                 print!("{}", QUICKSTART_TEXT);
             }
         }
-        Command::New { name, dir, force } => {
+        Command::New {
+            name,
+            dir,
+            force,
+            all_exports,
+        } => {
             let parent = dir.unwrap_or_else(|| std::path::PathBuf::from("."));
-            scaffold_fixture(&parent, &name, force)?;
+            scaffold_fixture(&parent, &name, force, all_exports)?;
         }
         Command::Viz {
             reports_dir,
@@ -717,7 +742,12 @@ fn main() -> Result<()> {
 /// kebab-case crate name and `{{NAME_SNAKE}}` for the snake-case
 /// module name. Writes them with `0644` (or `0755` for the shell
 /// scripts) and prints a one-screen "next steps" message.
-fn scaffold_fixture(parent: &std::path::Path, name: &str, force: bool) -> Result<()> {
+fn scaffold_fixture(
+    parent: &std::path::Path,
+    name: &str,
+    force: bool,
+    all_exports: bool,
+) -> Result<()> {
     if name.is_empty()
         || !name
             .chars()
@@ -738,16 +768,22 @@ fn scaffold_fixture(parent: &std::path::Path, name: &str, force: bool) -> Result
     let snake = name.replace('-', "_");
     let kebab = name.replace('_', "-");
 
+    let (lib_template, run_template) = if all_exports {
+        (SCAFFOLD_LIB_RS_ALL_EXPORTS, SCAFFOLD_RUN_SH_ALL_EXPORTS)
+    } else {
+        (SCAFFOLD_LIB_RS, SCAFFOLD_RUN_SH)
+    };
+
     let cargo_toml = SCAFFOLD_CARGO_TOML
         .replace("{{NAME}}", &kebab)
         .replace("{{NAME_SNAKE}}", &snake);
-    let lib_rs = SCAFFOLD_LIB_RS
+    let lib_rs = lib_template
         .replace("{{NAME}}", &kebab)
         .replace("{{NAME_SNAKE}}", &snake);
     let build_sh = SCAFFOLD_BUILD_SH
         .replace("{{NAME}}", &kebab)
         .replace("{{NAME_SNAKE}}", &snake);
-    let run_sh = SCAFFOLD_RUN_SH
+    let run_sh = run_template
         .replace("{{NAME}}", &kebab)
         .replace("{{NAME_SNAKE}}", &snake);
     let gitignore = SCAFFOLD_GITIGNORE.to_string();
@@ -783,9 +819,15 @@ fn scaffold_fixture(parent: &std::path::Path, name: &str, force: bool) -> Result
         println!("  ./run.sh           # instruments + runs + reports + bundles");
         println!("  witness viz --reports-dir verdict-evidence");
         println!();
-        println!(
-            "Single typed-arg export (`is_leap`) driven by 5 years; 1/1 decisions\n  full MC/DC, 2 conditions proved (rustc fuses the third condition)."
-        );
+        if all_exports {
+            println!(
+                "v0.11.3 row-per-export shape: 5 no-arg `run_row_*` exports driven by\n  `witness run --invoke-all` auto-discovery; 1/1 decisions full MC/DC."
+            );
+        } else {
+            println!(
+                "Single typed-arg export (`is_leap`) driven by 5 years; 1/1 decisions\n  full MC/DC, 2 conditions proved (rustc fuses the third condition)."
+            );
+        }
     }
 
     Ok(())
@@ -937,6 +979,106 @@ echo "  witness viz --reports-dir verdict-evidence"
 
 const SCAFFOLD_GITIGNORE: &str =
     "target/\nCargo.lock\n*.wasm\n*.witness.json\nrun.json\nverdict-evidence/\n";
+
+/// v0.11.3 — alternate scaffold (selected by `--all-exports`). Five
+/// no-arg `run_row_*` exports each driving the leap-year predicate
+/// with a hardcoded year. The reviewer reads each export name to see
+/// which row of the truth table it produces. Pairs with the
+/// `--invoke-all` run.sh template that auto-discovers + invokes the
+/// exports without needing typed-args specs.
+const SCAFFOLD_LIB_RS_ALL_EXPORTS: &str = r#"//! Witness fixture: scaffolded by `witness new --all-exports {{NAME}}`.
+//!
+//! Decision under test:  `(year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)`
+//!
+//! Same predicate as the default scaffold; this fixture exposes one
+//! no-arg export per row of the truth table instead of a single
+//! typed-arg export. `witness run --invoke-all` (v0.11.3+) auto-
+//! discovers every `run_row_*` export and invokes it once. Each
+//! export embeds its year inside `core::hint::black_box` so the
+//! constant doesn't fold and the predicate's branches are reached.
+//!
+//! When to prefer this shape over the default:
+//! - You want one named test case per row, not a typed-args spec
+//!   (more obvious in test reports / CI logs).
+//! - You're integrating with a harness that calls every export it
+//!   finds (the v0.11.3 auto-discovery convention).
+//!
+//! When to prefer the default `is_leap` shape:
+//! - You want DWARF source attribution on the predicate's source
+//!   line in `lib.rs` instead of `hint.rs:491` (typed-args lifts the
+//!   input through a function parameter, eliminating black_box).
+
+#![no_std]
+
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+
+/// The decision under test. Marked `#[inline(never)]` so the call
+/// site keeps a stable DWARF line entry — without this the inliner
+/// fuses the predicate into each export and the truth table loses
+/// its consistent attribution.
+#[inline(never)]
+fn is_leap_year(year: u32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+/// Helper: run the predicate against a year wrapped in `black_box`.
+/// `black_box` blocks the constant-folding pass that would otherwise
+/// fold each export into a return-of-constant.
+#[inline(never)]
+fn check(year: u32) -> i32 {
+    is_leap_year(core::hint::black_box(year)) as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_0() -> i32 { check(2001) } // c0=F                       → F
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_1() -> i32 { check(2004) } // c0=T, c1=T                 → T
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_2() -> i32 { check(2100) } // c0=T, c1=F, c2=F           → F
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_3() -> i32 { check(2000) } // c0=T, c1=F, c2=T           → T
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_row_4() -> i32 { check(1900) } // c0=T, c1=F, c2=F (≠row 2)  → F
+"#;
+
+/// v0.11.3 — alternate run.sh that drives the row-per-export shape
+/// via `witness run --invoke-all`. The runner auto-discovers every
+/// no-arg, non-`__witness_*` export and invokes it once.
+const SCAFFOLD_RUN_SH_ALL_EXPORTS: &str = r#"#!/usr/bin/env bash
+# End-to-end pipeline (row-per-export shape, v0.11.3+):
+#   build → instrument → run --invoke-all → report → bundle.
+# Expected outcome: 1 decision reconstructed; 2 conditions proved
+# under masking MC/DC (rustc fuses the third — see lib.rs comment).
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+WITNESS="${WITNESS:-witness}"
+
+./build.sh
+"$WITNESS" instrument verdict_{{NAME_SNAKE}}.wasm -o instrumented.wasm
+# v0.11.3+: --invoke-all auto-discovers every no-arg, non-witness
+# export. With this scaffold that's run_row_0..4. No typed-args
+# spec needed; reviewers can read row N as `run_row_N`.
+"$WITNESS" run instrumented.wasm --invoke-all -o run.json
+"$WITNESS" report --input run.json --format mcdc
+
+EVIDENCE_DIR="verdict-evidence/{{NAME_SNAKE}}"
+mkdir -p "$EVIDENCE_DIR"
+"$WITNESS" report --input run.json --format mcdc-json \
+    > "$EVIDENCE_DIR/report.json"
+cp instrumented.wasm.witness.json "$EVIDENCE_DIR/manifest.json"
+echo
+echo "Bundle written under verdict-evidence/. Browse with:"
+echo "  witness viz --reports-dir verdict-evidence"
+"#;
 
 fn run_viz(reports_dir: &std::path::Path, port: u16, bind: &str) -> Result<()> {
     let bin = std::env::var_os("WITNESS_VIZ_BIN")

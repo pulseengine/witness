@@ -49,6 +49,13 @@ pub struct RunOptions<'a> {
     /// If true, call `_start` automatically before any `invoke` entries
     /// (the WASI "command" convention). Ignored when `harness` is `Some`.
     pub call_start: bool,
+    /// v0.11.3 — auto-invoke every no-arg, non-witness export the
+    /// module exposes (after explicit `invoke` / `invoke_with_args`
+    /// entries). Filters out `__witness_*` instrumentation exports,
+    /// `_start`, `_initialize`, non-function exports, and any
+    /// function whose signature has parameters. Ignored when
+    /// `harness` is `Some`. Pairs with `witness new --all-exports`.
+    pub invoke_all: bool,
     /// Subprocess harness command. When set, witness spawns this command
     /// instead of running the module via embedded wasmtime.
     pub harness: Option<String>,
@@ -163,6 +170,49 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
             name: name.to_string(),
             raw: spec.clone(),
         });
+    }
+    // v0.11.3 — `--invoke-all` auto-discovery. Walk the module's
+    // exports and add every no-arg function that isn't a witness
+    // instrumentation hook. Discovered exports are appended in
+    // module-export order so the row sequence stays deterministic
+    // across re-runs.
+    if options.invoke_all {
+        let already: std::collections::HashSet<String> = invocations
+            .iter()
+            .map(|i| match i {
+                Invocation::NoArgs(n) => n.clone(),
+                Invocation::Typed { name, .. } => name.clone(),
+            })
+            .collect();
+        let mut discovered: Vec<String> = Vec::new();
+        for export in module.exports() {
+            let name = export.name();
+            if name.starts_with("__witness_")
+                || name == "_start"
+                || name == "_initialize"
+                || already.contains(name)
+            {
+                continue;
+            }
+            let wasmtime::ExternType::Func(func_ty) = export.ty() else {
+                continue;
+            };
+            if func_ty.params().len() != 0 {
+                continue;
+            }
+            discovered.push(name.to_string());
+        }
+        if discovered.is_empty() && options.invoke.is_empty() && options.invoke_with_args.is_empty()
+        {
+            return Err(Error::Runtime(anyhow::anyhow!(
+                "--invoke-all found no auto-invocable exports (only `__witness_*` hooks, \
+                 _start/_initialize, or non-zero-arg functions). Add explicit \
+                 `--invoke <name>` or `--invoke-with-args 'name:val,...'` entries."
+            )));
+        }
+        for n in discovered {
+            invocations.push(Invocation::NoArgs(n));
+        }
     }
 
     for inv in &invocations {
@@ -1010,6 +1060,7 @@ mod tests {
             invoke: vec!["hit_then".to_string()],
             call_start: false,
             invoke_with_args: vec![],
+            invoke_all: false,
             harness: None,
         };
         run_module(&options).unwrap();
@@ -1062,6 +1113,7 @@ mod tests {
             invoke: vec!["take_branch".to_string()],
             call_start: false,
             invoke_with_args: vec![],
+            invoke_all: false,
             harness: None,
         };
         run_module(&options).unwrap();
@@ -1113,6 +1165,7 @@ EOF"#;
             invoke: vec![],
             call_start: false,
             invoke_with_args: vec![],
+            invoke_all: false,
             harness: Some(harness_cmd.to_string()),
         };
         run_module(&options).unwrap();
@@ -1162,6 +1215,7 @@ EOF"#;
             invoke: vec![],
             invoke_with_args: vec!["take_branch:1".to_string()],
             call_start: false,
+            invoke_all: false,
             harness: None,
         };
         run_module(&options).unwrap();
@@ -1211,6 +1265,7 @@ EOF"#;
             invoke: vec![],
             invoke_with_args: vec!["two_args:42".to_string()], // missing the second arg
             call_start: false,
+            invoke_all: false,
             harness: None,
         };
         let err = run_module(&options).expect_err("arity mismatch must error");
@@ -1289,6 +1344,7 @@ EOF"#
             invoke: vec![],
             call_start: false,
             invoke_with_args: vec![],
+            invoke_all: false,
             harness: Some(harness_cmd),
         };
         run_module(&options).unwrap();
@@ -1342,6 +1398,7 @@ EOF"#;
             invoke: vec![],
             call_start: false,
             invoke_with_args: vec![],
+            invoke_all: false,
             harness: Some(harness_cmd.to_string()),
         };
         let err = run_module(&options).expect_err("unknown schema must error");
@@ -1349,6 +1406,147 @@ EOF"#;
         assert!(msg.contains("witness-harness-v1"), "{msg}");
         assert!(msg.contains("witness-harness-v2"), "{msg}");
         assert!(msg.contains("witness-harness-vfuture"), "{msg}");
+    }
+
+    #[test]
+    fn invoke_all_discovers_and_filters_exports() {
+        // v0.11.3 — `--invoke-all` should auto-invoke every no-arg
+        // non-`__witness_*` export. Module here exposes:
+        //   - `hit_then` and `hit_else` (no-arg, expected to fire)
+        //   - `with_args` (one i32 param, must be skipped — would
+        //     otherwise crash with "expected 1 arg, got 0")
+        // Witness instrumentation also adds its own `__witness_*`
+        // exports which must be skipped silently.
+        let wat_src = r#"
+            (module
+              (func $choose (param i32) (result i32)
+                local.get 0
+                if (result i32)
+                  i32.const 42
+                else
+                  i32.const 99
+                end)
+              (func (export "hit_then") (result i32)
+                i32.const 1
+                call $choose)
+              (func (export "hit_else") (result i32)
+                i32.const 0
+                call $choose)
+              (func (export "with_args") (param i32) (result i32)
+                local.get 0
+                call $choose))
+        "#;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("prog.wasm");
+        let manifest_path = dir.path().join("prog.wasm.witness.json");
+        let run_path = dir.path().join("run.json");
+        let entries = instrument_and_emit(wat_src, &wasm_path);
+        let manifest = Manifest {
+            schema_version: "1".to_string(),
+            witness_version: "test".to_string(),
+            module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
+            branches: entries,
+            decisions: vec![],
+        };
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let options = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path,
+            output: &run_path,
+            invoke: vec![],
+            call_start: false,
+            invoke_with_args: vec![],
+            invoke_all: true,
+            harness: None,
+        };
+        run_module(&options).unwrap();
+
+        let record = RunRecord::load(&run_path).unwrap();
+        // Both no-arg exports should appear in `invoked` (in module
+        // export order); `with_args` must NOT, and no `__witness_*`
+        // export should leak through either.
+        let invoked: Vec<&str> = record
+            .invoked
+            .iter()
+            .filter(|s| !s.starts_with("__witness_trace_bytes="))
+            .map(String::as_str)
+            .collect();
+        assert!(
+            invoked.contains(&"hit_then"),
+            "auto-discovery missed hit_then: {invoked:?}"
+        );
+        assert!(
+            invoked.contains(&"hit_else"),
+            "auto-discovery missed hit_else: {invoked:?}"
+        );
+        assert!(
+            !invoked.contains(&"with_args"),
+            "auto-discovery should skip param-having exports: {invoked:?}"
+        );
+        assert!(
+            !invoked.iter().any(|s| s.starts_with("__witness_")),
+            "auto-discovery leaked witness instrumentation export: {invoked:?}"
+        );
+        // Both then and else arms should now have been hit.
+        let then_hit = record
+            .branches
+            .iter()
+            .find(|b| b.kind == BranchKind::IfThen)
+            .expect("then branch");
+        let else_hit = record
+            .branches
+            .iter()
+            .find(|b| b.kind == BranchKind::IfElse)
+            .expect("else branch");
+        assert_eq!(then_hit.hits, 1, "then arm should fire from hit_then");
+        assert_eq!(else_hit.hits, 1, "else arm should fire from hit_else");
+    }
+
+    #[test]
+    fn invoke_all_with_no_invocable_exports_errors() {
+        // Module with only a parameterised export. `--invoke-all`
+        // alone (no explicit `--invoke`) must surface a helpful
+        // error rather than silently produce a zero-row run record.
+        let wat_src = r#"
+            (module
+              (func (export "with_args") (param i32) (result i32)
+                local.get 0
+                drop
+                i32.const 0))
+        "#;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("prog.wasm");
+        let manifest_path = dir.path().join("prog.wasm.witness.json");
+        let run_path = dir.path().join("run.json");
+        let entries = instrument_and_emit(wat_src, &wasm_path);
+        let manifest = Manifest {
+            schema_version: "1".to_string(),
+            witness_version: "test".to_string(),
+            module_source: wasm_path.to_string_lossy().into_owned(),
+            original_module_sha256: None,
+            branches: entries,
+            decisions: vec![],
+        };
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let options = RunOptions {
+            module: &wasm_path,
+            manifest: manifest_path,
+            output: &run_path,
+            invoke: vec![],
+            call_start: false,
+            invoke_with_args: vec![],
+            invoke_all: true,
+            harness: None,
+        };
+        let err = run_module(&options).expect_err("--invoke-all with nothing to invoke must error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("--invoke-all"),
+            "error should mention the flag: {msg}"
+        );
     }
 
     #[test]
@@ -1374,6 +1572,7 @@ EOF"#;
             invoke: vec![],
             call_start: false,
             invoke_with_args: vec![],
+            invoke_all: false,
             harness: Some("exit 1".to_string()),
         };
         let result = run_module(&options);

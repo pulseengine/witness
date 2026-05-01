@@ -7,7 +7,67 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.11.2] — 2026-04-26
+## [0.11.3] — 2026-05-01
+
+Closes the v0.11.0 deferral on `witness new --all-exports`
+(proposal item 15) by shipping both halves: the alternate
+"row-per-export" scaffold *and* the `witness run --invoke-all`
+flag the scaffold's run.sh depends on.
+
+### Added — `witness run --invoke-all` auto-discovery
+
+Embedded-mode `witness run` gains a `--invoke-all` flag that
+auto-invokes every no-arg, non-`__witness_*` export the module
+exposes. Skips `_start`, `_initialize`, non-function exports
+(memories, globals, tables), and any function whose signature
+declares parameters (those need explicit `--invoke-with-args`
+specs). Discovered exports are appended after explicit
+`--invoke` / `--invoke-with-args` entries, in module-export
+order, so the row sequence stays deterministic across reruns.
+
+When `--invoke-all` is passed alone with nothing to discover,
+witness now errors loudly rather than producing a zero-row run
+record — same chatty-failure principle as the v0.11.0 Action
+fixes.
+
+Two unit tests cover the happy path (filtering keeps
+`hit_then`/`hit_else`, drops the `(param i32)` export, never
+leaks `__witness_*`) and the empty-discovery error.
+
+### Added — `witness new --all-exports` scaffold
+
+`witness new` accepts `--all-exports` to scaffold the row-per-
+export fixture shape. The generated `src/lib.rs` exposes five
+no-arg `run_row_0..4` exports, each calling the leap-year
+predicate against a hardcoded year wrapped in
+`core::hint::black_box`. The generated `run.sh` drives them via
+`witness run --invoke-all` — no typed-args spec needed.
+
+When to prefer `--all-exports` over the v0.9.11 default:
+- One named test case per row (more obvious in CI logs).
+- Integrating with a harness convention that calls every export
+  it finds.
+
+When to prefer the default `is_leap` shape:
+- DWARF source attribution lands on the predicate's source line
+  in `lib.rs` instead of `hint.rs:491` (typed-args lifts the
+  input through a function parameter, no `black_box` needed).
+
+### Verified
+
+End-to-end smoke test of `witness new --all-exports leap-rows
+&& cd leap-rows && ./build.sh && ./run.sh`: 1/1 decisions full
+MC/DC, 2 conditions proved, 5 rows with stable export-name row
+ids.
+
+### Notes for v0.11.x and v0.12
+
+Unchanged. Deferred: macOS Developer ID signing + notarisation;
+predicate Rekor-binding (v0.12); differential testing against
+rustc-mcdc; per-arm `brval`/`brcnt` for `br_table` decisions
+(v0.11.4).
+
+## [0.11.2] — 2026-05-01
 
 Documentation patch: refreshes the published JSON Schemas at
 `docs/schemas/witness-coverage-v1.json` and

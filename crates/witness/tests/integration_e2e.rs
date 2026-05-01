@@ -95,6 +95,7 @@ fn run_with_invoke(invoke: &str) -> RunRecord {
         invoke: vec![invoke.to_string()],
         invoke_with_args: vec![],
         call_start: false,
+        invoke_all: false,
         harness: None,
     };
     run_module(&options).expect("run instrumented fixture");
