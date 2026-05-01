@@ -7,6 +7,25 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-05-01
+
+### Fixed — `cargo fmt --check` failure on the v0.11.0 release
+
+The v0.11.0 commit landed before `cargo fmt --all` ran; the new
+`Verify` command's struct fields at `crates/witness/src/main.rs:617`
+weren't formatted to rustfmt's preferred multi-line `[arg(...)] field`
+shape. CI's Format job failed; Release ran clean (cosign signing
+worked, every platform built).
+
+Fix: ran `cargo fmt --all`. No semantic change.
+
+The Schemas-informational job also failed — the v0.10-vintage
+JSON-Schema validator caught the v0.11.0-shaped `Measurement` (now
+carrying optional `toolchain` and `test_cases`) as an unknown
+property. The schemas-job is `continue-on-error: true` so it didn't
+gate the release; v0.11.x will refresh the published `witness-mcdc-v1.json`
+and `witness-coverage-v1.json` to permit the new fields.
+
 ## [0.11.0] — 2026-04-30
 
 ### Headline — audit-grade evidence
