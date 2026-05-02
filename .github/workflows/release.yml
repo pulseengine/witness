@@ -1,5 +1,13 @@
 name: Release
 
+# Release variant: serialise per-tag (release-${{ github.ref }}) and
+# never cancel a run mid-publish. A cancelled release leaves
+# registries, attestations, or signed artifacts in an inconsistent
+# state — better to queue than abort.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     tags:
