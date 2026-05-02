@@ -1,5 +1,12 @@
 name: CI
 
+# Cancel superseded PR runs; never cancel main / scheduled / dispatched
+# runs. Group by workflow + branch (head_ref on PRs, ref otherwise) so
+# distinct workflows on the same branch don't fight each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
