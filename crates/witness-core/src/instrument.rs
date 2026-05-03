@@ -456,33 +456,38 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
                 .add(&format!("{COUNTER_EXPORT_PREFIX}{id}"), counter);
             counter_globals.push(counter);
 
-            // v0.6.1: allocate per-row capture globals for non-br_table branches.
-            let (brval, brcnt) = match branch.kind {
-                BranchKind::BrIf | BranchKind::IfThen | BranchKind::IfElse => {
-                    let bv = module.globals.add_local(
-                        ValType::I32,
-                        true,
-                        false,
-                        ConstExpr::Value(Value::I32(0)),
-                    );
-                    module
-                        .exports
-                        .add(&format!("{BRVAL_EXPORT_PREFIX}{id}"), bv);
-                    let bc = module.globals.add_local(
-                        ValType::I32,
-                        true,
-                        false,
-                        ConstExpr::Value(Value::I32(0)),
-                    );
-                    module
-                        .exports
-                        .add(&format!("{BRCNT_EXPORT_PREFIX}{id}"), bc);
-                    (Some(bv), Some(bc))
-                }
-                BranchKind::BrTableTarget | BranchKind::BrTableDefault => (None, None),
-            };
-            brval_globals.push(brval);
-            brcnt_globals.push(brcnt);
+            // v0.6.1: per-row capture globals for br_if/if-then/if-else.
+            // v0.11.5: extended to br_table arms so the audit layer can
+            // derive discriminant-bit independent-effect proofs without
+            // breaking the per-arm verdict surface. For br_table:
+            // - BrTableTarget arm i: brval = i (constant per arm,
+            //   recorded for symmetry with br_if so the runner can
+            //   read the same global slot uniformly); brcnt = per-row
+            //   count of times this arm fired.
+            // - BrTableDefault: brval = the actual discriminant value
+            //   when default fired (variable, ≥ N — the audit-layer
+            //   signal that determines bit-decomposition for default-
+            //   path rows); brcnt = per-row default-arm count.
+            let bv = module.globals.add_local(
+                ValType::I32,
+                true,
+                false,
+                ConstExpr::Value(Value::I32(0)),
+            );
+            module
+                .exports
+                .add(&format!("{BRVAL_EXPORT_PREFIX}{id}"), bv);
+            let bc = module.globals.add_local(
+                ValType::I32,
+                true,
+                false,
+                ConstExpr::Value(Value::I32(0)),
+            );
+            module
+                .exports
+                .add(&format!("{BRCNT_EXPORT_PREFIX}{id}"), bc);
+            brval_globals.push(Some(bv));
+            brcnt_globals.push(Some(bc));
 
             entries.push(BranchEntry {
                 id,
@@ -504,7 +509,13 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
     // br_table site. Helpers must be added before the per-function rewrite
     // because rewrite_function holds a `&mut LocalFunction` that conflicts
     // with module.funcs mutations.
-    let helpers = build_brtable_helpers(module, &scans, &counter_globals)?;
+    let helpers = build_brtable_helpers(
+        module,
+        &scans,
+        &counter_globals,
+        &brval_globals,
+        &brcnt_globals,
+    )?;
 
     // v0.7.2: build the trace memory + reset/row-marker helpers + the
     // trace_record helper. Built BEFORE the rewrite loop so its
@@ -1133,6 +1144,8 @@ fn build_brtable_helpers(
     module: &mut Module,
     scans: &[FunctionScan],
     counter_globals: &[GlobalId],
+    brval_globals: &[Option<GlobalId>],
+    brcnt_globals: &[Option<GlobalId>],
 ) -> Result<HashMap<usize, FunctionId>> {
     let mut helpers: HashMap<usize, FunctionId> = HashMap::new();
     let mut helper_seq: u32 = 0;
@@ -1162,7 +1175,46 @@ fn build_brtable_helpers(
                         Error::Instrument("br_table counter group out of range".to_string())
                     })?
                     .to_vec();
-                let helper_id = build_brtable_helper(module, &group_globals, helper_seq)?;
+                // v0.11.5 — per-arm brval/brcnt globals are guaranteed
+                // present for br_table arms (line ~480 lifted the
+                // BrTableTarget|BrTableDefault `(None, None)` to real
+                // allocations). Helper writes them inside the same
+                // `if sel == i { ... }` arm-selection blocks.
+                let group_brvals: Vec<GlobalId> = brval_globals
+                    .get(abs_start..abs_end)
+                    .ok_or_else(|| {
+                        Error::Instrument("br_table brval group out of range".to_string())
+                    })?
+                    .iter()
+                    .map(|o| {
+                        o.ok_or_else(|| {
+                            Error::Instrument(
+                                "br_table arm missing brval global (v0.11.5 invariant)".to_string(),
+                            )
+                        })
+                    })
+                    .collect::<Result<_>>()?;
+                let group_brcnts: Vec<GlobalId> = brcnt_globals
+                    .get(abs_start..abs_end)
+                    .ok_or_else(|| {
+                        Error::Instrument("br_table brcnt group out of range".to_string())
+                    })?
+                    .iter()
+                    .map(|o| {
+                        o.ok_or_else(|| {
+                            Error::Instrument(
+                                "br_table arm missing brcnt global (v0.11.5 invariant)".to_string(),
+                            )
+                        })
+                    })
+                    .collect::<Result<_>>()?;
+                let helper_id = build_brtable_helper(
+                    module,
+                    &group_globals,
+                    &group_brvals,
+                    &group_brcnts,
+                    helper_seq,
+                )?;
                 helpers.insert(abs_start, helper_id);
                 helper_seq = helper_seq.saturating_add(1);
                 i = j;
@@ -1200,6 +1252,8 @@ fn build_brtable_helpers(
 fn build_brtable_helper(
     module: &mut Module,
     counters: &[GlobalId],
+    brvals: &[GlobalId],
+    brcnts: &[GlobalId],
     helper_seq: u32,
 ) -> Result<FunctionId> {
     if counters.is_empty() {
@@ -1207,10 +1261,21 @@ fn build_brtable_helper(
             "br_table helper requires at least the default counter".to_string(),
         ));
     }
+    if brvals.len() != counters.len() || brcnts.len() != counters.len() {
+        return Err(Error::Instrument(
+            "br_table helper: counter/brval/brcnt slice length mismatch".to_string(),
+        ));
+    }
     let n_explicit = counters.len().saturating_sub(1);
     let default_counter = *counters
         .last()
         .ok_or_else(|| Error::Instrument("br_table helper missing default counter".to_string()))?;
+    let default_brval = *brvals
+        .last()
+        .ok_or_else(|| Error::Instrument("br_table helper missing default brval".to_string()))?;
+    let default_brcnt = *brcnts
+        .last()
+        .ok_or_else(|| Error::Instrument("br_table helper missing default brcnt".to_string()))?;
     let n_explicit_i32 = i32::try_from(n_explicit)
         .map_err(|_| Error::Instrument("br_table target count exceeds i32::MAX".to_string()))?;
 
@@ -1224,6 +1289,17 @@ fn build_brtable_helper(
             let target_idx = i32::try_from(i).map_err(|_| {
                 Error::Instrument("br_table target index exceeds i32::MAX".to_string())
             })?;
+            // v0.11.5 — also record per-arm brval (= arm index when
+            // selected) and increment brcnt. Globals are guaranteed
+            // by the v0.11.5 invariant in build_brtable_helpers.
+            let brval = brvals
+                .get(i)
+                .copied()
+                .ok_or_else(|| Error::Instrument("brval index out of range".to_string()))?;
+            let brcnt = brcnts
+                .get(i)
+                .copied()
+                .ok_or_else(|| Error::Instrument("brcnt index out of range".to_string()))?;
             body.instr(Instr::LocalGet(LocalGet {
                 local: selector_local,
             }));
@@ -1237,6 +1313,12 @@ fn build_brtable_helper(
                 InstrSeqType::Simple(None),
                 |then| {
                     counter_inc_into(then, counter);
+                    // brval = selector (= arm index when this branch fires)
+                    then.instr(Instr::LocalGet(LocalGet {
+                        local: selector_local,
+                    }));
+                    then.instr(Instr::GlobalSet(GlobalSet { global: brval }));
+                    counter_inc_into(then, brcnt);
                 },
                 |_else| {},
             );
@@ -1255,6 +1337,19 @@ fn build_brtable_helper(
             InstrSeqType::Simple(None),
             |then| {
                 counter_inc_into(then, default_counter);
+                // v0.11.5 — record actual discriminant for default-path
+                // rows. This is the load-bearing capture: target arms
+                // imply discriminant == arm_index, but default-arm rows
+                // could have any discriminant ≥ N. The audit-layer bit-
+                // decomposition needs the exact value to compute
+                // independent-effect across the full bit width.
+                then.instr(Instr::LocalGet(LocalGet {
+                    local: selector_local,
+                }));
+                then.instr(Instr::GlobalSet(GlobalSet {
+                    global: default_brval,
+                }));
+                counter_inc_into(then, default_brcnt);
             },
             |_else| {},
         );
@@ -1898,6 +1993,49 @@ mod tests {
             .collect();
         idx.sort_unstable();
         assert_eq!(idx, vec![0, 1]);
+    }
+
+    #[test]
+    fn br_table_arms_export_brval_and_brcnt_globals() {
+        // v0.11.5 — every br_table arm (target + default) must now
+        // export per-row brval + brcnt globals so the audit layer
+        // can derive discriminant-bit independent-effect from the
+        // recorded values. v0.11.4 and earlier left these unset for
+        // br_table arms (the `BrTableTarget | BrTableDefault =>
+        // (None, None)` arm at the alloc site).
+        let wat_src = r#"
+            (module
+              (func (export "f") (param i32)
+                block
+                  block
+                    block
+                      local.get 0
+                      br_table 0 1 2
+                    end
+                  end
+                end))
+        "#;
+        let mut module = wat_to_module(wat_src);
+        let entries = instrument_module(&mut module, "test").unwrap();
+        // 2 targets + 1 default = 3 arms; each should have its own
+        // counter, brval, and brcnt global export.
+        for e in &entries {
+            let counter_name = format!("{COUNTER_EXPORT_PREFIX}{}", e.id);
+            let brval_name = format!("{BRVAL_EXPORT_PREFIX}{}", e.id);
+            let brcnt_name = format!("{BRCNT_EXPORT_PREFIX}{}", e.id);
+            assert!(
+                module.exports.iter().any(|x| x.name == counter_name),
+                "missing counter export {counter_name}"
+            );
+            assert!(
+                module.exports.iter().any(|x| x.name == brval_name),
+                "missing brval export {brval_name} (v0.11.5 invariant)"
+            );
+            assert!(
+                module.exports.iter().any(|x| x.name == brcnt_name),
+                "missing brcnt export {brcnt_name} (v0.11.5 invariant)"
+            );
+        }
     }
 
     #[test]

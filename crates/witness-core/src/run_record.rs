@@ -72,6 +72,28 @@ pub struct DecisionRow {
     /// outcome was not observed (e.g. function returned mid-chain).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<bool>,
+    /// v0.11.5 — raw per-condition `brval` integers, indexed by
+    /// condition_index. Populated by the embedded runner when the
+    /// instrumented module exports per-row `__witness_brval_<id>`
+    /// globals (v0.6.1 instrumentation onwards for br_if; v0.11.5
+    /// onwards for br_table arms).
+    ///
+    /// For boolean conditions (br_if/if-then/if-else) the value is
+    /// the wasm-level br_if value (`0` or `1`) and is redundant
+    /// with `evaluated`. For br_table arms it carries the **actual
+    /// discriminant integer** when the arm fired:
+    /// - target arm `i`: `raw_brvals[i] = i` (constant, can be
+    ///   skipped by the audit layer).
+    /// - default arm: `raw_brvals[default] = actual_discriminant`
+    ///   (the load-bearing capture — the audit layer needs this
+    ///   for discriminant-bit independent-effect proofs over the
+    ///   full bit width, since target-arm rows only pin the value
+    ///   to `< N` and default-arm rows could be any `≥ N`).
+    ///
+    /// `#[serde(default)]` so v0.11.4 and earlier run records
+    /// keep deserialising; absent map = audit layer no-ops.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub raw_brvals: BTreeMap<u32, i32>,
 }
 
 /// Health of the per-row capture path. The reporter refuses MC/DC verdicts
