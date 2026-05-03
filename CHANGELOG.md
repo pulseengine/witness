@@ -7,6 +7,54 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.4] — 2026-05-03
+
+Security patch — bumps wasmtime from 42 to 44 to close
+RUSTSEC-2026-0114 ("Panic when allocating a table exceeding the
+size of the host's address space"). Patched in wasmtime
+`>= 43.0.2, < 44` and `>= 44.0.1`; v0.11.4 picks the latest
+stable (44.x).
+
+### Fixed — RUSTSEC-2026-0114
+
+The Bytecode Alliance disclosed GHSA-p8xm-42r7-89xg on 2026-04-30,
+affecting every wasmtime release from 30.0.0 through the
+unpatched ranges. Witness uses wasmtime in two places:
+
+- `witness run` (embedded mode) — instantiates user-provided
+  modules, reads counter globals + trace memory.
+- `witness-component` — the compliance-evidence consumer.
+
+Both now build against wasmtime 44 with no API changes required —
+`Engine::new`, `Module::from_binary`, `Linker`, `Store`, `Func`,
+`Val`, and `ExternType::Func(_)` all unchanged across 42 → 44.
+
+### Changed — `Measurement.toolchain.wasmtime_version` reports `"44"`
+
+The compile-time wasmtime version constant in
+`crates/witness-core/src/predicate.rs` (`WASMTIME_VERSION`) is
+now `"44"`. v0.11.0..v0.11.3 envelopes that report `"42"` are
+still valid — the field is provenance, not a correctness gate —
+but reviewers should expect to see `"44"` on freshly-built v0.11.4
+predicates.
+
+### Notes for v0.11.x and v0.12
+
+Unchanged. Deferred per the v0.11.4 planning conversation:
+
+- v0.11.5 — `br_table` MC/DC variant. Designing a hybrid that
+  surfaces both the textbook discriminant-bit math and the
+  per-arm reviewer view side-by-side, instead of forcing a
+  pick-one between rigour and readability.
+- v0.12.0 — per-DWARF-inlined-context decisions (Variant A:
+  per-context decision split). Bumps httparse 7/67 → much
+  higher next week.
+- v0.13 — mcdc-v2 schema with per-context row tagging
+  (Variant B), with deprecation window.
+- macOS Developer ID signing + notarisation — waiting on user
+  cert plumbing.
+- Predicate Rekor-binding — deferred to v0.13+.
+
 ## [0.11.3] — 2026-05-01
 
 Closes the v0.11.0 deferral on `witness new --all-exports`
