@@ -89,7 +89,59 @@
           "type": "array",
           "items": { "$ref": "#/$defs/RowView" }
         },
-        "status": { "$ref": "#/$defs/DecisionStatus" }
+        "status": { "$ref": "#/$defs/DecisionStatus" },
+        "br_table_audit": {
+          "description": "v0.11.5 — discriminant-bit MC/DC audit verdict for br_table-shape decisions. Present only when (a) the decision is br_table-shaped, (b) at least one row carried `raw_brvals` data (v0.11.5+ instrumentation). The per-condition `conditions` list above stays the headline reviewer view (per-arm coverage); this block carries the textbook MC/DC-over-the-discriminant proof that DO-178C objective 5.2 work needs.",
+          "$ref": "#/$defs/BrTableAudit"
+        }
+      }
+    },
+    "BrTableAudit": {
+      "type": "object",
+      "required": ["bit_width", "bits", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "bit_width": {
+          "description": "Number of discriminant bits the audit considered. Equals the position of the highest set bit across all observed discriminants, plus one (capped to 32, the wasm i32 width).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32
+        },
+        "bits": {
+          "description": "Per-bit verdict in ascending bit-position order (bit 0 first).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/BrTableBitVerdict" }
+        },
+        "status": {
+          "description": "Aggregate audit status.\n- `proved` — every bit position has an independent-effect witness pair.\n- `partial` — some bits proved, some have gaps.\n- `gap` — at least one observed bit has no proving pair.\n- `not_applicable` — decision was reached but no rows carried raw_brvals (pre-v0.11.5 instrumentation).",
+          "type": "string",
+          "enum": ["proved", "partial", "gap", "not_applicable"]
+        }
+      }
+    },
+    "BrTableBitVerdict": {
+      "type": "object",
+      "required": ["bit", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "bit": {
+          "description": "Bit position (0 = least-significant).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "status": {
+          "description": "Per-bit verdict.\n- `proved` — found a row pair where this bit differs and the firing arm differs.\n- `gap` — bit was observed but no proving pair.\n- `dead` — every observed discriminant agreed on this bit's value.",
+          "type": "string",
+          "enum": ["proved", "gap", "dead"]
+        },
+        "pair": {
+          "description": "Row pair witnessing independent effect of this bit. Present only when `status == proved`.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 2,
+          "maxItems": 2
+        }
       }
     },
     "DecisionStatus": {

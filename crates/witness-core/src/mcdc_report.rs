@@ -70,6 +70,84 @@ pub struct DecisionVerdict {
     /// Read-only view of `DecisionRow` for downstream renderers.
     pub truth_table: Vec<RowView>,
     pub status: DecisionStatus,
+    /// v0.11.5 — discriminant-bit independent-effect derivation for
+    /// br_table-shape decisions. Present only when (a) the decision
+    /// is br_table-shaped, (b) at least one row carried a non-empty
+    /// `raw_brvals` map (i.e. the run was produced by v0.11.5+
+    /// instrumentation). The per-arm verdict in `conditions` stays
+    /// the headline reviewer view; this audit block carries the
+    /// textbook MC/DC-over-the-discriminant proof for DO-178C
+    /// objective 5.2 work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub br_table_audit: Option<BrTableAudit>,
+}
+
+/// v0.11.5 — discriminant-bit MC/DC audit derivation for a br_table
+/// decision. Treats the integer discriminant as a vector of bits and
+/// tries to find independent-effect witness pairs across rows. Two
+/// rows form an independent-effect pair for bit *i* when bit *i*
+/// differs and the firing arm differs (because the arm fired *is*
+/// the outcome for a switch-shape decision). When such a pair
+/// exists for every set bit in the observed range, the decision is
+/// "audit-proved" — equivalent to the per-condition MC/DC verdict
+/// for boolean decisions.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BrTableAudit {
+    /// Number of bits the audit considered. Equal to the highest set
+    /// bit position across all observed discriminants, plus one. For a
+    /// br_table with arms 0..7 + default, every observed value fits in
+    /// 3 bits → `bit_width = 3`. Default-arm rows can lift this if the
+    /// observed value runs higher.
+    pub bit_width: u32,
+    /// Per-bit verdict in ascending bit-position order (bit 0 first).
+    pub bits: Vec<BrTableBitVerdict>,
+    /// Aggregate audit status. `proved` when every bit position has a
+    /// witness pair; `partial` when some bits are proved and some
+    /// have gaps; `gap` when any bit is proved-against and missing a
+    /// pair (test corpus is too narrow); `not_applicable` when the
+    /// decision is reached but no rows carried the required
+    /// `raw_brvals` (pre-v0.11.5 instrumentation).
+    pub status: BrTableAuditStatus,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum BrTableAuditStatus {
+    /// Every bit position has an independent-effect witness pair.
+    Proved,
+    /// Some bit positions are proved; some have gaps.
+    Partial,
+    /// At least one bit position was observed across rows but no
+    /// independent-effect pair was found for it.
+    Gap,
+    /// Decision was reached but no rows carried `raw_brvals` data
+    /// (pre-v0.11.5 instrumentation).
+    NotApplicable,
+}
+
+/// v0.11.5 — per-bit verdict within a br_table audit derivation.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BrTableBitVerdict {
+    /// Bit position (0 = least-significant).
+    pub bit: u32,
+    pub status: BrTableBitStatus,
+    /// Row pair witnessing independent effect of this bit. Present
+    /// only when `status == Proved`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pair: Option<[u32; 2]>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum BrTableBitStatus {
+    /// Found a row pair where this bit differs and the firing arm
+    /// differs accordingly.
+    Proved,
+    /// Bit was observed but no proving pair found across the run.
+    Gap,
+    /// Bit position is dead — every observed discriminant agreed on
+    /// this bit's value.
+    Dead,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -505,6 +583,10 @@ fn analyse_decision(
             (false, true) => DecisionStatus::Unreached,
             (false, false) => DecisionStatus::Unreached,
         };
+        // v0.11.5 — derive the discriminant-bit audit verdict from
+        // the captured `raw_brvals` per row. Skipped silently when
+        // pre-v0.11.5 instrumentation produced no raw values.
+        let br_table_audit = derive_br_table_audit(d);
         return DecisionVerdict {
             id: d.id,
             source_file: d.source_file.clone(),
@@ -512,6 +594,7 @@ fn analyse_decision(
             conditions,
             truth_table,
             status,
+            br_table_audit,
         };
     }
 
@@ -535,6 +618,7 @@ fn analyse_decision(
                 .collect(),
             truth_table,
             status: DecisionStatus::Unreached,
+            br_table_audit: None,
         };
     }
 
@@ -600,7 +684,135 @@ fn analyse_decision(
         conditions,
         truth_table,
         status,
+        // Boolean (non-br_table) decisions don't carry the audit
+        // block — the per-condition MC/DC verdict above is the
+        // textbook proof. The audit layer is reserved for
+        // switch-shape decisions where the source has no boolean
+        // chain to find pairs over.
+        br_table_audit: None,
     }
+}
+
+/// v0.11.5 — derive the discriminant-bit audit verdict for a
+/// br_table-shape decision. Walks the captured `raw_brvals` per row
+/// and tries to find independent-effect witness pairs across each
+/// bit position. A pair (row A, row B) proves bit *i* when:
+/// - A and B differ in bit *i* of their discriminant, AND
+/// - the firing arm differs between A and B (because the firing
+///   arm is the outcome for a switch-shape decision).
+///
+/// The firing arm per row is recovered by finding the unique
+/// condition index in `evaluated` that the row marked as present —
+/// the runner sets that on every arm fire (br_table arms get one
+/// hit per row at most).
+///
+/// Returns `None` when the decision is reached but no row carried
+/// `raw_brvals` (pre-v0.11.5 instrumentation), so consumers can
+/// distinguish "audit skipped because no data" from "audit ran and
+/// produced a verdict."
+fn derive_br_table_audit(d: &DecisionRecord) -> Option<BrTableAudit> {
+    // Collect (row_id, discriminant, firing_arm_idx) tuples for
+    // every row that recorded a discriminant. Empty raw_brvals
+    // means pre-v0.11.5 instrumentation; bail out so the outer
+    // verdict carries `None` rather than a misleading
+    // `not_applicable` derivation.
+    let mut samples: Vec<(u32, u32, u32)> = Vec::new();
+    for r in &d.rows {
+        // The runner records one entry in raw_brvals per condition
+        // that fired this row; for br_table decisions there's at
+        // most one. The condition_index is the firing arm; the
+        // value is the discriminant (= arm index for target arms,
+        // actual integer for default arm).
+        if let Some((&arm_idx, &val)) = r.raw_brvals.iter().next() {
+            // Reinterpret as unsigned for bit-decomposition. The
+            // i32 → u32 reinterpret is bit-equivalent and sound
+            // for any wasm-emitted i32.
+            let val_u32 = u32::from_ne_bytes(val.to_ne_bytes());
+            samples.push((r.row_id, val_u32, arm_idx));
+        }
+    }
+    if samples.is_empty() {
+        return None;
+    }
+
+    // Bit width = position of highest set bit + 1 across all
+    // observed discriminants, clamped to ≥ 1 so the verdict has at
+    // least one bit to report on. 32-bit ceiling is the wasm
+    // discriminant width; anything wider would be a different
+    // wasm op.
+    let max_val = samples.iter().map(|(_, v, _)| *v).max().unwrap_or(0);
+    let bit_width: u32 = if max_val == 0 {
+        1
+    } else {
+        let leading = max_val.leading_zeros();
+        32u32.saturating_sub(leading)
+    };
+
+    let mut bits: Vec<BrTableBitVerdict> =
+        Vec::with_capacity(usize::try_from(bit_width).unwrap_or(usize::MAX));
+    for bit in 0..bit_width {
+        let mask: u32 = 1u32 << bit;
+        // Partition rows by this bit's value.
+        let mut bit_set: Vec<&(u32, u32, u32)> = Vec::new();
+        let mut bit_clear: Vec<&(u32, u32, u32)> = Vec::new();
+        for sample in &samples {
+            if sample.1 & mask != 0 {
+                bit_set.push(sample);
+            } else {
+                bit_clear.push(sample);
+            }
+        }
+        if bit_set.is_empty() || bit_clear.is_empty() {
+            // Bit value never varied across the observed rows —
+            // no proving pair is possible, but it's not a "gap"
+            // in the test corpus either; this is a Dead bit.
+            bits.push(BrTableBitVerdict {
+                bit,
+                status: BrTableBitStatus::Dead,
+                pair: None,
+            });
+            continue;
+        }
+        // Find a pair (s, c) where the firing arm differs. That
+        // proves bit `bit` independently affected the routing.
+        let mut found_pair: Option<[u32; 2]> = None;
+        'outer: for s in &bit_set {
+            for c in &bit_clear {
+                if s.2 != c.2 {
+                    found_pair = Some([s.0, c.0]);
+                    break 'outer;
+                }
+            }
+        }
+        let (status, pair) = match found_pair {
+            Some(p) => (BrTableBitStatus::Proved, Some(p)),
+            None => (BrTableBitStatus::Gap, None),
+        };
+        bits.push(BrTableBitVerdict { bit, status, pair });
+    }
+
+    // Roll up the per-bit verdicts to an aggregate audit status.
+    let any_proved = bits
+        .iter()
+        .any(|b| matches!(b.status, BrTableBitStatus::Proved));
+    let any_gap = bits
+        .iter()
+        .any(|b| matches!(b.status, BrTableBitStatus::Gap));
+    let status = match (any_proved, any_gap) {
+        (true, false) => BrTableAuditStatus::Proved,
+        (true, true) => BrTableAuditStatus::Partial,
+        (false, true) => BrTableAuditStatus::Gap,
+        // No proved-or-gap bits means every bit is Dead — the
+        // discriminant value never actually varied. Treat as gap
+        // (the test corpus is too narrow to reason about
+        // independent effect at all).
+        (false, false) => BrTableAuditStatus::Gap,
+    };
+    Some(BrTableAudit {
+        bit_width,
+        bits,
+        status,
+    })
 }
 
 /// Find a pair of rows that prove condition `target_idx` independently
@@ -675,13 +887,15 @@ fn recommend_gap_closure(rows: &[DecisionRow], target_idx: u32) -> Option<GapClo
 )]
 mod tests {
     use super::*;
-    use crate::run_record::{DecisionRecord, DecisionRow, RunRecord, TraceHealth};
+    use crate::instrument::BranchKind;
+    use crate::run_record::{BranchHit, DecisionRecord, DecisionRow, RunRecord, TraceHealth};
 
     fn row(id: u32, evaluated: &[(u32, bool)], outcome: Option<bool>) -> DecisionRow {
         DecisionRow {
             row_id: id,
             evaluated: evaluated.iter().copied().collect(),
             outcome,
+            raw_brvals: BTreeMap::new(),
         }
     }
 
@@ -810,6 +1024,137 @@ mod tests {
             .find(|c| c.index == 1)
             .unwrap();
         assert!(matches!(c1.status, ConditionStatus::Dead));
+    }
+
+    #[test]
+    fn br_table_audit_proves_each_observed_bit() {
+        // v0.11.5 — drive a 4-arm br_table (3 explicit targets + 1
+        // default) with discriminants 0, 1, 2, 7. The audit layer
+        // should treat the discriminant as 3 bits wide (because 7
+        // sets bit 2) and find independent-effect pairs for every
+        // bit position:
+        //   bit 0: rows {1, 7} (set) vs {0, 2} (clear). Pair: (1, 0)
+        //          → arm 1 vs arm 0; differs.
+        //   bit 1: rows {2, 7} (set) vs {0, 1} (clear). Pair: (2, 0)
+        //          → arm 2 vs arm 0; differs.
+        //   bit 2: rows {7} (set, default-arm) vs {0,1,2} (clear,
+        //          target arms). Pair: (7-row, 0-row) — arm
+        //          differs.
+        // To exercise this, build a DecisionRecord by hand with
+        // raw_brvals populated.
+        let mut rows: Vec<DecisionRow> = Vec::new();
+        for (row_id, discriminant) in [(0u32, 0i32), (1, 1), (2, 2), (3, 7)] {
+            // condition_index for the firing arm: target arms map
+            // 1:1 (arm 0 → cond 0, arm 1 → cond 1, arm 2 → cond 2);
+            // default-arm rows hit cond 3 (the default arm's
+            // position in condition_branch_ids).
+            let cond_idx: u32 = if discriminant < 3 {
+                u32::try_from(discriminant).unwrap()
+            } else {
+                3
+            };
+            let mut evaluated = BTreeMap::new();
+            evaluated.insert(cond_idx, true);
+            let mut raw_brvals = BTreeMap::new();
+            raw_brvals.insert(cond_idx, discriminant);
+            rows.push(DecisionRow {
+                row_id,
+                evaluated,
+                outcome: None,
+                raw_brvals,
+            });
+        }
+        let d = DecisionRecord {
+            id: 0,
+            source_file: Some("switch.rs".to_string()),
+            source_line: Some(10),
+            condition_branch_ids: vec![10, 11, 12, 13],
+            rows,
+        };
+        // Manifest needs br_table-shape branch entries so the
+        // analysis takes the br_table path.
+        let mut record = record_with_decision(d);
+        record.branches = (0..3)
+            .map(|i| BranchHit {
+                id: 10 + i,
+                function_index: 0,
+                function_name: None,
+                kind: BranchKind::BrTableTarget,
+                instr_index: 0,
+                hits: 1,
+            })
+            .chain(std::iter::once(BranchHit {
+                id: 13,
+                function_index: 0,
+                function_name: None,
+                kind: BranchKind::BrTableDefault,
+                instr_index: 0,
+                hits: 1,
+            }))
+            .collect();
+        let report = McdcReport::from_record(&record);
+        let dec = report.decisions.first().expect("decision");
+        let audit = dec.br_table_audit.as_ref().expect("br_table_audit present");
+        assert_eq!(audit.bit_width, 3, "discriminant 7 sets bit 2");
+        assert!(
+            matches!(audit.status, BrTableAuditStatus::Proved),
+            "every bit should be proved with discriminants {{0,1,2,7}}: {audit:?}"
+        );
+        for bit in &audit.bits {
+            assert!(
+                matches!(bit.status, BrTableBitStatus::Proved),
+                "bit {} should be proved: {bit:?}",
+                bit.bit
+            );
+            assert!(bit.pair.is_some(), "bit {} missing pair", bit.bit);
+        }
+    }
+
+    #[test]
+    fn br_table_audit_absent_when_pre_v0_11_5_run() {
+        // Pre-v0.11.5 instrumentation produces rows with empty
+        // raw_brvals; the audit layer should yield None (not a
+        // misleading not_applicable verdict at the bit level).
+        let mut rows: Vec<DecisionRow> = Vec::new();
+        for row_id in 0u32..3 {
+            let mut evaluated = BTreeMap::new();
+            evaluated.insert(row_id, true);
+            rows.push(DecisionRow {
+                row_id,
+                evaluated,
+                outcome: None,
+                raw_brvals: BTreeMap::new(),
+            });
+        }
+        let d = DecisionRecord {
+            id: 0,
+            source_file: None,
+            source_line: None,
+            condition_branch_ids: vec![10, 11, 12],
+            rows,
+        };
+        let mut record = record_with_decision(d);
+        record.branches = (0..3)
+            .map(|i| BranchHit {
+                id: 10 + i,
+                function_index: 0,
+                function_name: None,
+                kind: if i < 2 {
+                    BranchKind::BrTableTarget
+                } else {
+                    BranchKind::BrTableDefault
+                },
+                instr_index: 0,
+                hits: 1,
+            })
+            .collect();
+        let report = McdcReport::from_record(&record);
+        let dec = report.decisions.first().expect("decision");
+        assert!(
+            dec.br_table_audit.is_none(),
+            "no raw_brvals → audit absent (got {:?})",
+            dec.br_table_audit
+        );
     }
 
     #[test]

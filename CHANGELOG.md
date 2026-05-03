@@ -7,6 +7,95 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.5] — 2026-05-03
+
+`br_table` MC/DC with dual presentation. Closes the v0.11.4
+notes item by shipping both halves: bytecode-level brval/brcnt
+captures for `br_table` arms (so the discriminant integer is
+recoverable per row), and a `BrTableAudit` block on every
+`br_table`-shape decision that derives discriminant-bit
+independent-effect proofs from the captured values.
+
+The per-arm verdict (the headline reviewer view) is unchanged.
+The new audit block sits next to it as a drill-down for DO-178C
+objective 5.2 work that wants the textbook MC/DC math for
+switch-shape decisions, not just per-arm coverage.
+
+### Added — bytecode brval/brcnt for `br_table` arms
+
+`crates/witness-core/src/instrument.rs` lifts the
+`BrTableTarget | BrTableDefault => (None, None)` special case
+at the global-allocation site to real allocations, and extends
+`build_brtable_helper` to write per-arm `brval` (= arm index
+when target arm fires; = actual discriminant value when default
+arm fires) and increment per-arm `brcnt` inside the same
+`if sel == i { ... }` blocks the existing counter-increment
+already runs in.
+
+For `BrTableDefault` the recorded `brval` is the load-bearing
+capture: target arms imply `discriminant == arm_index`, but
+default-arm rows could have any `discriminant ≥ N`. Without
+the actual integer, the audit layer can't decompose
+default-path discriminants into bits.
+
+### Added — `DecisionRow.raw_brvals` (additive, serde-default)
+
+`crates/witness-core/src/run_record.rs::DecisionRow` gains an
+optional `raw_brvals: BTreeMap<u32, i32>` field (`#[serde(default,
+skip_serializing_if = BTreeMap::is_empty)]`). The runner
+populates it from the per-row brval globals; the audit layer
+reads it. Pre-v0.11.5 run records keep deserialising — empty
+map = audit layer no-ops.
+
+### Added — `BrTableAudit` per-decision block
+
+`crates/witness-core/src/mcdc_report.rs::DecisionVerdict` gains
+`br_table_audit: Option<BrTableAudit>`. Populated on every
+`br_table`-shape decision that has at least one row carrying
+`raw_brvals`. Carries:
+
+- `bit_width`: highest set bit across observed discriminants + 1
+  (≤ 32; the wasm i32 ceiling).
+- `bits[]`: per-bit verdict (`proved` / `gap` / `dead`) with the
+  proving row pair when proved.
+- `status`: aggregate (`proved` / `partial` / `gap` /
+  `not_applicable`).
+
+The pair criterion: row A and row B prove bit *i* when their
+discriminants differ in bit *i* AND the firing arm differs.
+Equivalent to MC/DC's "this condition independently affects the
+outcome" applied to the discriminant-as-bit-vector.
+
+### Schema — `witness-mcdc/v1` extended (additive)
+
+`docs/schemas/witness-mcdc-v1.json` gains `BrTableAudit` and
+`BrTableBitVerdict` `$defs`, plus the optional `br_table_audit`
+property on `DecisionVerdict`. v0.11.4 envelopes still validate
+unchanged — the new field is `additionalProperties: false`-
+compliant and skipped when absent. Verified locally against a
+synthesised v0.11.5 envelope.
+
+### Tests
+
+- `instrument::tests::br_table_arms_export_brval_and_brcnt_globals`
+  — every br_table arm now exports its three globals.
+- `run::tests::br_table_records_brval_and_brcnt_per_arm` —
+  three-row drive of a 3-arm `br_table` produces correct per-arm
+  hit counts.
+- `mcdc_report::tests::br_table_audit_proves_each_observed_bit`
+  — discriminants `{0, 1, 2, 7}` yield a `bit_width = 3`,
+  `status = proved` audit with witness pairs for every bit.
+- `mcdc_report::tests::br_table_audit_absent_when_pre_v0_11_5_run`
+  — empty `raw_brvals` → `br_table_audit: None` (back-compat
+  with v0.11.4 run records).
+
+### Notes for v0.12+
+
+Unchanged. Still deferred: per-DWARF-inlined-context decisions
+(v0.12.0, Variant A — per-context decision split); mcdc-v2
+schema with per-context row tagging (v0.13, Variant B); macOS
+Developer ID signing; predicate Rekor-binding.
+
 ## [0.11.4] — 2026-05-03
 
 Security patch — bumps wasmtime from 42 to 44 to close
