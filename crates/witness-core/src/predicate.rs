@@ -182,14 +182,18 @@ impl Toolchain {
     }
 }
 
-/// Compile-time wasmtime version. v0.10.x pinned wasmtime 42 in
-/// `[workspace.dependencies]`; we report what witness itself was
-/// built against. Embedded vs harness mode doesn't matter — the
-/// claim is "the runner that produced this run record was wasmtime
-/// 42-compatible." Harness-mode runs aren't *executed* under
-/// wasmtime but they consume the same manifest schema wasmtime
-/// would have, so the version is still useful provenance.
-const WASMTIME_VERSION: &str = "42";
+/// Compile-time wasmtime version. v0.11.4 bumped to 44 in
+/// `[workspace.dependencies]` to close RUSTSEC-2026-0114 (panic
+/// when allocating a table exceeding the host's address space —
+/// patched in `>= 43.0.2, < 44` and `>= 44.0.1`). v0.10.x and
+/// v0.11.0..v0.11.3 ran under wasmtime 42; we report what
+/// witness itself was built against. Embedded vs harness mode
+/// doesn't matter — the claim is "the runner that produced this
+/// run record was wasmtime $VERSION-compatible." Harness-mode
+/// runs aren't *executed* under wasmtime but they consume the
+/// same manifest schema wasmtime would have, so the version is
+/// still useful provenance.
+const WASMTIME_VERSION: &str = "44";
 
 /// Best-effort `rustc --version` lookup. Returns `None` when rustc
 /// isn't installed on PATH or the call fails for any reason — this
