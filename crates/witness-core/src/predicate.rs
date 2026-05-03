@@ -842,6 +842,7 @@ mod tests {
             id: 0,
             source_file: Some("leap_year.rs".to_string()),
             source_line: Some(20),
+            inline_context: None,
             condition_branch_ids: vec![100, 101, 102],
             rows: vec![
                 row(0, &[(0, false), (2, false)], Some(false)),
@@ -854,6 +855,7 @@ mod tests {
             id: 1,
             source_file: Some("leap_year.rs".to_string()),
             source_line: Some(40),
+            inline_context: None,
             condition_branch_ids: vec![200, 201, 202],
             rows: vec![
                 row(0, &[(0, false), (2, false)], Some(false)),

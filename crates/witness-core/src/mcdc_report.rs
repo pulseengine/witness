@@ -66,6 +66,15 @@ pub struct DecisionVerdict {
     pub source_file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_line: Option<u32>,
+    /// v0.12.0 — inlined call-site context, when the source decision
+    /// was reconstructed from an inlined-subroutine instance. Lets
+    /// reviewers see "this Decision is `is_safe` inlined from
+    /// `validate.rs:5`" vs "...from `audit.rs:10`" — otherwise the
+    /// two split Decisions look identical at the source level. Absent
+    /// when the decision is at top level or DWARF didn't supply
+    /// inlining info.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_context: Option<crate::instrument::InlineContext>,
     pub conditions: Vec<ConditionVerdict>,
     /// Read-only view of `DecisionRow` for downstream renderers.
     pub truth_table: Vec<RowView>,
@@ -591,6 +600,7 @@ fn analyse_decision(
             id: d.id,
             source_file: d.source_file.clone(),
             source_line: d.source_line,
+            inline_context: d.inline_context.clone(),
             conditions,
             truth_table,
             status,
@@ -603,6 +613,7 @@ fn analyse_decision(
             id: d.id,
             source_file: d.source_file.clone(),
             source_line: d.source_line,
+            inline_context: d.inline_context.clone(),
             conditions: d
                 .condition_branch_ids
                 .iter()
@@ -681,6 +692,7 @@ fn analyse_decision(
         id: d.id,
         source_file: d.source_file.clone(),
         source_line: d.source_line,
+        inline_context: d.inline_context.clone(),
         conditions,
         truth_table,
         status,
@@ -919,6 +931,7 @@ mod tests {
             id: 0,
             source_file: Some("leap_year.rs".to_string()),
             source_line: Some(20),
+            inline_context: None,
             condition_branch_ids: vec![100, 101, 102],
             rows: vec![
                 row(0, &[(0, false), (2, false)], Some(false)),
@@ -948,6 +961,7 @@ mod tests {
             id: 0,
             source_file: None,
             source_line: None,
+            inline_context: None,
             condition_branch_ids: vec![10, 11],
             rows: vec![
                 row(0, &[(0, true), (1, false)], Some(false)),
@@ -966,6 +980,7 @@ mod tests {
             id: 0,
             source_file: None,
             source_line: None,
+            inline_context: None,
             condition_branch_ids: vec![100, 101, 102],
             rows: vec![
                 row(0, &[(0, false), (2, false)], Some(false)),
@@ -991,6 +1006,7 @@ mod tests {
             id: 0,
             source_file: None,
             source_line: None,
+            inline_context: None,
             condition_branch_ids: vec![10, 11],
             rows: vec![],
         };
@@ -1011,6 +1027,7 @@ mod tests {
             id: 0,
             source_file: None,
             source_line: None,
+            inline_context: None,
             condition_branch_ids: vec![100, 101, 102],
             rows: vec![
                 row(0, &[(0, false), (2, false)], Some(false)),
@@ -1068,6 +1085,7 @@ mod tests {
             id: 0,
             source_file: Some("switch.rs".to_string()),
             source_line: Some(10),
+            inline_context: None,
             condition_branch_ids: vec![10, 11, 12, 13],
             rows,
         };
@@ -1130,6 +1148,7 @@ mod tests {
             id: 0,
             source_file: None,
             source_line: None,
+            inline_context: None,
             condition_branch_ids: vec![10, 11, 12],
             rows,
         };
@@ -1163,6 +1182,7 @@ mod tests {
             id: 7,
             source_file: Some("x.rs".to_string()),
             source_line: Some(99),
+            inline_context: None,
             condition_branch_ids: vec![1, 2],
             rows: vec![
                 row(0, &[(0, true), (1, true)], Some(true)),

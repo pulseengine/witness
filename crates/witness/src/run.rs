@@ -368,6 +368,8 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     let mut record = build_run_record(&manifest, &counter_values, options.module, invoked);
 
     // v0.6.1: attach per-decision row tables and trace health.
+    // v0.12.0: also propagate `inline_context` from the manifest so
+    // reporters can attribute split decisions to their call sites.
     let mut decisions: Vec<DecisionRecord> = Vec::with_capacity(manifest.decisions.len());
     for d in &manifest.decisions {
         let rows = rows_per_decision.remove(&d.id).unwrap_or_default();
@@ -375,6 +377,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
             id: d.id,
             source_file: d.source_file.clone(),
             source_line: d.source_line,
+            inline_context: d.inline_context.clone(),
             condition_branch_ids: d.conditions.clone(),
             rows,
         });
@@ -825,6 +828,7 @@ fn harness_v2_to_run_record(
             id: d.id,
             source_file: d.source_file.clone(),
             source_line: d.source_line,
+            inline_context: d.inline_context.clone(),
             condition_branch_ids: d.conditions.clone(),
             rows: drs,
         });

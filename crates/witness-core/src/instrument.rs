@@ -250,6 +250,46 @@ pub struct Decision {
     /// belongs to a different logical scope).
     #[serde(default, skip_serializing_if = "ChainKind::is_unknown")]
     pub chain_kind: ChainKind,
+    /// v0.12.0 — DWARF inlined-call-site context this decision was
+    /// reconstructed under. When the same source predicate is inlined
+    /// at multiple call sites within one function, the v0.11 path
+    /// conflated rows from every call site into one Decision —
+    /// pair-finding then failed because rows from distinct contexts
+    /// got compared. v0.12.0 walks `DW_TAG_inlined_subroutine`
+    /// entries and uses the call site's `(call_file, call_line)` as
+    /// part of the decision key, so each call site gets its own
+    /// Decision and its own truth table.
+    ///
+    /// Absent (`None`) when the decision is at top-level (no
+    /// inlining detected) or DWARF didn't provide the data.
+    /// Pre-v0.12 manifests stay valid via `#[serde(default)]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_context: Option<InlineContext>,
+}
+
+/// v0.12.0 — call-site context for an inlined source decision. The
+/// pair `(call_file, call_line)` names *where* in the calling
+/// function the inlined predicate was instantiated. Two Decisions
+/// with the same `(source_file, source_line)` but different
+/// `inline_context` represent two physically-distinct call sites
+/// that happen to share the same source-level predicate.
+///
+/// For deeply nested inlines, `call_file`/`call_line` reflect the
+/// *innermost enclosing* inlined subroutine — the single hop above
+/// the source location. v0.13 will extend to full chain tracking
+/// via the per-context row tagging schema (Variant B).
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct InlineContext {
+    /// Source file containing the inlined call site (the *caller*'s
+    /// file). When DWARF doesn't supply `DW_AT_call_file` for the
+    /// inlined subroutine, falls back to the unit's primary
+    /// compilation file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_file: Option<String>,
+    /// Source line of the inlined call site. Always populated when
+    /// the inline context exists at all (the line discriminator is
+    /// what splits the otherwise-conflated decisions).
+    pub call_line: u32,
 }
 
 /// v0.8 — classification of a decision's br_if chain at wasm level.

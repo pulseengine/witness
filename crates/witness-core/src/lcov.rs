@@ -227,6 +227,7 @@ mod tests {
                 source_file: Some("src/lib.rs".to_string()),
                 source_line: Some(42),
                 chain_kind: crate::instrument::ChainKind::default(),
+                inline_context: None,
             }],
         }
     }

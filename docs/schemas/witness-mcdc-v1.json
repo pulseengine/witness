@@ -79,6 +79,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "inline_context": {
+          "description": "v0.12.0 — inlined call-site context. When the source decision was reconstructed from an inlined-subroutine instance (e.g. `is_safe()` inlined from `validate.rs:5`), this field carries the call site coordinates so reviewers can disambiguate two Decisions that share the same `source_file` / `source_line` but originate from different physical call sites. Absent when the decision is at top level or DWARF didn't supply inlining info.",
+          "$ref": "#/$defs/InlineContext"
+        },
         "conditions": {
           "description": "Per-condition verdicts in evaluation order (index 0..N-1).",
           "type": "array",
@@ -93,6 +97,22 @@
         "br_table_audit": {
           "description": "v0.11.5 — discriminant-bit MC/DC audit verdict for br_table-shape decisions. Present only when (a) the decision is br_table-shaped, (b) at least one row carried `raw_brvals` data (v0.11.5+ instrumentation). The per-condition `conditions` list above stays the headline reviewer view (per-arm coverage); this block carries the textbook MC/DC-over-the-discriminant proof that DO-178C objective 5.2 work needs.",
           "$ref": "#/$defs/BrTableAudit"
+        }
+      }
+    },
+    "InlineContext": {
+      "type": "object",
+      "required": ["call_line"],
+      "additionalProperties": false,
+      "properties": {
+        "call_file": {
+          "description": "Source file containing the inlined call site (the caller's file). Absent when DWARF didn't supply DW_AT_call_file for the inlined subroutine.",
+          "type": "string"
+        },
+        "call_line": {
+          "description": "Source line of the inlined call site (1-based). Always present when the inline context exists at all — the line discriminator is what splits otherwise-conflated decisions.",
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
