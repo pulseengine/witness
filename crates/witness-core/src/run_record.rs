@@ -52,6 +52,15 @@ pub struct DecisionRecord {
     pub source_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_line: Option<u32>,
+    /// v0.12.0 — DWARF inlined-call-site context this decision was
+    /// reconstructed under. Mirrors `Manifest::Decision::inline_context`
+    /// (the manifest is the source of truth at instrument time; this
+    /// field plumbs it through into the run record so reporters can
+    /// attribute decisions to call sites without re-reading the
+    /// manifest). Pre-v0.12 records keep deserialising via
+    /// `#[serde(default)]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_context: Option<crate::instrument::InlineContext>,
     pub condition_branch_ids: Vec<u32>,
     pub rows: Vec<DecisionRow>,
 }

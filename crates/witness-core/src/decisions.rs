@@ -38,7 +38,7 @@
 //!   handling.
 
 use crate::Result;
-use crate::instrument::{BranchEntry, BranchKind, Decision};
+use crate::instrument::{BranchEntry, BranchKind, Decision, InlineContext};
 use gimli::{EndianSlice, LittleEndian};
 use std::collections::BTreeMap;
 
@@ -63,7 +63,14 @@ pub fn reconstruct_decisions(wasm_bytes: &[u8], branches: &[BranchEntry]) -> Res
         return Ok(Vec::new());
     }
 
-    Ok(group_into_decisions(branches, &line_map))
+    // v0.12.0 — inline-context map: byte_offset → InlineContext. Built
+    // by walking the DIE tree for `DW_TAG_inlined_subroutine` entries
+    // and recording each entry's `(call_file, call_line)` against its
+    // address range. Empty map (no inlines or DWARF reader error) is
+    // a no-op — `group_into_decisions` falls back to v0.11 keying.
+    let inline_map = build_inline_map(&dwarf_sections).unwrap_or_default();
+
+    Ok(group_into_decisions(branches, &line_map, &inline_map))
 }
 
 /// DWARF custom sections lifted out of a Wasm module.
@@ -243,22 +250,39 @@ pub const MAX_DECISION_LINE_SPAN: u32 = 10;
 /// emission order from `walk_collect`), which preserves the
 /// short-circuit chain's natural sequence. A new cluster starts when
 /// the next br_if's line falls outside the current cluster's span.
-fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Decision> {
-    // Step 1: resolve each br_if's (function, file, line). Drop entries
-    // missing byte_offset (synthetic) or with no DWARF mapping.
-    type Resolved<'a> = (u32, String, u32, &'a BranchEntry);
+fn group_into_decisions(
+    branches: &[BranchEntry],
+    line_map: &LineMap,
+    inline_map: &InlineMap,
+) -> Vec<Decision> {
+    // Step 1: resolve each br_if's (function, file, line, inline_context).
+    // v0.12.0 — inline_context discriminates Decisions whose source
+    // location matches but whose calling site differs (e.g. a single
+    // `is_safe()` predicate inlined twice in `validate()` at different
+    // lines). Drop entries missing byte_offset or with no DWARF
+    // mapping; pass `None` for inline_context when not in any
+    // inlined range (top-level br_if).
+    type Resolved<'a> = (u32, String, u32, Option<InlineContext>, &'a BranchEntry);
     let mut resolved: Vec<Resolved<'_>> = Vec::new();
     let mut brtable_resolved: Vec<Resolved<'_>> = Vec::new();
     for entry in branches {
         let Some(byte_offset) = entry.byte_offset else {
             continue;
         };
-        let Some(loc) = lookup_line(line_map, u64::from(byte_offset)) else {
+        let addr = u64::from(byte_offset);
+        let Some(loc) = lookup_line(line_map, addr) else {
             continue;
         };
+        let inline_ctx = lookup_inline(inline_map, addr).cloned();
         match entry.kind {
             BranchKind::BrIf => {
-                resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
+                resolved.push((
+                    entry.function_index,
+                    loc.file.clone(),
+                    loc.line,
+                    inline_ctx,
+                    entry,
+                ));
             }
             // v0.9.7 — br_table entries from the same match arm
             // grouped by (function, file, line). All targets of one
@@ -266,7 +290,13 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
             // hand-written code; macro-generated tables may merge with
             // adjacent code, which is the same trade-off `BrIf` makes.
             BranchKind::BrTableTarget | BranchKind::BrTableDefault => {
-                brtable_resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
+                brtable_resolved.push((
+                    entry.function_index,
+                    loc.file.clone(),
+                    loc.line,
+                    inline_ctx,
+                    entry,
+                ));
             }
             // IfThen / IfElse counters are emitted by the if/else
             // lowering and don't represent independent conditions in
@@ -276,13 +306,19 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
         }
     }
 
-    // Step 2: bucket by (function, file). Within each bucket, br_ifs
-    // are already in branch-id order because `branches` is, and we
-    // preserved that order in `resolved`.
-    let mut by_func_file: BTreeMap<(u32, String), Vec<(u32, &BranchEntry)>> = BTreeMap::new();
-    for (func, file, line, entry) in resolved {
+    // Step 2: bucket by (function, file, inline_context). v0.12.0 —
+    // adding inline_context here is the load-bearing change. Two
+    // sets of br_ifs from distinct inlined call sites no longer
+    // collapse into one Decision; each call site gets its own
+    // bucket and its own pair-finding scope. Within each bucket,
+    // br_ifs are in branch-id order (= source-walk order from
+    // `walk_collect`).
+    type BrIfBucketKey = (u32, String, Option<InlineContext>);
+    type BrIfBucketEntry<'a> = Vec<(u32, &'a BranchEntry)>;
+    let mut by_func_file: BTreeMap<BrIfBucketKey, BrIfBucketEntry<'_>> = BTreeMap::new();
+    for (func, file, line, inline_ctx, entry) in resolved {
         by_func_file
-            .entry((func, file))
+            .entry((func, file, inline_ctx))
             .or_default()
             .push((line, entry));
     }
@@ -290,7 +326,7 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
     let mut out: Vec<Decision> = Vec::new();
     let mut next_decision_id: u32 = 0;
 
-    for ((_func, file), entries) in by_func_file {
+    for ((_func, file, inline_ctx), entries) in by_func_file {
         let mut cluster: Vec<&BranchEntry> = Vec::new();
         let mut cluster_min: u32 = u32::MAX;
         let mut cluster_max: u32 = 0;
@@ -299,7 +335,8 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
                      cluster_min: u32,
                      next_decision_id: &mut u32,
                      out: &mut Vec<Decision>,
-                     file: &str| {
+                     file: &str,
+                     inline_ctx: &Option<InlineContext>| {
             if cluster.len() >= 2 {
                 let conditions: Vec<u32> = cluster.iter().map(|e| e.id).collect();
                 out.push(Decision {
@@ -316,6 +353,7 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
                     // ChainKind::Unknown here keeps decisions.rs free of
                     // walrus dependencies.
                     chain_kind: crate::instrument::ChainKind::default(),
+                    inline_context: inline_ctx.clone(),
                 });
                 *next_decision_id = next_decision_id.saturating_add(1);
             }
@@ -342,6 +380,7 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
                     &mut next_decision_id,
                     &mut out,
                     &file,
+                    &inline_ctx,
                 );
                 cluster.push(entry);
                 cluster_min = line;
@@ -354,22 +393,28 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
             &mut next_decision_id,
             &mut out,
             &file,
+            &inline_ctx,
         );
     }
 
     // v0.9.7 — second pass: group BrTable* entries by (function, file,
-    // line). Each group becomes one Decision representing a `match`
-    // expression's per-arm dispatch. Single-arm tables (= unreachable
+    // line). v0.12.0 — inline_context joins the key so the same
+    // `match` expression inlined at multiple call sites within one
+    // caller produces multiple Decisions (one per call site), each
+    // with its own per-arm hit counts. Single-arm tables (= unreachable
     // default-only or 1-arm) are emitted only when they contain >= 2
     // entries, mirroring the BrIf threshold.
-    let mut by_func_file_line: BTreeMap<(u32, String, u32), Vec<&BranchEntry>> = BTreeMap::new();
-    for (func, file, line, entry) in brtable_resolved {
+    let mut by_func_file_line: BTreeMap<
+        (u32, String, u32, Option<InlineContext>),
+        Vec<&BranchEntry>,
+    > = BTreeMap::new();
+    for (func, file, line, inline_ctx, entry) in brtable_resolved {
         by_func_file_line
-            .entry((func, file, line))
+            .entry((func, file, line, inline_ctx))
             .or_default()
             .push(entry);
     }
-    for ((_func, file, line), entries) in by_func_file_line {
+    for ((_func, file, line, inline_ctx), entries) in by_func_file_line {
         if entries.len() < 2 {
             continue;
         }
@@ -384,6 +429,7 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
             // derive-outcome-from-conditions path. Per-arm counters are
             // the truth-table view here.
             chain_kind: crate::instrument::ChainKind::default(),
+            inline_context: inline_ctx,
         });
         next_decision_id = next_decision_id.saturating_add(1);
     }
@@ -396,6 +442,185 @@ fn group_into_decisions(branches: &[BranchEntry], line_map: &LineMap) -> Vec<Dec
 /// offset uses the largest row address less than or equal to the query.
 fn lookup_line(map: &LineMap, addr: u64) -> Option<&LineLocation> {
     map.range(..=addr).next_back().map(|(_, v)| v)
+}
+
+/// v0.12.0 — interval-style map of inlined-subroutine address ranges
+/// to their call site. Keyed by `low_pc` (the start of the inlined
+/// subroutine's address range); the value carries `high_pc` (the
+/// exclusive end) plus the call site `(call_file, call_line)`. A
+/// `BTreeMap` keyed on `low_pc` lets us range-query the largest entry
+/// whose `low_pc <= addr`, then test `addr < high_pc` for membership.
+type InlineMap = BTreeMap<u64, InlineEntry>;
+
+#[derive(Debug, Clone)]
+struct InlineEntry {
+    high_pc_exclusive: u64,
+    context: InlineContext,
+}
+
+/// Walk the DIE tree of every compilation unit and collect every
+/// `DW_TAG_inlined_subroutine` entry's address range + call site.
+/// Returns the empty map on any DWARF reader error (back-compat —
+/// the caller treats it as "no inlines detected").
+///
+/// v0.12.0 supports the simple form: `DW_AT_low_pc` + `DW_AT_high_pc`
+/// (with high_pc as offset relative to low_pc, the usual rustc
+/// emission). Inlined entries that use `DW_AT_ranges` (multi-range
+/// scattered inlines, less common) are skipped silently — those
+/// fall back to the v0.11 conflated-decision behaviour, no
+/// regression. v0.13's per-context row tagging (Variant B) will
+/// pick those up via DW_AT_ranges traversal.
+fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineMap, gimli::Error> {
+    let dwarf = build_dwarf(sections);
+    let mut units = dwarf.units();
+    let mut out: InlineMap = BTreeMap::new();
+
+    while let Some(header) = units.next()? {
+        let unit = dwarf.unit(header)?;
+        let unit_ref = unit.unit_ref(&dwarf);
+
+        // Build the unit-local file table once per unit so DW_AT_call_file
+        // (a line-program file index) can be resolved to a path string.
+        let unit_files = collect_unit_files(&unit_ref);
+
+        let mut entries = unit.entries();
+        while let Some((_depth, entry)) = entries.next_dfs()? {
+            if entry.tag() != gimli::constants::DW_TAG_inlined_subroutine {
+                continue;
+            }
+
+            let mut low_pc: Option<u64> = None;
+            let mut high_pc_form: Option<HighPcForm> = None;
+            let mut call_file_idx: Option<u64> = None;
+            let mut call_line: Option<u64> = None;
+
+            let mut attrs = entry.attrs();
+            while let Some(attr) = attrs.next()? {
+                match attr.name() {
+                    gimli::constants::DW_AT_low_pc => {
+                        if let gimli::AttributeValue::Addr(a) = attr.value() {
+                            low_pc = Some(a);
+                        }
+                    }
+                    gimli::constants::DW_AT_high_pc => {
+                        // Two encodings only: absolute address or
+                        // offset-from-low_pc. Other DWARF attribute
+                        // forms aren't legal for DW_AT_high_pc per
+                        // the standard, so silently ignore them.
+                        #[allow(clippy::wildcard_enum_match_arm)]
+                        match attr.value() {
+                            gimli::AttributeValue::Addr(a) => {
+                                high_pc_form = Some(HighPcForm::Addr(a));
+                            }
+                            gimli::AttributeValue::Udata(d) => {
+                                high_pc_form = Some(HighPcForm::Offset(d));
+                            }
+                            _ => {}
+                        }
+                    }
+                    gimli::constants::DW_AT_call_file => {
+                        if let Some(idx) = attr.udata_value() {
+                            call_file_idx = Some(idx);
+                        }
+                    }
+                    gimli::constants::DW_AT_call_line => {
+                        if let Some(n) = attr.udata_value() {
+                            call_line = Some(n);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Need both endpoints + a call line to be useful for
+            // decision-key splitting. Without `call_line` the
+            // inlined entry can't act as a discriminator.
+            let (Some(lo), Some(hpc), Some(line)) = (low_pc, high_pc_form, call_line) else {
+                continue;
+            };
+            let hi_excl = match hpc {
+                HighPcForm::Addr(a) => a,
+                HighPcForm::Offset(off) => lo.saturating_add(off),
+            };
+            if hi_excl <= lo {
+                continue;
+            }
+            let line_u32 = u32::try_from(line).unwrap_or(u32::MAX);
+            let call_file = call_file_idx
+                .and_then(|idx| usize::try_from(idx).ok())
+                .and_then(|idx| unit_files.get(idx).cloned());
+
+            // BTreeMap keyed on low_pc; later inlines at the same
+            // low_pc overwrite earlier ones. Rare; if it happens
+            // both ranges cover the same code so either is fine.
+            // For nested inlines, the DIE walker visits children
+            // after parents and OUR inner-most entry wins — which
+            // matches Variant A's semantics ("innermost call site
+            // discriminates").
+            out.insert(
+                lo,
+                InlineEntry {
+                    high_pc_exclusive: hi_excl,
+                    context: InlineContext {
+                        call_file,
+                        call_line: line_u32,
+                    },
+                },
+            );
+        }
+    }
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HighPcForm {
+    Addr(u64),
+    Offset(u64),
+}
+
+/// Collect a unit's line-program file table once, so DW_AT_call_file
+/// indices on `DW_TAG_inlined_subroutine` entries can be resolved to
+/// path strings. Index 0 is the unit's primary compilation file in
+/// DWARF v5; v4 uses 1-based indexing. Returns a flat Vec where
+/// `vec[idx]` is the path at file index `idx` (or empty string when
+/// resolution fails).
+fn collect_unit_files(unit_ref: &gimli::UnitRef<'_, EndianSlice<'_, LittleEndian>>) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    let Some(lp) = unit_ref.line_program.as_ref() else {
+        return files;
+    };
+    let header = lp.header();
+    // DWARF v5 file table is 0-based; v4 is 1-based with index 0
+    // representing the unit's primary file. Push entries verbatim
+    // and let callers index by what they read from DW_AT_call_file.
+    let file_count = header.file_names().len();
+    for i in 0..=file_count {
+        let path = header
+            .file(u64::try_from(i).unwrap_or(0))
+            .and_then(|f| {
+                unit_ref
+                    .attr_string(f.path_name())
+                    .ok()
+                    .and_then(|s| s.to_string().ok().map(str::to_owned))
+            })
+            .unwrap_or_default();
+        files.push(path);
+    }
+    files
+}
+
+/// Look up the inline context for a given byte offset. Returns the
+/// innermost inlined-subroutine entry whose address range covers
+/// `addr`, or `None` if the address is at top-level or outside any
+/// known inlined range. Pre-v0.12 behaviour (no inlines tracked)
+/// falls out of an empty `InlineMap`.
+fn lookup_inline(map: &InlineMap, addr: u64) -> Option<&InlineContext> {
+    let (_, entry) = map.range(..=addr).next_back()?;
+    if addr < entry.high_pc_exclusive {
+        Some(&entry.context)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -463,7 +688,7 @@ mod tests {
             },
         );
         let entries = vec![entry_with_offset(0, 10), entry_with_offset(1, 20)];
-        let decisions = group_into_decisions(&entries, &line_map);
+        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             1,
@@ -492,7 +717,7 @@ mod tests {
             },
         );
         let entries = vec![entry_with_offset(0, 10), entry_with_offset(1, 20)];
-        let decisions = group_into_decisions(&entries, &line_map);
+        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert!(
             decisions.is_empty(),
             "two singletons on different lines → no Decision (strict-per-br_if applies)"
@@ -520,7 +745,7 @@ mod tests {
         a.function_index = 0;
         let mut b = entry_with_offset(1, 20);
         b.function_index = 1;
-        let decisions = group_into_decisions(&[a, b], &line_map);
+        let decisions = group_into_decisions(&[a, b], &line_map, &InlineMap::new());
         // Same line, different functions → no shared decision.
         assert!(
             decisions.is_empty(),
@@ -568,7 +793,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let decisions = group_into_decisions(&entries, &line_map);
+        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             1,
@@ -620,7 +845,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let decisions = group_into_decisions(&entries, &line_map);
+        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             2,
@@ -655,5 +880,118 @@ mod tests {
         assert_eq!(lookup_line(&map, 20).unwrap().line, 1);
         // After all entries → the last one.
         assert_eq!(lookup_line(&map, 100).unwrap().line, 2);
+    }
+
+    /// v0.12.0 — the load-bearing test: two pairs of br_ifs whose
+    /// source location is identical (same file, same line, same
+    /// function) but whose inline_context differs (different
+    /// `(call_file, call_line)`) must produce TWO Decisions, not
+    /// one. This is the exact shape that motivates the v0.12.0
+    /// rework: a single source predicate inlined twice in one caller.
+    #[test]
+    fn group_into_decisions_splits_by_inline_context() {
+        // Source predicate at lib.rs:42, br_ifs at offsets {10, 20}
+        // for call site A, {30, 40} for call site B.
+        let mut line_map = LineMap::new();
+        for off in [10u64, 20, 30, 40] {
+            line_map.insert(
+                off,
+                LineLocation {
+                    file: "lib.rs".to_string(),
+                    line: 42,
+                },
+            );
+        }
+        // Inline map: offsets [10, 20) inlined from caller.rs:5;
+        // offsets [30, 40) inlined from caller.rs:10. Note ranges
+        // are right-open (high_pc_exclusive).
+        let mut inline_map = InlineMap::new();
+        inline_map.insert(
+            10,
+            InlineEntry {
+                high_pc_exclusive: 25,
+                context: InlineContext {
+                    call_file: Some("caller.rs".to_string()),
+                    call_line: 5,
+                },
+            },
+        );
+        inline_map.insert(
+            30,
+            InlineEntry {
+                high_pc_exclusive: 45,
+                context: InlineContext {
+                    call_file: Some("caller.rs".to_string()),
+                    call_line: 10,
+                },
+            },
+        );
+        let entries = vec![
+            entry_with_offset(0, 10),
+            entry_with_offset(1, 20),
+            entry_with_offset(2, 30),
+            entry_with_offset(3, 40),
+        ];
+        let decisions = group_into_decisions(&entries, &line_map, &inline_map);
+        assert_eq!(
+            decisions.len(),
+            2,
+            "two distinct inline contexts → two Decisions, not one (got {decisions:?})"
+        );
+        // Both Decisions land at the same source line (the inlined
+        // predicate's line) but carry distinct inline_context values.
+        let lines: Vec<u32> = decisions.iter().filter_map(|d| d.source_line).collect();
+        assert_eq!(lines, vec![42, 42], "both at lib.rs:42");
+        let call_lines: Vec<u32> = decisions
+            .iter()
+            .filter_map(|d| d.inline_context.as_ref().map(|ic| ic.call_line))
+            .collect();
+        // BTreeMap sort order: call_line 5 < call_line 10.
+        assert_eq!(
+            call_lines,
+            vec![5, 10],
+            "decisions discriminated by their inline call_line"
+        );
+        // Each Decision contains exactly the two br_ifs from one
+        // inlined call site.
+        assert_eq!(decisions[0].conditions, vec![0, 1]);
+        assert_eq!(decisions[1].conditions, vec![2, 3]);
+    }
+
+    /// Negative control: when the same predicate is reached from
+    /// the SAME inline context (or top-level / no inlines), the
+    /// existing v0.11 conflation behaviour holds — one Decision
+    /// per cluster. This protects against the v0.12.0 split being
+    /// over-eager and breaking back-compat.
+    #[test]
+    fn group_into_decisions_keeps_single_when_no_inline_context() {
+        let mut line_map = LineMap::new();
+        for off in [10u64, 20, 30, 40] {
+            line_map.insert(
+                off,
+                LineLocation {
+                    file: "lib.rs".to_string(),
+                    line: 42,
+                },
+            );
+        }
+        // No inlines at all — InlineMap empty.
+        let entries = vec![
+            entry_with_offset(0, 10),
+            entry_with_offset(1, 20),
+            entry_with_offset(2, 30),
+            entry_with_offset(3, 40),
+        ];
+        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        assert_eq!(
+            decisions.len(),
+            1,
+            "no inline context → all conditions cluster (v0.11 behaviour preserved)"
+        );
+        assert_eq!(decisions[0].conditions, vec![0, 1, 2, 3]);
+        assert!(
+            decisions[0].inline_context.is_none(),
+            "Decision.inline_context absent when no inlines detected"
+        );
     }
 }

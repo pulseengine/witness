@@ -7,6 +7,97 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-05-03
+
+Per-DWARF-inlined-context decision split — closes the v0.5
+deferral first noted at `decisions.rs:35`. When a single source
+predicate is inlined at multiple call sites within one wasm
+function, witness now reconstructs one Decision *per call site*
+instead of conflating rows from every site into one Decision.
+
+The motivating shape: `is_safe()` inlined twice in `validate()`
+at lines 5 and 10. Pre-v0.12 collapsed both call sites into one
+Decision with rows from both — pair-finding then failed because
+rows from distinct contexts got compared as if they were
+alternatives within one chain. v0.12.0 splits them, so each
+call site gets its own pair-finding scope and its own truth
+table.
+
+### Added — DWARF inlined-subroutine walking
+
+`crates/witness-core/src/decisions.rs` gains `build_inline_map`
+which walks each compilation unit's DIE tree, finds every
+`DW_TAG_inlined_subroutine` entry, and records its
+`(low_pc..high_pc, call_file, call_line)`. The map is then
+queried per branch entry alongside the line map; together they
+yield `(source_file, source_line, inline_context)` for every
+br_if site.
+
+Variant A semantics (per the design conversation): one level of
+inlining only — the *innermost* enclosing inlined call site.
+Deeply-nested inlines collapse to that one hop. Variant B
+(full chain tracking via per-context row tagging) lands as
+mcdc-v2 schema in v0.13.
+
+Skipped silently:
+- Inlined entries that use `DW_AT_ranges` (multi-range
+  scattered inlines, less common). Rustc's typical wasm
+  emission uses contiguous `low_pc + high_pc` ranges, so this
+  covers the common case. v0.13 will pick up DW_AT_ranges as
+  part of the chain walk.
+- Modules without DWARF, or units that fail to parse — back-
+  compat: empty inline_map → v0.11 keying behaviour.
+
+### Added — `Decision.inline_context` (manifest)
+
+`Decision` (in `instrument.rs`) gains `inline_context:
+Option<InlineContext>` where `InlineContext { call_file,
+call_line }` names the call site. Additive,
+`#[serde(default)]` — pre-v0.12 manifests deserialise unchanged.
+
+### Added — `DecisionRecord.inline_context` (run record)
+
+`DecisionRecord` (in `run_record.rs`) gains the same field. The
+runner propagates the manifest's `inline_context` into each
+`DecisionRecord` so reporters can attribute split decisions to
+their call sites without re-reading the manifest. Additive,
+`#[serde(default)]`.
+
+### Added — `DecisionVerdict.inline_context` (mcdc report)
+
+`DecisionVerdict` (in `mcdc_report.rs`) gains the field for the
+auditor view: reviewers see "this Decision is `is_safe`
+inlined from `validate.rs:5`" vs "...from `validate.rs:10`",
+disambiguating two Decisions that share `source_file` /
+`source_line`.
+
+### Schema — `witness-mcdc/v1` extended (additive)
+
+`docs/schemas/witness-mcdc-v1.json` gains the `InlineContext`
+`$def` and the optional `inline_context` property on
+`DecisionVerdict`. v0.11.x envelopes still validate unchanged.
+v0.12.0 envelopes with split decisions also validate.
+
+### Tests
+
+- `decisions::tests::group_into_decisions_splits_by_inline_context`
+  — two pairs of br_ifs at the same source line but with
+  different inline contexts produce two Decisions with distinct
+  `call_line` values; each Decision contains exactly its own
+  call site's br_ifs.
+- `decisions::tests::group_into_decisions_keeps_single_when_no_inline_context`
+  — back-compat negative control: empty inline map yields the
+  same single conflated Decision the v0.11 path produced.
+
+### Notes for v0.13+
+
+- v0.13 — mcdc-v2 schema: per-context row tagging (Variant B).
+  Recovers source-DRY view (one Decision per source location;
+  rows tagged with their call chain). Includes DW_AT_ranges
+  walk for scattered inlines and full chain depth.
+- macOS Developer ID signing — waiting on user cert plumbing.
+- Predicate Rekor-binding — deferred to v0.13+.
+
 ## [0.11.5] — 2026-05-03
 
 `br_table` MC/DC with dual presentation. Closes the v0.11.4
