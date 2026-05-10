@@ -111,6 +111,11 @@
       "additionalProperties": false,
       "properties": {
         "inline_context": { "$ref": "#/$defs/InlineContext" },
+        "inline_chain": {
+          "description": "v0.14.1 — full call chain for this drill-down bucket. The bucket's `inline_context` is the chain's leaf (`chain.last()`); the chain shows the full call path the bucket represents. Stripped under v1/v2 schemas.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/InlineContext" }
+        },
         "conditions": {
           "description": "Per-condition verdicts under this call-site context's row subset. Same shape as DecisionVerdict.conditions but computed against the filtered rows.",
           "type": "array",

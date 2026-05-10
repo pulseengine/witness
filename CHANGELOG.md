@@ -7,6 +7,37 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-05-10
+
+Closes the v0.14.0 deferral on `PerContextVerdict.inline_chain`
+and adds a focused chain-propagation test.
+
+### Added — `PerContextVerdict.inline_chain`
+
+`Vec<InlineContext>` field on the per-context drill-down bucket
+in mcdc-v3 envelopes. The bucket's `inline_context` (single-hop
+leaf) is preserved as before; the new chain field tells reviewers
+the *full* call path the bucket represents — useful when the same
+leaf call site is reached from multiple parent contexts.
+
+Stripped under v1 / v2 schemas via `from_record_with_schema`.
+Pre-v0.14 envelopes deserialise unchanged via `#[serde(default)]`.
+
+### Schema — v3 extended (additive)
+
+`docs/schemas/witness-mcdc-v3.json::PerContextVerdict` gains
+the optional `inline_chain` property. v3 envelopes from v0.14.0
+without per-context entries (the verdict suite case) still
+validate; v0.14.1 v3 envelopes WITH per-context entries also
+validate cleanly.
+
+### Tests
+
+- `mcdc_report::tests::v3_chain_propagates_from_decision_row_to_row_view_and_per_context`
+  — synthesises a Decision with two distinct chain tags across
+  five rows; asserts (a) v3 schema populates chain on RowView
+  and PerContextVerdict, (b) v2 schema strips both.
+
 ## [0.14.0] — 2026-05-10
 
 DWARF inline-context CHAIN tracking — extends v0.13's single-hop
