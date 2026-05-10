@@ -63,12 +63,22 @@ pub fn reconstruct_decisions(wasm_bytes: &[u8], branches: &[BranchEntry]) -> Res
         return Ok(Vec::new());
     }
 
-    // v0.12.0 — inline-context map: byte_offset → InlineContext. Built
-    // by walking the DIE tree for `DW_TAG_inlined_subroutine` entries
-    // and recording each entry's `(call_file, call_line)` against its
-    // address range. Empty map (no inlines or DWARF reader error) is
-    // a no-op — `group_into_decisions` falls back to v0.11 keying.
-    let inline_map = build_inline_map(&dwarf_sections).unwrap_or_default();
+    // v0.12.1 — revert v0.12.0's inline-context bucket-keying. Soak
+    // data on 2026-05-10 showed v0.12.0 regressed (httparse 7/86 →
+    // 6/77, total 21/177 → 20/167). The corpus shape (one br_if per
+    // inlined call site) meant the split fragmented v0.11's
+    // beneficial multi-condition clusters into singletons that the
+    // `cluster.len() >= 2` gate at line ~310 then dropped. Variant B
+    // (per-context row tagging within unified Decisions) is the
+    // correct shape for this corpus and ships as v0.13.
+    //
+    // We KEEP `build_inline_map` and the `InlineContext` machinery
+    // (the type, the schema additions, the per-Decision/Record/
+    // Verdict fields, the v0.12.0 tests that exercise the bucket-
+    // key logic with synthetic InlineMaps). Only the production
+    // call is gated to an empty map, so end-user behaviour matches
+    // v0.11.5 while v0.13 keeps all the substrate it needs.
+    let inline_map = InlineMap::new();
 
     Ok(group_into_decisions(branches, &line_map, &inline_map))
 }
@@ -470,6 +480,7 @@ struct InlineEntry {
 /// fall back to the v0.11 conflated-decision behaviour, no
 /// regression. v0.13's per-context row tagging (Variant B) will
 /// pick those up via DW_AT_ranges traversal.
+#[allow(dead_code)] // v0.12.1 — call disabled in `reconstruct_decisions`; v0.13's Variant B reuses this.
 fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineMap, gimli::Error> {
     let dwarf = build_dwarf(sections);
     let mut units = dwarf.units();
@@ -573,6 +584,7 @@ fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineM
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // v0.12.1 — kept for v0.13's Variant B inline walker.
 enum HighPcForm {
     Addr(u64),
     Offset(u64),
@@ -584,6 +596,7 @@ enum HighPcForm {
 /// DWARF v5; v4 uses 1-based indexing. Returns a flat Vec where
 /// `vec[idx]` is the path at file index `idx` (or empty string when
 /// resolution fails).
+#[allow(dead_code)] // v0.12.1 — only called from build_inline_map; both kept for v0.13.
 fn collect_unit_files(unit_ref: &gimli::UnitRef<'_, EndianSlice<'_, LittleEndian>>) -> Vec<String> {
     let mut files: Vec<String> = Vec::new();
     let Some(lp) = unit_ref.line_program.as_ref() else {

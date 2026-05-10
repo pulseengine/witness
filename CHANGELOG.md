@@ -7,6 +7,66 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-05-10
+
+Revert of v0.12.0's regressing keying change. The v0.12.0 soak
+check on 2026-05-10 (verdict suite at v0.12.0 vs v0.11.5
+baseline) showed:
+
+- Total decisions: **21/177 → 20/167** (lost 10 decisions, lost
+  1 full-MC/DC).
+- httparse: **7/86 → 6/77** (the very fixture v0.12.0 was
+  designed to lift; instead it lost 1 full-MC/DC and 4 proved
+  conditions).
+- parser_dispatch and base64_decode also regressed.
+- 9 of 12 fixtures showed no change at all (the inline-context
+  path didn't fire on them).
+
+### Diagnosis
+
+The Variant A design premise — that inlined-multi-br_if
+predicates exist in real Rust→wasm output and benefit from
+per-context Decision separation — was wrong. Macros and
+inlined functions emit one branching site each. The split key
+change `(function, file)` → `(function, file, inline_context)`
+strictly fragmented v0.11's clusters. Where v0.11 grouped 2
+br_ifs from distinct inline contexts into a useful 2-condition
+Decision, v0.12.0 produced two singleton clusters that the
+existing `cluster.len() >= 2` gate at `decisions.rs:303`
+dropped. Net: both decisions and conditions lost.
+
+### What v0.12.1 reverts
+
+`crates/witness-core/src/decisions.rs::reconstruct_decisions`
+now passes an empty `InlineMap` to `group_into_decisions`,
+restoring v0.11's `(function, file)` keying behaviour.
+
+### What v0.12.1 keeps (additive surface preserved)
+
+The `InlineContext` type, the `inline_context: Option<InlineContext>`
+fields on `Decision` / `DecisionRecord` / `DecisionVerdict`,
+the mcdc-v1 schema's `InlineContext` `$def`, the
+`build_inline_map` function, and the v0.12.0 tests all stay.
+`build_inline_map` and helpers are marked `#[allow(dead_code)]`
+in v0.12.1 with a comment that v0.13's Variant B reuses them.
+Wire format is unchanged — v0.12.0 envelopes still validate,
+consumers that read `inline_context` keep working (they just
+never see a populated value in v0.12.1 output).
+
+### Where Variant A goes
+
+Variant A is shelved permanently. v0.13 ships Variant B
+(per-context row tagging within unified Decisions, mcdc-v2
+schema). Variant B preserves v0.11's beneficial clustering and
+adds inline_context as a row-level tag the auditor can filter
+by — the design that fits the actual corpus shape.
+
+### Notes for v0.13+
+
+Unchanged from v0.12.0. v0.13 = mcdc-v2 + Variant B (next).
+macOS Developer ID signing waiting on user cert plumbing.
+Predicate Rekor-binding deferred to v0.14+.
+
 ## [0.12.0] — 2026-05-03
 
 Per-DWARF-inlined-context decision split — closes the v0.5
