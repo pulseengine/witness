@@ -20,7 +20,7 @@ env:
 jobs:
   fmt:
     name: Format
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, light]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -30,7 +30,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -44,7 +44,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: [self-hosted, linux, x64, rust-cpu]
+          # Stays on ubuntu-latest equivalents: smithy is Linux x86_64 only.
+          - os: macos-latest
+          - os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -54,7 +58,7 @@ jobs:
 
   msrv:
     name: MSRV (1.91)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.91.0
@@ -63,7 +67,7 @@ jobs:
 
   miri:
     name: Miri
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, lean-mem]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@nightly
@@ -84,17 +88,25 @@ jobs:
 
   deny:
     name: Cargo Deny
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, light]
     steps:
       - uses: actions/checkout@v5
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          log-level: warn
-          command: check
-          arguments: --all-features
+      - uses: dtolnay/rust-toolchain@stable
+      # Smithy workaround: EmbarkStudios/cargo-deny-action launches a
+      # rootless container which fails under our hardened runner unit
+      # (NoNewPrivileges=true blocks newuidmap). Run cargo-deny directly.
+      # Skip `advisories` here — that check stays on the hosted `audit`
+      # job until smithy ships cargo-audit 0.22.1+ (RUSTSEC-2026-0037
+      # CVSS 4.0 parser issue).
+      - run: cargo install cargo-deny --locked --version 0.16.4 || true
+      - run: cargo deny check bans licenses sources
 
   audit:
     name: Security Audit
+    # Stays on ubuntu-latest: smithy ships cargo-audit v0.21.2 whose
+    # bundled rustsec parser rejects CVSS 4.0 advisories
+    # (RUSTSEC-2026-0037). Move back once smithy bumps cargo-audit to
+    # 0.22.1+.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -106,7 +118,7 @@ jobs:
 
   proptest-extended:
     name: Proptest (extended cases)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v5
@@ -118,7 +130,7 @@ jobs:
 
   mutants:
     name: Mutation testing (informational)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, lean-mem]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     steps:
@@ -131,7 +143,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v5
@@ -152,7 +164,7 @@ jobs:
 
   dogfood:
     name: Dogfood — witness measures the fixture
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v5
@@ -205,7 +217,7 @@ jobs:
 
   wasm-component:
     name: Build witness-component (Component Model wasm) — v0.7.0+
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -231,7 +243,7 @@ jobs:
 
   schemas:
     name: Schemas — validate fixtures against shipped JSON Schema docs (informational)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, light]
     # v0.10.0 item 5 — published schemas live at docs/schemas/. CI proves
     # the shipped report.json / predicate.json fixtures match those
     # schemas. Informational while the schema work settles; will gate
@@ -275,7 +287,7 @@ jobs:
 
   verdict-suite:
     name: Verdict suite — end-to-end MC/DC on the canonical 7
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v5

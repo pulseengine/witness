@@ -25,7 +25,7 @@ env:
 jobs:
   coverage-delta:
     name: Coverage Delta
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     continue-on-error: true
     steps:
       - uses: actions/checkout@v5
@@ -93,7 +93,7 @@ jobs:
   # failures don't block merge — the comment is the signal.
   verdict-suite-delta:
     name: Verdict suite delta
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     continue-on-error: true
     steps:
       - uses: actions/checkout@v5
