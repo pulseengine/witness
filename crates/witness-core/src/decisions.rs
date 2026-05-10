@@ -49,36 +49,32 @@ use std::collections::BTreeMap;
 /// reconstruction phase yields no multi-condition groups (i.e. every
 /// surviving group is a single condition — strict per-`br_if` is the
 /// correct interpretation, no need to materialise a `Decision`).
-pub fn reconstruct_decisions(wasm_bytes: &[u8], branches: &[BranchEntry]) -> Result<Vec<Decision>> {
+pub fn reconstruct_decisions(
+    wasm_bytes: &[u8],
+    branches: &[BranchEntry],
+) -> Result<(Vec<Decision>, BTreeMap<u32, InlineContext>)> {
     let dwarf_sections = match extract_dwarf_sections(wasm_bytes) {
         Some(s) => s,
-        None => return Ok(Vec::new()),
+        None => return Ok((Vec::new(), BTreeMap::new())),
     };
 
     let line_map = match build_line_map(&dwarf_sections) {
         Ok(m) => m,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => return Ok((Vec::new(), BTreeMap::new())),
     };
     if line_map.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), BTreeMap::new()));
     }
 
-    // v0.12.1 — revert v0.12.0's inline-context bucket-keying. Soak
-    // data on 2026-05-10 showed v0.12.0 regressed (httparse 7/86 →
-    // 6/77, total 21/177 → 20/167). The corpus shape (one br_if per
-    // inlined call site) meant the split fragmented v0.11's
-    // beneficial multi-condition clusters into singletons that the
-    // `cluster.len() >= 2` gate at line ~310 then dropped. Variant B
-    // (per-context row tagging within unified Decisions) is the
-    // correct shape for this corpus and ships as v0.13.
-    //
-    // We KEEP `build_inline_map` and the `InlineContext` machinery
-    // (the type, the schema additions, the per-Decision/Record/
-    // Verdict fields, the v0.12.0 tests that exercise the bucket-
-    // key logic with synthetic InlineMaps). Only the production
-    // call is gated to an empty map, so end-user behaviour matches
-    // v0.11.5 while v0.13 keeps all the substrate it needs.
-    let inline_map = InlineMap::new();
+    // v0.13.0 — Variant B: re-enable inline-map construction (v0.12.1
+    // had gated this to an empty map after the v0.12.0 split-by-
+    // context regression). v0.13 doesn't use the inline_map as a
+    // bucket-key discriminator (that was Variant A's mistake);
+    // instead it threads per-branch InlineContext through to the
+    // manifest so the runner can stamp each row's inline_context tag
+    // and the mcdc-v2 reporter can build per-context verdict views
+    // *within* unified single-Decision clusters.
+    let inline_map = build_inline_map(&dwarf_sections).unwrap_or_default();
 
     Ok(group_into_decisions(branches, &line_map, &inline_map))
 }
@@ -264,17 +260,20 @@ fn group_into_decisions(
     branches: &[BranchEntry],
     line_map: &LineMap,
     inline_map: &InlineMap,
-) -> Vec<Decision> {
-    // Step 1: resolve each br_if's (function, file, line, inline_context).
-    // v0.12.0 — inline_context discriminates Decisions whose source
-    // location matches but whose calling site differs (e.g. a single
-    // `is_safe()` predicate inlined twice in `validate()` at different
-    // lines). Drop entries missing byte_offset or with no DWARF
-    // mapping; pass `None` for inline_context when not in any
-    // inlined range (top-level br_if).
-    type Resolved<'a> = (u32, String, u32, Option<InlineContext>, &'a BranchEntry);
+) -> (Vec<Decision>, BTreeMap<u32, InlineContext>) {
+    // Step 1: resolve each br_if's (function, file, line). Side-output
+    // a per-branch `branch_id → InlineContext` map for everything
+    // whose byte offset fell within an inlined-subroutine address
+    // range — the runner consumes this map to stamp each row's
+    // inline_context tag at execution time. v0.13's Variant B does
+    // NOT use inline_context as a bucket-key discriminator (that was
+    // v0.12.0's Variant A mistake); the conflated single-Decision
+    // shape stays. Drop entries missing byte_offset or with no DWARF
+    // mapping.
+    type Resolved<'a> = (u32, String, u32, &'a BranchEntry);
     let mut resolved: Vec<Resolved<'_>> = Vec::new();
     let mut brtable_resolved: Vec<Resolved<'_>> = Vec::new();
+    let mut branch_inline_contexts: BTreeMap<u32, InlineContext> = BTreeMap::new();
     for entry in branches {
         let Some(byte_offset) = entry.byte_offset else {
             continue;
@@ -283,16 +282,12 @@ fn group_into_decisions(
         let Some(loc) = lookup_line(line_map, addr) else {
             continue;
         };
-        let inline_ctx = lookup_inline(inline_map, addr).cloned();
+        if let Some(ctx) = lookup_inline(inline_map, addr) {
+            branch_inline_contexts.insert(entry.id, ctx.clone());
+        }
         match entry.kind {
             BranchKind::BrIf => {
-                resolved.push((
-                    entry.function_index,
-                    loc.file.clone(),
-                    loc.line,
-                    inline_ctx,
-                    entry,
-                ));
+                resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
             }
             // v0.9.7 — br_table entries from the same match arm
             // grouped by (function, file, line). All targets of one
@@ -300,13 +295,7 @@ fn group_into_decisions(
             // hand-written code; macro-generated tables may merge with
             // adjacent code, which is the same trade-off `BrIf` makes.
             BranchKind::BrTableTarget | BranchKind::BrTableDefault => {
-                brtable_resolved.push((
-                    entry.function_index,
-                    loc.file.clone(),
-                    loc.line,
-                    inline_ctx,
-                    entry,
-                ));
+                brtable_resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
             }
             // IfThen / IfElse counters are emitted by the if/else
             // lowering and don't represent independent conditions in
@@ -316,19 +305,18 @@ fn group_into_decisions(
         }
     }
 
-    // Step 2: bucket by (function, file, inline_context). v0.12.0 —
-    // adding inline_context here is the load-bearing change. Two
-    // sets of br_ifs from distinct inlined call sites no longer
-    // collapse into one Decision; each call site gets its own
-    // bucket and its own pair-finding scope. Within each bucket,
-    // br_ifs are in branch-id order (= source-walk order from
-    // `walk_collect`).
-    type BrIfBucketKey = (u32, String, Option<InlineContext>);
+    // Step 2: bucket by (function, file). v0.13 reverted v0.12.0's
+    // bucket-key extension — splitting by inline_context fragmented
+    // v0.11's clusters into singletons that got dropped by the
+    // `cluster.len() >= 2` gate. Variant B preserves the conflated
+    // single-Decision shape and exposes per-context detail via the
+    // row tag + per_context verdict view at the reporter layer.
+    type BrIfBucketKey = (u32, String);
     type BrIfBucketEntry<'a> = Vec<(u32, &'a BranchEntry)>;
     let mut by_func_file: BTreeMap<BrIfBucketKey, BrIfBucketEntry<'_>> = BTreeMap::new();
-    for (func, file, line, inline_ctx, entry) in resolved {
+    for (func, file, line, entry) in resolved {
         by_func_file
-            .entry((func, file, inline_ctx))
+            .entry((func, file))
             .or_default()
             .push((line, entry));
     }
@@ -336,7 +324,7 @@ fn group_into_decisions(
     let mut out: Vec<Decision> = Vec::new();
     let mut next_decision_id: u32 = 0;
 
-    for ((_func, file, inline_ctx), entries) in by_func_file {
+    for ((_func, file), entries) in by_func_file {
         let mut cluster: Vec<&BranchEntry> = Vec::new();
         let mut cluster_min: u32 = u32::MAX;
         let mut cluster_max: u32 = 0;
@@ -346,9 +334,16 @@ fn group_into_decisions(
                      next_decision_id: &mut u32,
                      out: &mut Vec<Decision>,
                      file: &str,
-                     inline_ctx: &Option<InlineContext>| {
+                     branch_inline_contexts: &BTreeMap<u32, InlineContext>| {
             if cluster.len() >= 2 {
                 let conditions: Vec<u32> = cluster.iter().map(|e| e.id).collect();
+                // Decision.inline_context = modal context across the
+                // cluster's branches. Used by reporters for the
+                // headline label ("inlined from foo.rs:5") when the
+                // cluster's rows are mostly one context. Mixed-
+                // context clusters get `None` here; per_context
+                // verdict views still surface every distinct context.
+                let inline_context = modal_inline_context(&conditions, branch_inline_contexts);
                 out.push(Decision {
                     id: *next_decision_id,
                     conditions,
@@ -363,7 +358,7 @@ fn group_into_decisions(
                     // ChainKind::Unknown here keeps decisions.rs free of
                     // walrus dependencies.
                     chain_kind: crate::instrument::ChainKind::default(),
-                    inline_context: inline_ctx.clone(),
+                    inline_context,
                 });
                 *next_decision_id = next_decision_id.saturating_add(1);
             }
@@ -390,7 +385,7 @@ fn group_into_decisions(
                     &mut next_decision_id,
                     &mut out,
                     &file,
-                    &inline_ctx,
+                    &branch_inline_contexts,
                 );
                 cluster.push(entry);
                 cluster_min = line;
@@ -403,32 +398,29 @@ fn group_into_decisions(
             &mut next_decision_id,
             &mut out,
             &file,
-            &inline_ctx,
+            &branch_inline_contexts,
         );
     }
 
-    // v0.9.7 — second pass: group BrTable* entries by (function, file,
-    // line). v0.12.0 — inline_context joins the key so the same
-    // `match` expression inlined at multiple call sites within one
-    // caller produces multiple Decisions (one per call site), each
-    // with its own per-arm hit counts. Single-arm tables (= unreachable
-    // default-only or 1-arm) are emitted only when they contain >= 2
-    // entries, mirroring the BrIf threshold.
-    let mut by_func_file_line: BTreeMap<
-        (u32, String, u32, Option<InlineContext>),
-        Vec<&BranchEntry>,
-    > = BTreeMap::new();
-    for (func, file, line, inline_ctx, entry) in brtable_resolved {
+    // v0.9.7 — second pass: group BrTable* entries by (function,
+    // file, line). v0.13 reverted v0.12.0's bucket-key extension
+    // here too — same regression mode applies to br_table arms.
+    // Single-arm tables (= unreachable default-only or 1-arm) are
+    // emitted only when they contain >= 2 entries, mirroring the
+    // BrIf threshold.
+    let mut by_func_file_line: BTreeMap<(u32, String, u32), Vec<&BranchEntry>> = BTreeMap::new();
+    for (func, file, line, entry) in brtable_resolved {
         by_func_file_line
-            .entry((func, file, line, inline_ctx))
+            .entry((func, file, line))
             .or_default()
             .push(entry);
     }
-    for ((_func, file, line, inline_ctx), entries) in by_func_file_line {
+    for ((_func, file, line), entries) in by_func_file_line {
         if entries.len() < 2 {
             continue;
         }
         let conditions: Vec<u32> = entries.iter().map(|e| e.id).collect();
+        let inline_context = modal_inline_context(&conditions, &branch_inline_contexts);
         out.push(Decision {
             id: next_decision_id,
             conditions,
@@ -439,12 +431,46 @@ fn group_into_decisions(
             // derive-outcome-from-conditions path. Per-arm counters are
             // the truth-table view here.
             chain_kind: crate::instrument::ChainKind::default(),
-            inline_context: inline_ctx,
+            inline_context,
         });
         next_decision_id = next_decision_id.saturating_add(1);
     }
 
-    out
+    (out, branch_inline_contexts)
+}
+
+/// v0.13.0 — pick the most-common `InlineContext` across the given
+/// branches' tags. `None` (top-level / no inlining) competes alongside
+/// `Some(ctx)` values; whichever count wins becomes the cluster's
+/// `Decision.inline_context`. Ties (including `None` ties with a
+/// `Some(ctx)`) resolve to `None` so the headline label stays
+/// conservative — per_context verdict views at the reporter layer
+/// surface every distinct context regardless.
+fn modal_inline_context(
+    branches: &[u32],
+    branch_inline_contexts: &BTreeMap<u32, InlineContext>,
+) -> Option<InlineContext> {
+    if branches.is_empty() {
+        return None;
+    }
+    let mut counts: BTreeMap<Option<InlineContext>, u32> = BTreeMap::new();
+    for &b in branches {
+        let key = branch_inline_contexts.get(&b).cloned();
+        let entry = counts.entry(key).or_insert(0);
+        *entry = entry.saturating_add(1);
+    }
+    let max_count = counts.values().copied().max().unwrap_or(0);
+    let winners: Vec<&Option<InlineContext>> = counts
+        .iter()
+        .filter(|(_, c)| **c == max_count)
+        .map(|(k, _)| k)
+        .collect();
+    if winners.len() == 1 {
+        winners.first().cloned().cloned().unwrap_or(None)
+    } else {
+        // Tie → conservative: no headline label.
+        None
+    }
 }
 
 /// DWARF line-table addresses are sparse — a row at address X applies
@@ -663,7 +689,7 @@ mod tests {
     #[test]
     fn empty_module_yields_no_decisions() {
         let entries = vec![entry_with_offset(0, 0), entry_with_offset(1, 4)];
-        let decisions = reconstruct_decisions(b"\x00asm\x01\x00\x00\x00", &entries).unwrap();
+        let (decisions, _) = reconstruct_decisions(b"\x00asm\x01\x00\x00\x00", &entries).unwrap();
         assert!(
             decisions.is_empty(),
             "no DWARF sections → strict-per-br_if fallback (empty Decision list)"
@@ -701,7 +727,7 @@ mod tests {
             },
         );
         let entries = vec![entry_with_offset(0, 10), entry_with_offset(1, 20)];
-        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             1,
@@ -730,7 +756,7 @@ mod tests {
             },
         );
         let entries = vec![entry_with_offset(0, 10), entry_with_offset(1, 20)];
-        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert!(
             decisions.is_empty(),
             "two singletons on different lines → no Decision (strict-per-br_if applies)"
@@ -758,7 +784,7 @@ mod tests {
         a.function_index = 0;
         let mut b = entry_with_offset(1, 20);
         b.function_index = 1;
-        let decisions = group_into_decisions(&[a, b], &line_map, &InlineMap::new());
+        let (decisions, _) = group_into_decisions(&[a, b], &line_map, &InlineMap::new());
         // Same line, different functions → no shared decision.
         assert!(
             decisions.is_empty(),
@@ -806,7 +832,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             1,
@@ -858,7 +884,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             2,
@@ -895,14 +921,16 @@ mod tests {
         assert_eq!(lookup_line(&map, 100).unwrap().line, 2);
     }
 
-    /// v0.12.0 — the load-bearing test: two pairs of br_ifs whose
-    /// source location is identical (same file, same line, same
-    /// function) but whose inline_context differs (different
-    /// `(call_file, call_line)`) must produce TWO Decisions, not
-    /// one. This is the exact shape that motivates the v0.12.0
-    /// rework: a single source predicate inlined twice in one caller.
+    /// v0.13 (Variant B) — same input as v0.12.0's split test, but
+    /// with the v0.13 expectation flipped. Two pairs of br_ifs at
+    /// the same source line with distinct inline_contexts now
+    /// produce **one** unified Decision (cluster preserved → no
+    /// fragmentation, no singleton drops), while the per-branch
+    /// `branch_inline_contexts` map carries the call-site detail
+    /// the runner needs to stamp each row's `inline_context` tag.
+    /// This is the load-bearing assertion for Variant B.
     #[test]
-    fn group_into_decisions_splits_by_inline_context() {
+    fn cluster_preserved_with_split_inline_contexts() {
         // Source predicate at lib.rs:42, br_ifs at offsets {10, 20}
         // for call site A, {30, 40} for call site B.
         let mut line_map = LineMap::new();
@@ -945,30 +973,89 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let decisions = group_into_decisions(&entries, &line_map, &inline_map);
+        let (decisions, branch_inline_contexts) =
+            group_into_decisions(&entries, &line_map, &inline_map);
         assert_eq!(
             decisions.len(),
-            2,
-            "two distinct inline contexts → two Decisions, not one (got {decisions:?})"
+            1,
+            "v0.13 preserves the cluster (no v0.12 fragmentation): got {decisions:?}"
         );
-        // Both Decisions land at the same source line (the inlined
-        // predicate's line) but carry distinct inline_context values.
-        let lines: Vec<u32> = decisions.iter().filter_map(|d| d.source_line).collect();
-        assert_eq!(lines, vec![42, 42], "both at lib.rs:42");
-        let call_lines: Vec<u32> = decisions
-            .iter()
-            .filter_map(|d| d.inline_context.as_ref().map(|ic| ic.call_line))
-            .collect();
-        // BTreeMap sort order: call_line 5 < call_line 10.
+        // The unified Decision spans all four br_ifs at lib.rs:42.
+        assert_eq!(decisions[0].conditions, vec![0, 1, 2, 3]);
+        assert_eq!(decisions[0].source_line, Some(42));
+        // 2 branches in ctx call_line=5 vs 2 branches in ctx call_line=10
+        // → tied modal → conservative `None` headline label. Per-row
+        // detail surfaces via `branch_inline_contexts`.
+        assert!(
+            decisions[0].inline_context.is_none(),
+            "tied 2-vs-2 modal → conservative None headline; got {:?}",
+            decisions[0].inline_context
+        );
+        // Per-branch context map is populated for every br_if whose
+        // address falls inside an inline range.
+        assert_eq!(branch_inline_contexts.get(&0).map(|c| c.call_line), Some(5));
+        assert_eq!(branch_inline_contexts.get(&1).map(|c| c.call_line), Some(5));
         assert_eq!(
-            call_lines,
-            vec![5, 10],
-            "decisions discriminated by their inline call_line"
+            branch_inline_contexts.get(&2).map(|c| c.call_line),
+            Some(10)
         );
-        // Each Decision contains exactly the two br_ifs from one
-        // inlined call site.
-        assert_eq!(decisions[0].conditions, vec![0, 1]);
-        assert_eq!(decisions[1].conditions, vec![2, 3]);
+        assert_eq!(
+            branch_inline_contexts.get(&3).map(|c| c.call_line),
+            Some(10)
+        );
+    }
+
+    /// v0.13 — modal headline label: when one inline context wins
+    /// the count outright, `Decision.inline_context` reflects it.
+    /// 3 branches in ctx_a, 1 in ctx_b → ctx_a is the headline.
+    #[test]
+    fn decision_inline_context_is_modal() {
+        let mut line_map = LineMap::new();
+        for off in [10u64, 20, 30, 40] {
+            line_map.insert(
+                off,
+                LineLocation {
+                    file: "lib.rs".to_string(),
+                    line: 42,
+                },
+            );
+        }
+        let mut inline_map = InlineMap::new();
+        // 3 branches in ctx_a (call_line 5)
+        inline_map.insert(
+            10,
+            InlineEntry {
+                high_pc_exclusive: 35,
+                context: InlineContext {
+                    call_file: Some("caller.rs".to_string()),
+                    call_line: 5,
+                },
+            },
+        );
+        // 1 branch in ctx_b (call_line 10)
+        inline_map.insert(
+            35,
+            InlineEntry {
+                high_pc_exclusive: 45,
+                context: InlineContext {
+                    call_file: Some("caller.rs".to_string()),
+                    call_line: 10,
+                },
+            },
+        );
+        let entries = vec![
+            entry_with_offset(0, 10),
+            entry_with_offset(1, 20),
+            entry_with_offset(2, 30),
+            entry_with_offset(3, 40),
+        ];
+        let (decisions, _) = group_into_decisions(&entries, &line_map, &inline_map);
+        assert_eq!(decisions.len(), 1);
+        let label = decisions[0]
+            .inline_context
+            .as_ref()
+            .expect("modal context should win");
+        assert_eq!(label.call_line, 5, "ctx_a wins 3-to-1 → headline is ctx_a");
     }
 
     /// Negative control: when the same predicate is reached from
@@ -995,7 +1082,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let decisions = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             1,

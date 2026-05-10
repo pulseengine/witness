@@ -212,6 +212,7 @@ mod tests {
             evaluated: evaluated.iter().copied().collect::<BTreeMap<_, _>>(),
             outcome,
             raw_brvals: BTreeMap::new(),
+            inline_context: None,
         };
         let record = RunRecord {
             schema_version: "3".to_string(),

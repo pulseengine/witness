@@ -145,6 +145,15 @@ enum Command {
         /// Predicate kind.
         #[arg(long, value_enum, default_value_t = PredicateKind::Coverage)]
         kind: PredicateKind,
+        /// v0.13.0 — MC/DC schema version. Only consulted when
+        /// `--kind mcdc`. `v1` is the default for v0.13.0 (back-
+        /// compat with the existing
+        /// `https://pulseengine.eu/witness-mcdc/v1` consumers);
+        /// `v2` opts in to the per-context drill-down + per-row
+        /// inline_context tags. v0.13.1 will flip the default
+        /// to v2.
+        #[arg(long = "mcdc-schema", value_enum, default_value_t = McdcSchemaArg::V1)]
+        mcdc_schema: McdcSchemaArg,
         /// Output path for the JSON Statement.
         #[arg(short, long, default_value = "witness-predicate.json")]
         output: PathBuf,
@@ -360,6 +369,28 @@ enum PredicateKind {
     Mcdc,
 }
 
+/// v0.13.0 — `--mcdc-schema` selector. Mirrors
+/// `witness_core::mcdc_report::McdcSchemaVersion` at the CLI surface.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum McdcSchemaArg {
+    /// `https://pulseengine.eu/witness-mcdc/v1` — pre-v0.13 shape.
+    /// Default for v0.13.0; flipped to V2 in v0.13.1.
+    V1,
+    /// `https://pulseengine.eu/witness-mcdc/v2` — v0.13.0 superset.
+    /// Adds per-row `inline_context` tags + per-context verdict
+    /// drill-down on `DecisionVerdict.per_context`.
+    V2,
+}
+
+impl From<McdcSchemaArg> for witness_core::mcdc_report::McdcSchemaVersion {
+    fn from(a: McdcSchemaArg) -> Self {
+        match a {
+            McdcSchemaArg::V1 => Self::V1,
+            McdcSchemaArg::V2 => Self::V2,
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
@@ -457,6 +488,7 @@ fn main() -> Result<()> {
             original,
             harness,
             kind,
+            mcdc_schema,
             output,
         } => {
             // v0.10.0 — when `--original` is omitted, fall back to the
@@ -501,7 +533,15 @@ fn main() -> Result<()> {
                     }
                 }
                 PredicateKind::Mcdc => {
-                    let mcdc = witness_core::mcdc_report::from_run_file(&run)?;
+                    // v0.13.0 — load the run record once, then build
+                    // the MC/DC report with the user-selected schema
+                    // version. v1 (default) strips per_context + row
+                    // inline_context tags; v2 keeps them.
+                    let record = witness_core::run_record::RunRecord::load(&run)?;
+                    let mcdc = witness_core::mcdc_report::McdcReport::from_record_with_schema(
+                        &record,
+                        mcdc_schema.into(),
+                    );
                     if let Some(om) = original_module {
                         witness_core::predicate::build_mcdc_statement_with_original(
                             &mcdc,
