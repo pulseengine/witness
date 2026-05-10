@@ -32,10 +32,14 @@ pub const MCDC_SCHEMA_URL_V2: &str = "https://pulseengine.eu/witness-mcdc/v2";
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum McdcSchemaVersion {
-    /// v0.13.0 default stays v1 for the soak window. v0.13.1 flips
-    /// the `#[default]` to V2.
-    #[default]
+    /// v0.13.0 shipped V1 as default for a soak window. v0.13.1
+    /// (this release) flips the default to V2 — soak validated
+    /// the v1-mode byte-identity to v0.11.5, so producers can now
+    /// emit the per-context drill-down by default. Existing
+    /// consumers that schema-validate strictly against v1 must
+    /// pass `--mcdc-schema v1` to preserve byte-identical output.
     V1,
+    #[default]
     V2,
 }
 

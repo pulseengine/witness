@@ -146,13 +146,12 @@ enum Command {
         #[arg(long, value_enum, default_value_t = PredicateKind::Coverage)]
         kind: PredicateKind,
         /// v0.13.0 — MC/DC schema version. Only consulted when
-        /// `--kind mcdc`. `v1` is the default for v0.13.0 (back-
-        /// compat with the existing
-        /// `https://pulseengine.eu/witness-mcdc/v1` consumers);
-        /// `v2` opts in to the per-context drill-down + per-row
-        /// inline_context tags. v0.13.1 will flip the default
-        /// to v2.
-        #[arg(long = "mcdc-schema", value_enum, default_value_t = McdcSchemaArg::V1)]
+        /// `--kind mcdc`. v0.13.0 defaulted to `v1` for a soak
+        /// window; v0.13.1 flips the default to `v2` (the per-
+        /// context drill-down + per-row inline_context tags). Pass
+        /// `--mcdc-schema v1` to preserve byte-identical output for
+        /// strict v1 schema-validating consumers.
+        #[arg(long = "mcdc-schema", value_enum, default_value_t = McdcSchemaArg::V2)]
         mcdc_schema: McdcSchemaArg,
         /// Output path for the JSON Statement.
         #[arg(short, long, default_value = "witness-predicate.json")]
