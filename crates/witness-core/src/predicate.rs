@@ -52,6 +52,9 @@ pub const MCDC_PREDICATE_TYPE: &str = "https://pulseengine.eu/witness-mcdc/v1";
 /// field so consumers validating against either coordinate stay in
 /// sync.
 pub const MCDC_PREDICATE_TYPE_V2: &str = "https://pulseengine.eu/witness-mcdc/v2";
+/// v0.14.0 — predicateType for mcdc-v3 envelopes. Tracks
+/// `MCDC_SCHEMA_URL_V3` in `mcdc_report`.
+pub const MCDC_PREDICATE_TYPE_V3: &str = "https://pulseengine.eu/witness-mcdc/v3";
 
 /// In-toto Statement v1.0. The `predicate` body is held as
 /// `serde_json::Value` so a single Statement type round-trips both the
@@ -472,7 +475,9 @@ pub fn build_mcdc_statement_with_original(
     // so v2 envelopes don't ship a v1 predicateType (would confuse
     // schema-aware consumers). report.schema is the authoritative
     // source set by `McdcReport::from_record_with_schema`.
-    let predicate_type = if report.schema == crate::mcdc_report::MCDC_SCHEMA_URL_V2 {
+    let predicate_type = if report.schema == crate::mcdc_report::MCDC_SCHEMA_URL_V3 {
+        MCDC_PREDICATE_TYPE_V3.to_string()
+    } else if report.schema == crate::mcdc_report::MCDC_SCHEMA_URL_V2 {
         MCDC_PREDICATE_TYPE_V2.to_string()
     } else {
         MCDC_PREDICATE_TYPE.to_string()
@@ -854,6 +859,7 @@ mod tests {
             outcome,
             raw_brvals: BTreeMap::new(),
             inline_context: None,
+            inline_chain: None,
         };
         let full = DecisionRecord {
             id: 0,

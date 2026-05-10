@@ -361,6 +361,19 @@ pub struct Manifest {
     /// Pre-v0.13 manifests deserialise unchanged via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub branch_inline_contexts: BTreeMap<u32, InlineContext>,
+    /// v0.14.0 — full inline call chain per branch, alongside the
+    /// single-hop `branch_inline_contexts`. Maps branch_id → the
+    /// `Vec<InlineContext>` from outermost to innermost inlined
+    /// frame at that branch's byte offset. Same keyset as
+    /// `branch_inline_contexts`; for any branch present in both
+    /// maps, `chain.last()` equals the corresponding leaf context.
+    /// Empty when DWARF reported no nesting (chain depth 1 reduces
+    /// to a single-frame Vec) is NOT skipped — instead each chain
+    /// is at least one frame long. Empty MAP only when no inlines
+    /// were detected. v3 mcdc envelopes ship the chain; v0.13
+    /// manifests deserialise unchanged via `#[serde(default)]`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub branch_inline_chains: BTreeMap<u32, Vec<InlineContext>>,
 }
 
 impl Manifest {
@@ -426,7 +439,7 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
     // means hosts use the strict per-br_if fallback. v0.13.0 — also
     // returns a per-branch InlineContext map (Variant B substrate)
     // that the runner consumes to tag each row.
-    let (mut decisions, branch_inline_contexts) =
+    let (mut decisions, branch_inline_contexts, branch_inline_chains) =
         crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
     // v0.8: classify each decision's chain direction (And/Or/Mixed/Unknown)
     // using the per-branch hints captured during instrument_module.
@@ -445,6 +458,7 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
         branches: entries,
         decisions,
         branch_inline_contexts,
+        branch_inline_chains,
     };
     let manifest_path = Manifest::path_for(output);
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(Error::Serde)?;

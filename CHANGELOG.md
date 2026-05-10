@@ -7,6 +7,88 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-05-10
+
+DWARF inline-context CHAIN tracking — extends v0.13's single-hop
+`InlineContext` to a full `Vec<InlineContext>` from outermost to
+innermost frame. Real-world signal: httparse runs through inlined
+chains up to **8 levels deep**; v0.13.x only saw the leaf.
+
+### Added — chain tracking in the DIE walker
+
+`crates/witness-core/src/decisions.rs::build_inline_map` now
+maintains a depth-keyed parent stack across the DIE depth-first
+walk. When the cursor enters a `DW_TAG_inlined_subroutine` DIE,
+the entry's `(call_file, call_line)` plus all currently-active
+parent inlined frames form the chain stored against the entry's
+address range. When the cursor ascends past a parent's depth,
+the parent is popped.
+
+`InlineEntry` gains `chain: Vec<InlineContext>` (outermost →
+innermost, inclusive of the entry's own context at the tail).
+A new `lookup_inline_with_chain` helper returns both the leaf
+and the full chain in one query.
+
+### Added — `Manifest.branch_inline_chains`
+
+`BTreeMap<u32, Vec<InlineContext>>` mirroring
+`branch_inline_contexts` (same keyset; for any branch present
+in both maps, `chain.last()` equals the leaf context). Pre-v0.14
+manifests deserialise unchanged via `#[serde(default)]`.
+
+### Added — `DecisionRow.inline_chain` + `RowView.inline_chain`
+
+Both runners (embedded + harness) populate `DecisionRow.inline_chain`
+via a new `row_modal_chain` helper that picks the modal *whole
+chain* across the row's evaluated condition branches. Same
+tie-resolves-to-`None` rule as `row_modal_context`. The reporter
+copies `inline_chain` through into `RowView.inline_chain` for v3
+envelopes; v1/v2 strip it via `from_record_with_schema`.
+
+### Added — mcdc-v3 schema
+
+New schema URL `https://pulseengine.eu/witness-mcdc/v3` at
+`docs/schemas/witness-mcdc-v3.json`. Structurally a superset of
+v2 with the `inline_chain` field on `RowView`.
+
+In `mcdc_report`: `MCDC_SCHEMA_URL_V3` const +
+`McdcSchemaVersion::V3` variant. In `predicate.rs`:
+`MCDC_PREDICATE_TYPE_V3` const; the `build_mcdc_statement_*`
+paths derive the in-toto `predicateType` from the report's
+schema URL so v3 envelopes ship a v3 predicateType in BOTH
+the wrapper and the embedded report.
+
+### Added — `witness predicate --mcdc-schema v3`
+
+CLI flag accepts `v3` alongside `v1` / `v2`. **Default stays v2**
+for v0.14.0 (matches v0.13.1 default; v0.14.x will flip to v3
+once the chain shape stabilises). Pass `--mcdc-schema v3` to
+opt in.
+
+### Verified — verdict suite delta
+
+- v0.14.0 v2-mode output **byte-identical** to v0.13.1 v2-mode
+  (verdict suite: 21/177 full-MC/DC, httparse 7/86; all conditions
+  counts match). No regression.
+- v0.14.0 v3-mode against the httparse fixture: 106 branches
+  carry inline-tag entries (matches v0.13); **max chain depth
+  observed is 8 frames**. v3 envelope validates against v3
+  schema; v2 envelopes still validate against v2 schema.
+
+### Notes for v0.14.x and v0.15
+
+- v0.14.1 — extend the DIE walker to `DW_AT_ranges`-form inlined
+  subroutines (multi-range scattered inlines). Currently skipped
+  silently; not a blocker because the contiguous form covers the
+  common case.
+- v0.14.x or v0.15 — also surface chain on `PerContextVerdict`
+  (per-bucket chain label so reviewers reading the drill-down see
+  not just the leaf but the full path the bucket represents).
+- v0.14.x — flip `--mcdc-schema` default v2 → v3 once the chain
+  shape stabilises and downstream tooling consumes it.
+- macOS Developer ID signing — waiting on user cert plumbing.
+- Predicate Rekor-binding — deferred.
+
 ## [0.13.1] — 2026-05-10
 
 Soak window for v0.13.0 closed. The verdict suite verified

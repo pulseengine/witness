@@ -350,6 +350,7 @@ mod tests {
             branches,
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
+            branch_inline_chains: std::collections::BTreeMap::new(),
         };
         std::fs::write(path, serde_json::to_string(&m).unwrap()).unwrap();
     }

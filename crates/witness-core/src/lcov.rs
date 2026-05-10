@@ -230,6 +230,7 @@ mod tests {
                 inline_context: None,
             }],
             branch_inline_contexts: std::collections::BTreeMap::new(),
+            branch_inline_chains: std::collections::BTreeMap::new(),
         }
     }
 

@@ -373,12 +373,15 @@ enum PredicateKind {
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum McdcSchemaArg {
     /// `https://pulseengine.eu/witness-mcdc/v1` — pre-v0.13 shape.
-    /// Default for v0.13.0; flipped to V2 in v0.13.1.
     V1,
     /// `https://pulseengine.eu/witness-mcdc/v2` — v0.13.0 superset.
     /// Adds per-row `inline_context` tags + per-context verdict
-    /// drill-down on `DecisionVerdict.per_context`.
+    /// drill-down on `DecisionVerdict.per_context`. Default since v0.13.1.
     V2,
+    /// `https://pulseengine.eu/witness-mcdc/v3` — v0.14.0 superset.
+    /// Adds full DWARF inline call CHAIN (`Vec<InlineContext>`) per
+    /// row + per `RowView`, on top of v2's single-hop leaf.
+    V3,
 }
 
 impl From<McdcSchemaArg> for witness_core::mcdc_report::McdcSchemaVersion {
@@ -386,6 +389,7 @@ impl From<McdcSchemaArg> for witness_core::mcdc_report::McdcSchemaVersion {
         match a {
             McdcSchemaArg::V1 => Self::V1,
             McdcSchemaArg::V2 => Self::V2,
+            McdcSchemaArg::V3 => Self::V3,
         }
     }
 }
