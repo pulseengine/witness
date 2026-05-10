@@ -7,6 +7,47 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-05-10
+
+Soak window for v0.13.0 closed. The verdict suite verified
+v0.13.0's v1-mode output is byte-identical to v0.11.5
+(21/177 full-MC/DC, httparse 7/86); v2-mode adds the per-row
+`inline_context` tags and the `per_context` drill-down without
+regression. v0.13.1 flips the `witness predicate
+--mcdc-schema` default from `v1` to `v2`.
+
+### Changed — `--mcdc-schema` default v1 → v2
+
+- `McdcSchemaVersion::default()` now returns `V2` (was `V1`).
+- `witness predicate --kind mcdc` (no explicit `--mcdc-schema`)
+  now emits v2 envelopes by default. The wrapper's `predicateType`
+  AND the embedded `predicate.report.schema` both ship the v2 URL.
+- Existing consumers that schema-validate strictly against v1
+  must pass `--mcdc-schema v1` to preserve byte-identical output.
+
+### Tests
+
+- `predicate::tests::mcdc_predicate_round_trips_truth_tables_and_gaps`
+  and `attest::tests::mcdc_predicate_sign_then_verify_round_trip`
+  now assert against `MCDC_PREDICATE_TYPE_V2` (was `MCDC_PREDICATE_TYPE`),
+  matching the new default.
+
+### Verified
+
+- `cargo test --workspace`: all green (67 mcdc_report + others).
+- Live sample at `/tmp/v0131-default.json` (httparse run): default
+  emits v2 (`predicateType` and `report.schema` both
+  `https://pulseengine.eu/witness-mcdc/v2`). Explicit
+  `--mcdc-schema v1` still emits v1 envelopes byte-identical to
+  the v0.13.0 v1-mode output.
+
+### Notes for v0.14+
+
+- v0.14 — `DW_AT_ranges` scattered-inline support + chain-depth
+  tracking (row tag becomes `Vec<InlineFrame>`; mcdc-v3 schema).
+- macOS Developer ID signing — waiting on user cert plumbing.
+- Predicate Rekor-binding — deferred to v0.14+.
+
 ## [0.13.0] — 2026-05-10
 
 Variant B — per-DWARF-inlined-context row tagging in mcdc-v2.
