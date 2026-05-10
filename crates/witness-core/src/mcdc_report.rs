@@ -24,23 +24,29 @@ pub const MCDC_SCHEMA_URL: &str = "https://pulseengine.eu/witness-mcdc/v1";
 /// Producers select via `--mcdc-schema v2` (default stays v1 in
 /// v0.13.0; flipped to v2 in v0.13.1 once the soak validates).
 pub const MCDC_SCHEMA_URL_V2: &str = "https://pulseengine.eu/witness-mcdc/v2";
+/// v0.14.0 — mcdc-v3 endpoint. Adds full DWARF inlined-call CHAIN
+/// (`Vec<InlineContext>`) per row + per RowView, alongside the
+/// single-hop leaf context that v2 already ships. Producers select
+/// via `--mcdc-schema v3`. v0.14.0 keeps default at v2; a later
+/// release will flip when the chain shape stabilises.
+pub const MCDC_SCHEMA_URL_V3: &str = "https://pulseengine.eu/witness-mcdc/v3";
 
 /// v0.13.0 — schema selector for `McdcReport::from_record_v*` and
 /// `predicate::build_mcdc_statement_v*`. Kept as a small enum
-/// instead of a bool so future schema bumps (v3 etc.) extend
-/// cleanly without rewriting call-site signatures.
+/// instead of a bool so future schema bumps extend cleanly without
+/// rewriting call-site signatures.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum McdcSchemaVersion {
     /// v0.13.0 shipped V1 as default for a soak window. v0.13.1
-    /// (this release) flips the default to V2 — soak validated
-    /// the v1-mode byte-identity to v0.11.5, so producers can now
-    /// emit the per-context drill-down by default. Existing
-    /// consumers that schema-validate strictly against v1 must
-    /// pass `--mcdc-schema v1` to preserve byte-identical output.
+    /// flipped the default to V2.
     V1,
     #[default]
     V2,
+    /// v0.14.0 — adds full inline call chain (`Vec<InlineContext>`)
+    /// per row + per `RowView`, on top of v2's single-hop leaf.
+    /// Opt-in via `--mcdc-schema v3`.
+    V3,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -290,6 +296,13 @@ pub struct RowView {
     /// runner-tag time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inline_context: Option<crate::instrument::InlineContext>,
+    /// v0.14.0 — full inline call chain for this row, alongside the
+    /// single-hop `inline_context` leaf. Populated only on v3
+    /// envelopes; v2/v1 strip it via `from_record_with_schema`.
+    /// `chain.last() == inline_context.as_ref()` invariant holds
+    /// when both are populated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_chain: Option<Vec<crate::instrument::InlineContext>>,
 }
 
 impl McdcReport {
@@ -307,11 +320,22 @@ impl McdcReport {
                     d.per_context.clear();
                     for r in &mut d.truth_table {
                         r.inline_context = None;
+                        r.inline_chain = None;
                     }
                 }
             }
             McdcSchemaVersion::V2 => {
                 report.schema = MCDC_SCHEMA_URL_V2.to_string();
+                // v2 strips v3-only fields; keeps v2 fields intact.
+                for d in &mut report.decisions {
+                    for r in &mut d.truth_table {
+                        r.inline_chain = None;
+                    }
+                }
+            }
+            McdcSchemaVersion::V3 => {
+                report.schema = MCDC_SCHEMA_URL_V3.to_string();
+                // v3 keeps everything populated.
             }
         }
         report
@@ -626,6 +650,7 @@ fn analyse_decision(
             evaluated: r.evaluated.clone(),
             outcome: r.outcome,
             inline_context: r.inline_context.clone(),
+            inline_chain: r.inline_chain.clone(),
         })
         .collect();
 
@@ -1134,6 +1159,7 @@ mod tests {
             outcome,
             raw_brvals: BTreeMap::new(),
             inline_context: None,
+            inline_chain: None,
         }
     }
 
@@ -1306,6 +1332,7 @@ mod tests {
                 outcome: None,
                 raw_brvals,
                 inline_context: None,
+                inline_chain: None,
             });
         }
         let d = DecisionRecord {
@@ -1370,6 +1397,7 @@ mod tests {
                 outcome: None,
                 raw_brvals: BTreeMap::new(),
                 inline_context: None,
+                inline_chain: None,
             });
         }
         let d = DecisionRecord {
@@ -1446,6 +1474,7 @@ mod tests {
             outcome,
             raw_brvals: BTreeMap::new(),
             inline_context: Some(ctx.clone()),
+            inline_chain: None,
         };
         let d = DecisionRecord {
             id: 0,
@@ -1493,6 +1522,7 @@ mod tests {
                 outcome,
                 raw_brvals: BTreeMap::new(),
                 inline_context: Some(ctx.clone()),
+                inline_chain: None,
             }
         };
         // Decision shape: `c0 && c1` (masking MC/DC, &&-style). When

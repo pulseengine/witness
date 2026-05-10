@@ -49,21 +49,31 @@ use std::collections::BTreeMap;
 /// reconstruction phase yields no multi-condition groups (i.e. every
 /// surviving group is a single condition — strict per-`br_if` is the
 /// correct interpretation, no need to materialise a `Decision`).
+/// v0.14.0 — return tuple of `reconstruct_decisions` /
+/// `group_into_decisions`. Tuple is wide enough that clippy's
+/// `type_complexity` lint flags it; aliasing keeps signatures clean.
+pub type ReconstructionResult = (
+    Vec<Decision>,
+    BTreeMap<u32, InlineContext>,
+    BTreeMap<u32, Vec<InlineContext>>,
+);
+
 pub fn reconstruct_decisions(
     wasm_bytes: &[u8],
     branches: &[BranchEntry],
-) -> Result<(Vec<Decision>, BTreeMap<u32, InlineContext>)> {
+) -> Result<ReconstructionResult> {
+    let empty = || (Vec::new(), BTreeMap::new(), BTreeMap::new());
     let dwarf_sections = match extract_dwarf_sections(wasm_bytes) {
         Some(s) => s,
-        None => return Ok((Vec::new(), BTreeMap::new())),
+        None => return Ok(empty()),
     };
 
     let line_map = match build_line_map(&dwarf_sections) {
         Ok(m) => m,
-        Err(_) => return Ok((Vec::new(), BTreeMap::new())),
+        Err(_) => return Ok(empty()),
     };
     if line_map.is_empty() {
-        return Ok((Vec::new(), BTreeMap::new()));
+        return Ok(empty());
     }
 
     // v0.13.0 — Variant B: re-enable inline-map construction (v0.12.1
@@ -74,6 +84,13 @@ pub fn reconstruct_decisions(
     // manifest so the runner can stamp each row's inline_context tag
     // and the mcdc-v2 reporter can build per-context verdict views
     // *within* unified single-Decision clusters.
+    //
+    // v0.14.0 — also surfaces the full inline call CHAIN (Vec) per
+    // branch, alongside the single-hop leaf context. The chain
+    // captures multi-level inlines (e.g. `is_safe()` inlined into
+    // `validate()` itself inlined into `audit()` produces a chain
+    // of length 2). v3 mcdc envelopes ship the chain; v2 keeps the
+    // single-hop view byte-identical.
     let inline_map = build_inline_map(&dwarf_sections).unwrap_or_default();
 
     Ok(group_into_decisions(branches, &line_map, &inline_map))
@@ -260,7 +277,7 @@ fn group_into_decisions(
     branches: &[BranchEntry],
     line_map: &LineMap,
     inline_map: &InlineMap,
-) -> (Vec<Decision>, BTreeMap<u32, InlineContext>) {
+) -> ReconstructionResult {
     // Step 1: resolve each br_if's (function, file, line). Side-output
     // a per-branch `branch_id → InlineContext` map for everything
     // whose byte offset fell within an inlined-subroutine address
@@ -274,6 +291,9 @@ fn group_into_decisions(
     let mut resolved: Vec<Resolved<'_>> = Vec::new();
     let mut brtable_resolved: Vec<Resolved<'_>> = Vec::new();
     let mut branch_inline_contexts: BTreeMap<u32, InlineContext> = BTreeMap::new();
+    // v0.14.0 — full call chain per branch, in addition to the
+    // single-hop leaf context. Same keyset as branch_inline_contexts.
+    let mut branch_inline_chains: BTreeMap<u32, Vec<InlineContext>> = BTreeMap::new();
     for entry in branches {
         let Some(byte_offset) = entry.byte_offset else {
             continue;
@@ -282,8 +302,9 @@ fn group_into_decisions(
         let Some(loc) = lookup_line(line_map, addr) else {
             continue;
         };
-        if let Some(ctx) = lookup_inline(inline_map, addr) {
+        if let Some((ctx, chain)) = lookup_inline_with_chain(inline_map, addr) {
             branch_inline_contexts.insert(entry.id, ctx.clone());
+            branch_inline_chains.insert(entry.id, chain.clone());
         }
         match entry.kind {
             BranchKind::BrIf => {
@@ -436,7 +457,7 @@ fn group_into_decisions(
         next_decision_id = next_decision_id.saturating_add(1);
     }
 
-    (out, branch_inline_contexts)
+    (out, branch_inline_contexts, branch_inline_chains)
 }
 
 /// v0.13.0 — pick the most-common `InlineContext` across the given
@@ -492,6 +513,14 @@ type InlineMap = BTreeMap<u64, InlineEntry>;
 struct InlineEntry {
     high_pc_exclusive: u64,
     context: InlineContext,
+    /// v0.14.0 — full call chain from outermost to innermost inlined
+    /// frame (inclusive of `context` at the tail). When `is_safe()`
+    /// is inlined inside `validate()` which is itself inlined into
+    /// `audit()`, the chain at the innermost address is
+    /// `[validate-call-site-in-audit, is_safe-call-site-in-validate]`.
+    /// `chain.last() == Some(&context)` is an invariant: the last
+    /// frame is always this entry's own call site.
+    chain: Vec<InlineContext>,
 }
 
 /// Walk the DIE tree of every compilation unit and collect every
@@ -520,8 +549,28 @@ fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineM
         // (a line-program file index) can be resolved to a path string.
         let unit_files = collect_unit_files(&unit_ref);
 
+        // v0.14.0 — track the parent inlined-subroutine chain via a
+        // depth-keyed stack. Each entry on the stack is an outer
+        // inlined call site that hasn't closed yet (the DFS cursor
+        // is still inside its DIE subtree). When the cursor ascends
+        // past an inline parent's depth, we pop it. When we encounter
+        // a new inlined-subroutine DIE, we push it AFTER recording
+        // its chain (= parents-on-stack + self).
+        let mut inline_parents: Vec<(isize, InlineContext)> = Vec::new();
+        let mut current_depth: isize = 0;
+
         let mut entries = unit.entries();
-        while let Some((_depth, entry)) = entries.next_dfs()? {
+        while let Some((delta, entry)) = entries.next_dfs()? {
+            current_depth = current_depth.saturating_add(delta);
+            // Pop inline parents that closed (their DIE subtree is
+            // behind the cursor now).
+            while let Some(&(parent_depth, _)) = inline_parents.last() {
+                if parent_depth >= current_depth {
+                    inline_parents.pop();
+                } else {
+                    break;
+                }
+            }
             if entry.tag() != gimli::constants::DW_TAG_inlined_subroutine {
                 continue;
             }
@@ -587,23 +636,34 @@ fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineM
                 .and_then(|idx| usize::try_from(idx).ok())
                 .and_then(|idx| unit_files.get(idx).cloned());
 
+            let context = InlineContext {
+                call_file,
+                call_line: line_u32,
+            };
+            // v0.14.0 — chain = parents-on-stack + self, in
+            // outermost-to-innermost order. Last frame is always
+            // this entry's own context.
+            let chain: Vec<InlineContext> = inline_parents
+                .iter()
+                .map(|(_, c)| c.clone())
+                .chain(std::iter::once(context.clone()))
+                .collect();
+
             // BTreeMap keyed on low_pc; later inlines at the same
             // low_pc overwrite earlier ones. Rare; if it happens
             // both ranges cover the same code so either is fine.
-            // For nested inlines, the DIE walker visits children
-            // after parents and OUR inner-most entry wins — which
-            // matches Variant A's semantics ("innermost call site
-            // discriminates").
             out.insert(
                 lo,
                 InlineEntry {
                     high_pc_exclusive: hi_excl,
-                    context: InlineContext {
-                        call_file,
-                        call_line: line_u32,
-                    },
+                    context: context.clone(),
+                    chain,
                 },
             );
+
+            // Push self onto the parent stack so any nested inlines
+            // visited deeper in the DFS see this frame as their parent.
+            inline_parents.push((current_depth, context));
         }
     }
     Ok(out)
@@ -653,10 +713,29 @@ fn collect_unit_files(unit_ref: &gimli::UnitRef<'_, EndianSlice<'_, LittleEndian
 /// `addr`, or `None` if the address is at top-level or outside any
 /// known inlined range. Pre-v0.12 behaviour (no inlines tracked)
 /// falls out of an empty `InlineMap`.
+#[allow(dead_code)] // v0.14.0 — superseded by lookup_inline_with_chain in the prod path; kept for tests + future selectors.
 fn lookup_inline(map: &InlineMap, addr: u64) -> Option<&InlineContext> {
     let (_, entry) = map.range(..=addr).next_back()?;
     if addr < entry.high_pc_exclusive {
         Some(&entry.context)
+    } else {
+        None
+    }
+}
+
+/// v0.14.0 — chain-aware lookup. Same `addr` resolution as
+/// `lookup_inline`; returns both the innermost frame (for v2 back-
+/// compat) and the full chain from outermost to innermost. Callers
+/// in v3-aware code paths consume the chain; v2 code paths consume
+/// only the leaf via `lookup_inline`.
+#[allow(dead_code)] // wired into group_into_decisions; called via the per-branch path.
+fn lookup_inline_with_chain(
+    map: &InlineMap,
+    addr: u64,
+) -> Option<(&InlineContext, &Vec<InlineContext>)> {
+    let (_, entry) = map.range(..=addr).next_back()?;
+    if addr < entry.high_pc_exclusive {
+        Some((&entry.context, &entry.chain))
     } else {
         None
     }
@@ -689,7 +768,8 @@ mod tests {
     #[test]
     fn empty_module_yields_no_decisions() {
         let entries = vec![entry_with_offset(0, 0), entry_with_offset(1, 4)];
-        let (decisions, _) = reconstruct_decisions(b"\x00asm\x01\x00\x00\x00", &entries).unwrap();
+        let (decisions, _, _) =
+            reconstruct_decisions(b"\x00asm\x01\x00\x00\x00", &entries).unwrap();
         assert!(
             decisions.is_empty(),
             "no DWARF sections → strict-per-br_if fallback (empty Decision list)"
@@ -727,7 +807,7 @@ mod tests {
             },
         );
         let entries = vec![entry_with_offset(0, 10), entry_with_offset(1, 20)];
-        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             1,
@@ -756,7 +836,7 @@ mod tests {
             },
         );
         let entries = vec![entry_with_offset(0, 10), entry_with_offset(1, 20)];
-        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert!(
             decisions.is_empty(),
             "two singletons on different lines → no Decision (strict-per-br_if applies)"
@@ -784,7 +864,7 @@ mod tests {
         a.function_index = 0;
         let mut b = entry_with_offset(1, 20);
         b.function_index = 1;
-        let (decisions, _) = group_into_decisions(&[a, b], &line_map, &InlineMap::new());
+        let (decisions, _, _) = group_into_decisions(&[a, b], &line_map, &InlineMap::new());
         // Same line, different functions → no shared decision.
         assert!(
             decisions.is_empty(),
@@ -832,7 +912,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             1,
@@ -884,7 +964,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             2,
@@ -955,6 +1035,7 @@ mod tests {
                     call_file: Some("caller.rs".to_string()),
                     call_line: 5,
                 },
+                chain: Vec::new(),
             },
         );
         inline_map.insert(
@@ -965,6 +1046,7 @@ mod tests {
                     call_file: Some("caller.rs".to_string()),
                     call_line: 10,
                 },
+                chain: Vec::new(),
             },
         );
         let entries = vec![
@@ -973,7 +1055,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, branch_inline_contexts) =
+        let (decisions, branch_inline_contexts, _) =
             group_into_decisions(&entries, &line_map, &inline_map);
         assert_eq!(
             decisions.len(),
@@ -1030,6 +1112,7 @@ mod tests {
                     call_file: Some("caller.rs".to_string()),
                     call_line: 5,
                 },
+                chain: Vec::new(),
             },
         );
         // 1 branch in ctx_b (call_line 10)
@@ -1041,6 +1124,7 @@ mod tests {
                     call_file: Some("caller.rs".to_string()),
                     call_line: 10,
                 },
+                chain: Vec::new(),
             },
         );
         let entries = vec![
@@ -1049,7 +1133,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, _) = group_into_decisions(&entries, &line_map, &inline_map);
+        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &inline_map);
         assert_eq!(decisions.len(), 1);
         let label = decisions[0]
             .inline_context
@@ -1082,7 +1166,7 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
         assert_eq!(
             decisions.len(),
             1,

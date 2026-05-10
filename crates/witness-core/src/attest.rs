@@ -213,6 +213,7 @@ mod tests {
             outcome,
             raw_brvals: BTreeMap::new(),
             inline_context: None,
+            inline_chain: None,
         };
         let record = RunRecord {
             schema_version: "3".to_string(),

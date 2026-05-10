@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulseengine.eu/witness-mcdc/v3",
+  "title": "witness-mcdc/v3",
+  "description": "v0.14.0 — superset of witness-mcdc/v2. Adds full DWARF inlined-call CHAIN per row (`RowView.inline_chain`), as a `Vec<InlineContext>` from outermost to innermost frame. v2's single-hop `inline_context` leaf is preserved; both fields are populated together with `chain.last() == inline_context` invariant. Producers select via `--mcdc-schema v3`; consumers must validate against the schema URL the envelope declares.",
+  "type": "object",
+  "required": ["schema", "witness_version", "module", "overall", "decisions", "trace_health"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "Schema URL identifying this document. Always equal to the URL `https://pulseengine.eu/witness-mcdc/v3`.",
+      "type": "string",
+      "const": "https://pulseengine.eu/witness-mcdc/v3"
+    },
+    "witness_version": {
+      "description": "Version of the witness toolchain that produced this report (Cargo package version).",
+      "type": "string"
+    },
+    "module": {
+      "description": "Path of the instrumented Wasm module the report was produced from. May be project-relative when SOURCE_DATE_EPOCH and path normalisation are active.",
+      "type": "string"
+    },
+    "overall": {
+      "$ref": "#/$defs/McdcOverall"
+    },
+    "decisions": {
+      "description": "Per-decision verdicts in manifest order.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/DecisionVerdict" }
+    },
+    "trace_health": {
+      "$ref": "#/$defs/TraceHealth"
+    },
+    "interpretation_polarity": {
+      "description": "v0.10.0 — names the polarity convention the truth-table cells use. Always `wasm-early-exit` in v0.10.x: `c_i=true` means \"the wasm br_if value at condition i was true,\" which inverts source-level `c_i` for any condition lowered through `i32.eqz`. Lets viewers explain the `(year % 4 == 0) && ...` row vector at the right level of abstraction. v0.10.x may add `source-equivalent` as an opt-in. Omitted on v0.9.x reports.",
+      "type": "string",
+      "enum": ["wasm-early-exit", "source-equivalent"]
+    }
+  },
+  "$defs": {
+    "McdcOverall": {
+      "description": "Aggregate counts across the run. Boolean-decision counts (decisions_total, decisions_full_mcdc) exclude br_table-shape decisions because per-arm coverage is the honest measurement for those (see v0.9.7 br-table-arm interpretation).",
+      "type": "object",
+      "required": [
+        "decisions_total",
+        "decisions_full_mcdc",
+        "conditions_total",
+        "conditions_proved",
+        "conditions_gap",
+        "conditions_dead"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "decisions_total": { "type": "integer", "minimum": 0 },
+        "decisions_full_mcdc": { "type": "integer", "minimum": 0 },
+        "conditions_total": { "type": "integer", "minimum": 0 },
+        "conditions_proved": { "type": "integer", "minimum": 0 },
+        "conditions_gap": { "type": "integer", "minimum": 0 },
+        "conditions_dead": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "DecisionVerdict": {
+      "description": "One source-level decision's verdict.",
+      "type": "object",
+      "required": ["id", "conditions", "truth_table", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Decision id; matches manifest.decisions[].id.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_file": {
+          "description": "Source file (DWARF) the decision was reconstructed from. Absent when DWARF source location is unavailable.",
+          "type": "string"
+        },
+        "source_line": {
+          "description": "1-based source line number the decision starts on. Absent when DWARF source location is unavailable.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "inline_context": {
+          "description": "v0.12.0 — inlined call-site context. When the source decision was reconstructed from an inlined-subroutine instance (e.g. `is_safe()` inlined from `validate.rs:5`), this field carries the call site coordinates so reviewers can disambiguate two Decisions that share the same `source_file` / `source_line` but originate from different physical call sites. Absent when the decision is at top level or DWARF didn't supply inlining info.",
+          "$ref": "#/$defs/InlineContext"
+        },
+        "conditions": {
+          "description": "Per-condition verdicts in evaluation order (index 0..N-1).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConditionVerdict" }
+        },
+        "truth_table": {
+          "description": "Read-only view of every observed condition vector + outcome for this decision.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/RowView" }
+        },
+        "status": { "$ref": "#/$defs/DecisionStatus" },
+        "br_table_audit": {
+          "description": "v0.11.5 — discriminant-bit MC/DC audit verdict for br_table-shape decisions. Present only when (a) the decision is br_table-shaped, (b) at least one row carried `raw_brvals` data (v0.11.5+ instrumentation). The per-condition `conditions` list above stays the headline reviewer view (per-arm coverage); this block carries the textbook MC/DC-over-the-discriminant proof that DO-178C objective 5.2 work needs.",
+          "$ref": "#/$defs/BrTableAudit"
+        },
+        "per_context": {
+          "description": "v0.13.0 — per-context verdict drill-down (Variant B). One entry per distinct non-`null` `inline_context` observed across the decision's rows that has at least 2 rows. Each entry runs the MC/DC kernel against just that context's rows so reviewers can see 'this Decision is FullMcdc when inlined from validate.rs:5 but Partial when inlined from audit.rs:10' without losing the unified-Decision shape. Empty when no rows carry inline_context tags or when every tagged row shares one context (the headline already covers it).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/PerContextVerdict" }
+        }
+      }
+    },
+    "PerContextVerdict": {
+      "type": "object",
+      "required": ["inline_context", "conditions", "status", "proved_conditions", "gap_conditions", "dead_conditions", "row_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "inline_context": { "$ref": "#/$defs/InlineContext" },
+        "conditions": {
+          "description": "Per-condition verdicts under this call-site context's row subset. Same shape as DecisionVerdict.conditions but computed against the filtered rows.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConditionVerdict" }
+        },
+        "status": { "$ref": "#/$defs/DecisionStatus" },
+        "proved_conditions": { "type": "integer", "minimum": 0 },
+        "gap_conditions": { "type": "integer", "minimum": 0 },
+        "dead_conditions": { "type": "integer", "minimum": 0 },
+        "row_ids": {
+          "description": "row_ids of the rows contributing to this context's view. Reviewers can correlate against truth_table[].row_id to render the per-context truth-table without re-deriving the filter.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "InlineContext": {
+      "type": "object",
+      "required": ["call_line"],
+      "additionalProperties": false,
+      "properties": {
+        "call_file": {
+          "description": "Source file containing the inlined call site (the caller's file). Absent when DWARF didn't supply DW_AT_call_file for the inlined subroutine.",
+          "type": "string"
+        },
+        "call_line": {
+          "description": "Source line of the inlined call site (1-based). Always present when the inline context exists at all — the line discriminator is what splits otherwise-conflated decisions.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "BrTableAudit": {
+      "type": "object",
+      "required": ["bit_width", "bits", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "bit_width": {
+          "description": "Number of discriminant bits the audit considered. Equals the position of the highest set bit across all observed discriminants, plus one (capped to 32, the wasm i32 width).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32
+        },
+        "bits": {
+          "description": "Per-bit verdict in ascending bit-position order (bit 0 first).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/BrTableBitVerdict" }
+        },
+        "status": {
+          "description": "Aggregate audit status.\n- `proved` — every bit position has an independent-effect witness pair.\n- `partial` — some bits proved, some have gaps.\n- `gap` — at least one observed bit has no proving pair.\n- `not_applicable` — decision was reached but no rows carried raw_brvals (pre-v0.11.5 instrumentation).",
+          "type": "string",
+          "enum": ["proved", "partial", "gap", "not_applicable"]
+        }
+      }
+    },
+    "BrTableBitVerdict": {
+      "type": "object",
+      "required": ["bit", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "bit": {
+          "description": "Bit position (0 = least-significant).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "status": {
+          "description": "Per-bit verdict.\n- `proved` — found a row pair where this bit differs and the firing arm differs.\n- `gap` — bit was observed but no proving pair.\n- `dead` — every observed discriminant agreed on this bit's value.",
+          "type": "string",
+          "enum": ["proved", "gap", "dead"]
+        },
+        "pair": {
+          "description": "Row pair witnessing independent effect of this bit. Present only when `status == proved`.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "DecisionStatus": {
+      "description": "Decision-level verdict.\n- `full_mcdc` — every condition has an independent-effect witness pair.\n- `partial` — some conditions are proved, others have gaps or are dead.\n- `no_witness` — decision was reached but no conditions could be proved (e.g. only one row, or all rows have the same condition vector).\n- `unreached` — decision had zero rows in the run.",
+      "type": "string",
+      "enum": ["full_mcdc", "partial", "no_witness", "unreached"]
+    },
+    "ConditionVerdict": {
+      "description": "Verdict for one condition within a decision.",
+      "type": "object",
+      "required": ["index", "branch_id", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "description": "Condition index (0..N-1) within the decision.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "branch_id": {
+          "description": "Manifest branch id this condition corresponds to.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": { "$ref": "#/$defs/ConditionStatus" },
+        "interpretation": {
+          "description": "Pair interpretation when status is `proved`. Values:\n- `unique-cause` — both rows of the proving pair fully evaluated every condition (no short-circuiting).\n- `masking` — at least one row of the pair short-circuited a non-target condition (DO-178C masking variant).\n- `unique-cause-plus-masking` — reserved for the in-between case (currently unused; kept for forward compatibility).\n- `br-table-arm` — v0.9.7 — decision is br_table-shaped (mutually exclusive arms). Each condition is an arm and `proved` means the arm hit count is > 0; standard MC/DC pair-finding does not apply.",
+          "type": "string",
+          "enum": ["unique-cause", "masking", "unique-cause-plus-masking", "br-table-arm"]
+        },
+        "pair": {
+          "description": "Row ids of the proving pair when status is `proved`. Absent when no pair was found.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "gap_closure": {
+          "description": "Recommended row to close the missing pair when status is `gap`. Absent for `proved` and `dead`.",
+          "$ref": "#/$defs/GapClosure"
+        }
+      }
+    },
+    "ConditionStatus": {
+      "description": "Condition-level verdict.\n- `proved` — independent effect demonstrated by an existing row pair.\n- `gap` — condition was evaluated in at least one row but no proving pair exists; an additional test row would close it.\n- `dead` — condition was never evaluated across any row in the run (no test exercises it).",
+      "type": "string",
+      "enum": ["proved", "gap", "dead"]
+    },
+    "GapClosure": {
+      "description": "Recommendation for closing a `gap`-status condition by flipping the target value relative to an existing row.",
+      "type": "object",
+      "required": ["paired_with_row", "evaluated"],
+      "additionalProperties": false,
+      "properties": {
+        "paired_with_row": {
+          "description": "Row id this recommendation pairs against.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "evaluated": {
+          "description": "Recommended condition vector (target condition flipped from paired_with_row's value, others identical). Object whose keys are stringified u32 condition indices and values are booleans.",
+          "type": "object",
+          "patternProperties": {
+            "^[0-9]+$": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "outcome_must_differ_from": {
+          "description": "Outcome of paired_with_row. The recommended row's outcome must differ from this value to close the pair under masking MC/DC.",
+          "type": ["boolean", "null"]
+        }
+      }
+    },
+    "RowView": {
+      "description": "One observation of a decision's condition vector under short-circuit evaluation.",
+      "type": "object",
+      "required": ["row_id", "evaluated"],
+      "additionalProperties": false,
+      "properties": {
+        "row_id": {
+          "description": "Stable row identifier carried back in the proving-pair tuple.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "evaluated": {
+          "description": "Sparse map of condition_index (stringified) -> evaluated boolean. Conditions short-circuited in this row are absent.",
+          "type": "object",
+          "patternProperties": {
+            "^[0-9]+$": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "outcome": {
+          "description": "Decision outcome when observed. `null` when the decision was reached but the boolean result was not observed (e.g. function panicked or returned mid-chain).",
+          "type": ["boolean", "null"]
+        },
+        "inline_context": {
+          "description": "v0.13.0 — DWARF inlined-call-site tag for this row (innermost frame). Lets reviewers reading the truth-table see which call site each row came from without cross-referencing the per_context drill-down. Absent on rows whose conditions tied between contexts at runner-tag time.",
+          "$ref": "#/$defs/InlineContext"
+        },
+        "inline_chain": {
+          "description": "v0.14.0 — full DWARF inline call chain for this row, from outermost to innermost frame (inclusive). When `is_safe()` is inlined into `validate()` itself inlined into `audit()`, the chain at the innermost address is `[validate-call-site-in-audit, is_safe-call-site-in-validate]` (length 2). `chain.last()` equals `inline_context` when both are populated.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/InlineContext" }
+        }
+      }
+    },
+    "TraceHealth": {
+      "description": "Health of the per-row capture path. Reporters MUST refuse to emit MC/DC verdicts when `overflow` is true.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "overflow": {
+          "description": "True if any per-condition counter saturated between row markers (degenerate condition: a row evaluated the same condition more than once).",
+          "type": "boolean"
+        },
+        "rows": {
+          "description": "Total rows captured across all decisions.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "trace_parser_active": {
+          "description": "v0.10.0 — renamed from `ambiguous_rows` (the legacy field name was misleading: it described whether the trace-buffer parser produced per-iteration rows, not whether outcomes were ambiguous). True when post-v0.7.3 instrumentation produced kind=0/kind=2 trace records the parser could decode into rows. Pre-v0.7.3 modules and harness-v1 snapshots leave this `false` (only counter aggregates). Witness still accepts the legacy `ambiguous_rows` name on input via serde alias; producers emit only `trace_parser_active`.",
+          "type": "boolean"
+        },
+        "ambiguous_rows": {
+          "description": "Deprecated v0.9.x alias of `trace_parser_active`. Witness deserialises this name for back-compat with v0.9.x run-record loads but never emits it; consumers SHOULD prefer `trace_parser_active`.",
+          "type": "boolean",
+          "deprecated": true
+        },
+        "bytes_used": {
+          "description": "v0.9.8 — total trace memory bytes consumed across all rows.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "pages_allocated": {
+          "description": "v0.9.8 — number of Wasm memory pages the instrumented module allocates for its trace buffer (default 16 = 1 MiB).",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

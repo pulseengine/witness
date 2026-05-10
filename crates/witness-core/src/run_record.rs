@@ -123,6 +123,16 @@ pub struct DecisionRow {
     /// `#[serde(default)]` so pre-v0.13 run records keep deserialising.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inline_context: Option<crate::instrument::InlineContext>,
+    /// v0.14.0 — full inline call chain for this row, alongside the
+    /// single-hop `inline_context` leaf. Populated by the runner
+    /// from `Manifest.branch_inline_chains`. Same modal-selection
+    /// rule as `inline_context` (the modal chain across the row's
+    /// evaluated condition branches; ties resolve to `None`).
+    /// `chain.last() == inline_context.as_ref()` is an invariant
+    /// when both are populated. v3 mcdc envelopes ship the chain;
+    /// v2 envelopes strip it. Pre-v0.14 records deserialise unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_chain: Option<Vec<crate::instrument::InlineContext>>,
 }
 
 /// Health of the per-row capture path. The reporter refuses MC/DC verdicts
