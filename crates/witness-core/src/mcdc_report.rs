@@ -142,6 +142,13 @@ pub struct DecisionVerdict {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PerContextVerdict {
     pub inline_context: crate::instrument::InlineContext,
+    /// v0.14.1 — full call chain for this bucket, when v3 mcdc
+    /// envelope is requested. The bucket's `inline_context` is the
+    /// chain's leaf (`chain.last()`); reviewers reading the drill-
+    /// down see the full call path the bucket represents (not just
+    /// the leaf). Stripped under v1/v2 schemas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_chain: Option<Vec<crate::instrument::InlineContext>>,
     pub conditions: Vec<ConditionVerdict>,
     pub status: DecisionStatus,
     pub proved_conditions: u32,
@@ -330,6 +337,9 @@ impl McdcReport {
                 for d in &mut report.decisions {
                     for r in &mut d.truth_table {
                         r.inline_chain = None;
+                    }
+                    for p in &mut d.per_context {
+                        p.inline_chain = None;
                     }
                 }
             }
@@ -959,8 +969,15 @@ fn derive_per_context(
             (false, false) => DecisionStatus::FullMcdc,
         };
         let row_ids: Vec<u32> = ctx_rows.iter().map(|r| r.row_id).collect();
+        // v0.14.1 — chain label for the drill-down bucket. Pick any
+        // row's chain (they're filtered to the same context, so any
+        // row in the bucket carries the same chain by construction).
+        // Falls out to None when pre-v0.14 rows didn't carry chain
+        // tags, in which case v3 envelopes simply skip the field.
+        let inline_chain = ctx_rows.iter().find_map(|r| r.inline_chain.clone());
         out.push(PerContextVerdict {
             inline_context: ctx,
+            inline_chain,
             conditions,
             status,
             proved_conditions: proved_count,
@@ -1583,6 +1600,123 @@ mod tests {
             "ctx_b should be Partial (c0 proved, c1 gap); got {:?}",
             ctx_b_view.status
         );
+    }
+
+    #[test]
+    fn v3_chain_propagates_from_decision_row_to_row_view_and_per_context() {
+        // v0.14.1 — synthesize a Decision with rows tagged with
+        // *both* a leaf inline_context AND a chain. Build the
+        // McdcReport at v3 schema; assert chain shows up on
+        // RowView.inline_chain and on PerContextVerdict.inline_chain.
+        // Then re-build at v2 and assert chain is stripped.
+        let frame_outer = crate::instrument::InlineContext {
+            call_file: Some("audit.rs".to_string()),
+            call_line: 5,
+        };
+        let frame_inner = crate::instrument::InlineContext {
+            call_file: Some("validate.rs".to_string()),
+            call_line: 10,
+        };
+        let frame_other = crate::instrument::InlineContext {
+            call_file: Some("validate.rs".to_string()),
+            call_line: 20,
+        };
+        let chain_a = vec![frame_outer.clone(), frame_inner.clone()];
+        let chain_b = vec![frame_outer.clone(), frame_other.clone()];
+        let mk_row = |id: u32,
+                      evaluated: &[(u32, bool)],
+                      outcome: Option<bool>,
+                      ctx: &crate::instrument::InlineContext,
+                      chain: &Vec<crate::instrument::InlineContext>|
+         -> DecisionRow {
+            DecisionRow {
+                row_id: id,
+                evaluated: evaluated.iter().copied().collect(),
+                outcome,
+                raw_brvals: BTreeMap::new(),
+                inline_context: Some(ctx.clone()),
+                inline_chain: Some(chain.clone()),
+            }
+        };
+        let d = DecisionRecord {
+            id: 0,
+            source_file: Some("lib.rs".to_string()),
+            source_line: Some(1),
+            inline_context: None,
+            condition_branch_ids: vec![10, 11],
+            rows: vec![
+                // Two contexts. ctx_a (chain_a) gets 3 rows that
+                // prove c0 + c1; ctx_b (chain_b) gets 2 rows that
+                // prove c0 only.
+                mk_row(0, &[(0, false)], Some(false), &frame_inner, &chain_a),
+                mk_row(
+                    1,
+                    &[(0, true), (1, false)],
+                    Some(false),
+                    &frame_inner,
+                    &chain_a,
+                ),
+                mk_row(
+                    2,
+                    &[(0, true), (1, true)],
+                    Some(true),
+                    &frame_inner,
+                    &chain_a,
+                ),
+                mk_row(3, &[(0, false)], Some(false), &frame_other, &chain_b),
+                mk_row(
+                    4,
+                    &[(0, true), (1, true)],
+                    Some(true),
+                    &frame_other,
+                    &chain_b,
+                ),
+            ],
+        };
+        let record = record_with_decision(d);
+
+        // v3: chain populated everywhere.
+        let report_v3 = McdcReport::from_record_with_schema(&record, McdcSchemaVersion::V3);
+        let dec = report_v3.decisions.first().expect("decision");
+        assert_eq!(report_v3.schema, MCDC_SCHEMA_URL_V3);
+        // RowView carries the chain from DecisionRow.
+        let v3_chain_count = dec
+            .truth_table
+            .iter()
+            .filter(|r| r.inline_chain.is_some())
+            .count();
+        assert_eq!(v3_chain_count, 5, "every row should carry a chain in v3");
+        // PerContextVerdict carries the bucket's chain.
+        assert_eq!(dec.per_context.len(), 2);
+        for p in &dec.per_context {
+            let chain = p
+                .inline_chain
+                .as_ref()
+                .expect("v3 per_context entry should have inline_chain");
+            assert_eq!(chain.len(), 2, "outer + inner = 2 frames");
+            assert_eq!(chain.first(), Some(&frame_outer));
+        }
+
+        // v2: chain stripped from RowView + PerContextVerdict.
+        let report_v2 = McdcReport::from_record_with_schema(&record, McdcSchemaVersion::V2);
+        assert_eq!(report_v2.schema, MCDC_SCHEMA_URL_V2);
+        let dec = report_v2.decisions.first().expect("decision");
+        assert!(
+            dec.truth_table.iter().all(|r| r.inline_chain.is_none()),
+            "v2 should strip RowView.inline_chain"
+        );
+        for p in &dec.per_context {
+            assert!(
+                p.inline_chain.is_none(),
+                "v2 should strip PerContextVerdict.inline_chain"
+            );
+        }
+        // v2 still keeps the v2-introduced fields (inline_context, per_context).
+        assert!(
+            dec.truth_table.iter().any(|r| r.inline_context.is_some()),
+            "v2 keeps RowView.inline_context"
+        );
+        assert_eq!(dec.per_context.len(), 2);
     }
 
     #[test]
