@@ -103,6 +103,26 @@ pub struct DecisionRow {
     /// keep deserialising; absent map = audit layer no-ops.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub raw_brvals: BTreeMap<u32, i32>,
+    /// v0.13.0 — DWARF inlined-call-site tag for this row, derived
+    /// from the modal `InlineContext` across the row's evaluated
+    /// condition branch ids (resolved via the manifest's
+    /// `branch_inline_contexts` map at run time). Populated by the
+    /// embedded + harness runners; consumed by the mcdc-v2 reporter
+    /// to build per-context verdict views *within* a unified
+    /// Decision (Variant B).
+    ///
+    /// Absent when:
+    /// - the manifest's `branch_inline_contexts` is empty (pre-v0.13
+    ///   instrumentation, no DWARF, or no inlines detected);
+    /// - the row's evaluated conditions tied between two contexts
+    ///   (conservative tag-as-None — see `mcdc_report::analyse_decision`
+    ///   for the per-context grouping rule);
+    /// - the row evaluated zero conditions (degenerate — no contexts
+    ///   to vote with).
+    ///
+    /// `#[serde(default)]` so pre-v0.13 run records keep deserialising.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_context: Option<crate::instrument::InlineContext>,
 }
 
 /// Health of the per-row capture path. The reporter refuses MC/DC verdicts

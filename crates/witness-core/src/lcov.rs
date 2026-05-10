@@ -229,6 +229,7 @@ mod tests {
                 chain_kind: crate::instrument::ChainKind::default(),
                 inline_context: None,
             }],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         }
     }
 

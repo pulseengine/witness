@@ -7,6 +7,135 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-05-10
+
+Variant B — per-DWARF-inlined-context row tagging in mcdc-v2.
+Successor to v0.12.0's failed Variant A. Verdict suite at v0.13.0
+matches v0.11.5 baseline byte-for-byte (21/177 full-MC/DC,
+httparse 7/86): no regression vs the pre-v0.12 shape, full
+substrate in place for per-call-site drill-down via the new
+mcdc-v2 schema.
+
+### Why Variant B (and not another Variant A)
+
+The v0.12.0 soak (2026-05-10) showed Variant A's premise was
+wrong: real Rust→wasm code emits one br_if per inlined call
+site. Splitting the Decision-key by inline context fragmented
+v0.11's beneficial multi-condition clusters into singletons
+that the existing `cluster.len() >= 2` gate dropped. Net loss
+of 10 decisions, 7 conditions, 1 full-MC/DC verdict.
+
+Variant B keeps v0.11's `(function, file)` keying — preserving
+the unified single-Decision shape — and adds inline_context as
+a **row-level tag** that the auditor filters by. The split-by-
+context happens at the row-filter view at the reporter layer,
+not at the Decision-key bucket layer. Cluster sizes are
+preserved; nothing gets fragmented.
+
+### Added — `Manifest.branch_inline_contexts`
+
+`crates/witness-core/src/instrument.rs::Manifest` gains a
+`BTreeMap<u32, InlineContext>` field that maps every br_if's
+branch_id → the `(call_file, call_line)` of its enclosing
+inlined-subroutine entry (when DWARF reports one). Populated
+by `decisions::reconstruct_decisions` from the same DIE walk
+v0.12.0 introduced; previously gated to an empty map in v0.12.1.
+
+The map is the substrate the runner consumes to tag each
+DecisionRow's executing context.
+
+### Added — `DecisionRow.inline_context`
+
+`crates/witness-core/src/run_record.rs::DecisionRow` gains an
+optional `Option<InlineContext>` field. Populated by both the
+embedded runner (`crates/witness/src/run.rs`) and the harness
+runner via a `row_modal_context` helper that walks the row's
+evaluated condition indices, looks up each branch_id in the
+manifest's `branch_inline_contexts`, and stamps the modal
+context (with ties resolving to `None` so reporters route the
+row to the headline view). Pre-v0.13 records keep
+deserialising via `#[serde(default)]`.
+
+### Added — `DecisionVerdict.per_context` + `RowView.inline_context`
+
+`crates/witness-core/src/mcdc_report.rs::DecisionVerdict` gains
+a `Vec<PerContextVerdict>` (additive, `skip_serializing_if`
+`Vec::is_empty`). For each distinct non-`None` inline_context
+across the decision's rows that has at least 2 rows, the
+analyse path runs the full MC/DC kernel against just that
+context's rows. Reviewers can see "this Decision is FullMcdc
+when inlined from `validate.rs:5` but Partial when inlined
+from `audit.rs:10`" without the headline aggregating both into
+a single Partial verdict.
+
+`RowView.inline_context` ships per-row tags into the truth-
+table view so reviewers reading individual rows can correlate
+without cross-referencing.
+
+### Added — mcdc-v2 schema
+
+New schema URL `https://pulseengine.eu/witness-mcdc/v2` at
+`docs/schemas/witness-mcdc-v2.json`. Structurally a superset
+of v1 with the `PerContextVerdict` / `RowView.inline_context`
+fields. Also new in `mcdc_report`:
+`MCDC_SCHEMA_URL_V2`, `McdcSchemaVersion::{V1,V2}`,
+`McdcReport::from_record_with_schema(record, version)`.
+
+In `predicate.rs`: `MCDC_PREDICATE_TYPE_V2`. The
+`build_mcdc_statement_*` paths derive the in-toto `predicateType`
+from `report.schema` so v2 envelopes ship a v2 predicateType
+in BOTH the wrapper and the embedded report.
+
+### Added — `witness predicate --mcdc-schema {v1,v2}`
+
+CLI flag selects the emitted schema. **Default stays v1 for
+v0.13.0** (soak window — keep current Sigil consumers byte-
+identical). v0.13.1 will flip the default to v2 once the
+soak validates.
+
+### Verified — verdict suite delta
+
+Built witness at v0.13.0 + v0.11.5, ran the verdict suite at
+both, diffed the SUMMARY.txts. v0.13.0 v1-mode output is
+**byte-identical** to v0.11.5: 21/177 full-MC/DC, httparse
+7/86, all conditions counts match. 106 branches in httparse
+carry `branch_inline_contexts` entries; 22 Decisions get a
+non-`None` `inline_context` headline label under v2 (matches
+v0.12.0's count, but without the cluster-fragmentation regression).
+
+`per_context` populates only when a Decision's rows span
+multiple contexts. The verdict suite (12 fixtures, single-
+invocation-per-row test corpus) doesn't have any Decision
+hit by multiple contexts in one run, so per_context stays
+empty there. Substrate ships ready for fixtures with intra-
+export branching across inlined sites.
+
+Synthetic v0.13.0 envelopes validate against the v2 schema;
+synthetic v0.11.5 envelopes validate against v1 unchanged.
+
+### Tests
+
+- `decisions::tests::cluster_preserved_with_split_inline_contexts`
+  — formerly v0.12.0's `splits_by_inline_context`: same input,
+  flipped expectation. Now asserts unified Decision +
+  populated `branch_inline_contexts` map.
+- `decisions::tests::decision_inline_context_is_modal` — modal
+  headline label when one context wins outright.
+- `mcdc_report::tests::per_context_verdict_skipped_when_no_inline_tags`
+- `mcdc_report::tests::per_context_verdict_skipped_when_all_rows_share_one_context`
+- `mcdc_report::tests::per_context_verdict_splits_by_call_site`
+  — load-bearing: 2 contexts → 2 per_context entries, ctx_a
+  FullMcdc, ctx_b Partial.
+
+### Notes for v0.13+
+
+- v0.13.1 — flip the `--mcdc-schema` default from v1 to v2.
+- v0.14 — extend the inline walker to `DW_AT_ranges` for
+  scattered inlines + chain-depth tracking (`Vec<InlineContext>`
+  on the row tag). Currently single-hop only.
+- macOS Developer ID signing — waiting on user cert plumbing.
+- Predicate Rekor-binding — deferred to v0.14+.
+
 ## [0.12.1] — 2026-05-10
 
 Revert of v0.12.0's regressing keying change. The v0.12.0 soak

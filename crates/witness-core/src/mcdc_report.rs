@@ -19,6 +19,25 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 pub const MCDC_SCHEMA_URL: &str = "https://pulseengine.eu/witness-mcdc/v1";
+/// v0.13.0 — mcdc-v2 endpoint. Adds per-row `inline_context` tags
+/// and per-context `DecisionVerdict.per_context` drill-down views.
+/// Producers select via `--mcdc-schema v2` (default stays v1 in
+/// v0.13.0; flipped to v2 in v0.13.1 once the soak validates).
+pub const MCDC_SCHEMA_URL_V2: &str = "https://pulseengine.eu/witness-mcdc/v2";
+
+/// v0.13.0 — schema selector for `McdcReport::from_record_v*` and
+/// `predicate::build_mcdc_statement_v*`. Kept as a small enum
+/// instead of a bool so future schema bumps (v3 etc.) extend
+/// cleanly without rewriting call-site signatures.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum McdcSchemaVersion {
+    /// v0.13.0 default stays v1 for the soak window. v0.13.1 flips
+    /// the `#[default]` to V2.
+    #[default]
+    V1,
+    V2,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct McdcReport {
@@ -89,6 +108,39 @@ pub struct DecisionVerdict {
     /// objective 5.2 work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub br_table_audit: Option<BrTableAudit>,
+    /// v0.13.0 — per-context verdict drill-down. One entry per
+    /// distinct non-`None` `inline_context` observed across the
+    /// decision's rows that has at least 2 rows. Each entry runs the
+    /// same MC/DC kernel as the headline (using only that context's
+    /// rows), so reviewers can see "this Decision is FullMcdc when
+    /// inlined from `validate.rs:5` but Partial when inlined from
+    /// `audit.rs:10`" without losing the unified-Decision shape.
+    /// Empty when no rows carry inline_context tags (pre-v0.13
+    /// instrumentation, or no DWARF inlining detected) or when every
+    /// row tagged the same context (the headline already covers it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub per_context: Vec<PerContextVerdict>,
+}
+
+/// v0.13.0 — per-call-site verdict view within a unified Decision.
+/// The reviewer reads the headline `DecisionVerdict` for the all-
+/// rows aggregate; this drill-down filters rows by their
+/// `inline_context` tag and re-runs the kernel against just that
+/// subset. A Decision with split contexts where one site has full
+/// pair coverage and another has gaps surfaces both pictures here
+/// instead of being aggregated into a single Partial verdict.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PerContextVerdict {
+    pub inline_context: crate::instrument::InlineContext,
+    pub conditions: Vec<ConditionVerdict>,
+    pub status: DecisionStatus,
+    pub proved_conditions: u32,
+    pub gap_conditions: u32,
+    pub dead_conditions: u32,
+    /// Row ids contributing to this context's view. Reviewers can
+    /// correlate against `truth_table[].row_id` to read the per-
+    /// context truth-table without re-deriving the filter.
+    pub row_ids: Vec<u32>,
 }
 
 /// v0.11.5 — discriminant-bit MC/DC audit derivation for a br_table
@@ -226,10 +278,48 @@ pub struct RowView {
     pub row_id: u32,
     pub evaluated: BTreeMap<u32, bool>,
     pub outcome: Option<bool>,
+    /// v0.13.0 — DWARF inlined-call-site tag for this row, propagated
+    /// from `DecisionRow.inline_context`. Lets reviewers reading the
+    /// truth-table see which call site each row came from without
+    /// cross-referencing the `per_context` drill-down. Absent on
+    /// pre-v0.13 reports and on rows that tied between contexts at
+    /// runner-tag time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_context: Option<crate::instrument::InlineContext>,
 }
 
 impl McdcReport {
+    /// v0.13.0 — schema-aware report builder. v2 keeps the new
+    /// per-context drill-down + per-row inline_context tags;
+    /// v1 strips them (zeroes `per_context` and clears each
+    /// `RowView.inline_context`) so byte-clean v1 envelopes pass
+    /// strict `additionalProperties: false` validators.
+    pub fn from_record_with_schema(record: &RunRecord, schema: McdcSchemaVersion) -> Self {
+        let mut report = Self::from_record_inner(record);
+        match schema {
+            McdcSchemaVersion::V1 => {
+                report.schema = MCDC_SCHEMA_URL.to_string();
+                for d in &mut report.decisions {
+                    d.per_context.clear();
+                    for r in &mut d.truth_table {
+                        r.inline_context = None;
+                    }
+                }
+            }
+            McdcSchemaVersion::V2 => {
+                report.schema = MCDC_SCHEMA_URL_V2.to_string();
+            }
+        }
+        report
+    }
+
+    /// Default entry-point. v0.13.0 keeps the v1 default (soak
+    /// window); v0.13.1 will flip the default to v2.
     pub fn from_record(record: &RunRecord) -> Self {
+        Self::from_record_with_schema(record, McdcSchemaVersion::default())
+    }
+
+    fn from_record_inner(record: &RunRecord) -> Self {
         let mut overall = McdcOverall::default();
         let mut decisions: Vec<DecisionVerdict> = Vec::with_capacity(record.decisions.len());
 
@@ -531,6 +621,7 @@ fn analyse_decision(
             row_id: r.row_id,
             evaluated: r.evaluated.clone(),
             outcome: r.outcome,
+            inline_context: r.inline_context.clone(),
         })
         .collect();
 
@@ -596,6 +687,8 @@ fn analyse_decision(
         // the captured `raw_brvals` per row. Skipped silently when
         // pre-v0.11.5 instrumentation produced no raw values.
         let br_table_audit = derive_br_table_audit(d);
+        // br_table-shape decisions don't have boolean MC/DC pair-
+        // finding to filter per context; per_context stays empty.
         return DecisionVerdict {
             id: d.id,
             source_file: d.source_file.clone(),
@@ -605,6 +698,7 @@ fn analyse_decision(
             truth_table,
             status,
             br_table_audit,
+            per_context: Vec::new(),
         };
     }
 
@@ -630,6 +724,7 @@ fn analyse_decision(
             truth_table,
             status: DecisionStatus::Unreached,
             br_table_audit: None,
+            per_context: Vec::new(),
         };
     }
 
@@ -688,6 +783,12 @@ fn analyse_decision(
         (false, false) => DecisionStatus::FullMcdc, // 0 conditions; degenerate
     };
 
+    // v0.13.0 — per-context drill-down. Filter rows by their
+    // `inline_context` tag and re-run the kernel against each
+    // non-trivial subset. Lets reviewers see Decision-level proof
+    // breakdown by call site without losing the unified-Decision
+    // headline shape.
+    let per_context = derive_per_context(d, &conditions);
     DecisionVerdict {
         id: d.id,
         source_file: d.source_file.clone(),
@@ -696,6 +797,7 @@ fn analyse_decision(
         conditions,
         truth_table,
         status,
+        per_context,
         // Boolean (non-br_table) decisions don't carry the audit
         // block — the per-condition MC/DC verdict above is the
         // textbook proof. The audit layer is reserved for
@@ -722,6 +824,125 @@ fn analyse_decision(
 /// `raw_brvals` (pre-v0.11.5 instrumentation), so consumers can
 /// distinguish "audit skipped because no data" from "audit ran and
 /// produced a verdict."
+/// v0.13.0 — produce per-context verdict views for a Boolean (non-
+/// br_table) Decision. Walks the decision's rows, groups them by
+/// their `inline_context` tag, and runs the same MC/DC kernel
+/// against each non-trivial group. Returns an empty Vec when:
+/// - no row carries an inline_context tag (pre-v0.13 run record);
+/// - every row tagged the same context (the headline already
+///   covers it; per_context would just repeat the same verdict);
+/// - a context has fewer than 2 rows (singletons can't prove
+///   anything; surfacing them adds noise without signal).
+///
+/// `headline_conditions` is passed in to avoid re-deriving the
+/// dead-condition-everywhere check; per-context conditions inherit
+/// that property (a condition that's dead in the all-rows view is
+/// dead in any subset view too).
+fn derive_per_context(
+    d: &DecisionRecord,
+    headline_conditions: &[ConditionVerdict],
+) -> Vec<PerContextVerdict> {
+    use std::collections::BTreeMap;
+    // Group rows by their inline_context tag. None-tagged rows are
+    // not bucketed — they aggregate into the headline only.
+    let mut buckets: BTreeMap<crate::instrument::InlineContext, Vec<&DecisionRow>> =
+        BTreeMap::new();
+    for r in &d.rows {
+        if let Some(ctx) = r.inline_context.as_ref() {
+            buckets.entry(ctx.clone()).or_default().push(r);
+        }
+    }
+    // Skip if no tagged rows OR all rows tagged the same context (one
+    // bucket whose size equals the total tagged-row count and there
+    // are no untagged rows). The headline already captures that case.
+    if buckets.is_empty() {
+        return Vec::new();
+    }
+    if buckets.len() == 1 && d.rows.iter().all(|r| r.inline_context.is_some()) {
+        return Vec::new();
+    }
+    let n = d.condition_branch_ids.len();
+    let mut out: Vec<PerContextVerdict> = Vec::with_capacity(buckets.len());
+    for (ctx, rows) in buckets {
+        if rows.len() < 2 {
+            // Single-row context can't prove independent effect of
+            // any condition; skip rather than produce a noisy verdict.
+            continue;
+        }
+        // Re-run the per-condition loop against just this context's
+        // rows. Reuse find_independent_effect_pair unchanged — its
+        // input is &[DecisionRow], which we materialise by cloning.
+        let ctx_rows: Vec<DecisionRow> = rows.iter().map(|r| (*r).clone()).collect();
+        let mut conditions: Vec<ConditionVerdict> = Vec::with_capacity(n);
+        let mut proved_count: u32 = 0;
+        let mut gap_count: u32 = 0;
+        let mut dead_count: u32 = 0;
+        for (idx, &branch_id) in d.condition_branch_ids.iter().enumerate() {
+            let i = u32::try_from(idx).unwrap_or(u32::MAX);
+            let evaluated_anywhere = ctx_rows.iter().any(|r| r.evaluated.contains_key(&i));
+            if !evaluated_anywhere {
+                // Inherit the headline's dead status — the condition
+                // is dead in this context too (in fact dead-stricter
+                // since this is a subset of headline rows).
+                let _ = headline_conditions;
+                conditions.push(ConditionVerdict {
+                    index: i,
+                    branch_id,
+                    status: ConditionStatus::Dead,
+                    interpretation: None,
+                    pair: None,
+                    gap_closure: None,
+                });
+                dead_count = dead_count.saturating_add(1);
+                continue;
+            }
+            match find_independent_effect_pair(&ctx_rows, i, n) {
+                Some((r1, r2, interpretation)) => {
+                    conditions.push(ConditionVerdict {
+                        index: i,
+                        branch_id,
+                        status: ConditionStatus::Proved,
+                        interpretation: Some(interpretation),
+                        pair: Some([r1, r2]),
+                        gap_closure: None,
+                    });
+                    proved_count = proved_count.saturating_add(1);
+                }
+                None => {
+                    let gap = recommend_gap_closure(&ctx_rows, i);
+                    conditions.push(ConditionVerdict {
+                        index: i,
+                        branch_id,
+                        status: ConditionStatus::Gap,
+                        interpretation: None,
+                        pair: None,
+                        gap_closure: gap,
+                    });
+                    gap_count = gap_count.saturating_add(1);
+                }
+            }
+        }
+        let any_gap = gap_count > 0 || dead_count > 0;
+        let status = match (proved_count > 0, any_gap) {
+            (true, false) => DecisionStatus::FullMcdc,
+            (true, true) => DecisionStatus::Partial,
+            (false, true) => DecisionStatus::NoWitness,
+            (false, false) => DecisionStatus::FullMcdc,
+        };
+        let row_ids: Vec<u32> = ctx_rows.iter().map(|r| r.row_id).collect();
+        out.push(PerContextVerdict {
+            inline_context: ctx,
+            conditions,
+            status,
+            proved_conditions: proved_count,
+            gap_conditions: gap_count,
+            dead_conditions: dead_count,
+            row_ids,
+        });
+    }
+    out
+}
+
 fn derive_br_table_audit(d: &DecisionRecord) -> Option<BrTableAudit> {
     // Collect (row_id, discriminant, firing_arm_idx) tuples for
     // every row that recorded a discriminant. Empty raw_brvals
@@ -908,6 +1129,7 @@ mod tests {
             evaluated: evaluated.iter().copied().collect(),
             outcome,
             raw_brvals: BTreeMap::new(),
+            inline_context: None,
         }
     }
 
@@ -1079,6 +1301,7 @@ mod tests {
                 evaluated,
                 outcome: None,
                 raw_brvals,
+                inline_context: None,
             });
         }
         let d = DecisionRecord {
@@ -1142,6 +1365,7 @@ mod tests {
                 evaluated,
                 outcome: None,
                 raw_brvals: BTreeMap::new(),
+                inline_context: None,
             });
         }
         let d = DecisionRecord {
@@ -1173,6 +1397,157 @@ mod tests {
             dec.br_table_audit.is_none(),
             "no raw_brvals → audit absent (got {:?})",
             dec.br_table_audit
+        );
+    }
+
+    #[test]
+    fn per_context_verdict_skipped_when_no_inline_tags() {
+        // v0.13.0 — pre-v0.13 run records have no inline_context
+        // tags; the per_context drill-down should stay empty so the
+        // headline carries the verdict alone.
+        let d = DecisionRecord {
+            id: 0,
+            source_file: Some("lib.rs".to_string()),
+            source_line: Some(1),
+            inline_context: None,
+            condition_branch_ids: vec![10, 11],
+            rows: vec![
+                row(0, &[(0, true), (1, true)], Some(true)),
+                row(1, &[(0, true), (1, false)], Some(false)),
+                row(2, &[(0, false), (1, false)], Some(false)),
+            ],
+        };
+        let report =
+            McdcReport::from_record_with_schema(&record_with_decision(d), McdcSchemaVersion::V2);
+        let dec = report.decisions.first().expect("decision");
+        assert!(
+            dec.per_context.is_empty(),
+            "no inline tags → empty per_context: {:?}",
+            dec.per_context
+        );
+    }
+
+    #[test]
+    fn per_context_verdict_skipped_when_all_rows_share_one_context() {
+        // v0.13.0 — every row tagged the same context: per_context
+        // would just repeat the headline. Skip rather than emit
+        // redundant data.
+        let ctx = crate::instrument::InlineContext {
+            call_file: Some("validate.rs".to_string()),
+            call_line: 5,
+        };
+        let mk_row = |id: u32, evaluated: &[(u32, bool)], outcome: Option<bool>| DecisionRow {
+            row_id: id,
+            evaluated: evaluated.iter().copied().collect(),
+            outcome,
+            raw_brvals: BTreeMap::new(),
+            inline_context: Some(ctx.clone()),
+        };
+        let d = DecisionRecord {
+            id: 0,
+            source_file: Some("lib.rs".to_string()),
+            source_line: Some(1),
+            inline_context: Some(ctx.clone()),
+            condition_branch_ids: vec![10, 11],
+            rows: vec![
+                mk_row(0, &[(0, true), (1, true)], Some(true)),
+                mk_row(1, &[(0, true), (1, false)], Some(false)),
+                mk_row(2, &[(0, false), (1, false)], Some(false)),
+            ],
+        };
+        let report =
+            McdcReport::from_record_with_schema(&record_with_decision(d), McdcSchemaVersion::V2);
+        let dec = report.decisions.first().expect("decision");
+        assert!(
+            dec.per_context.is_empty(),
+            "single-context tagging → headline covers, per_context skipped: {:?}",
+            dec.per_context
+        );
+    }
+
+    #[test]
+    fn per_context_verdict_splits_by_call_site() {
+        // v0.13.0 load-bearing: rows tagged with two distinct
+        // contexts produce two per_context entries. Each runs the
+        // kernel against just its own rows.
+        let ctx_a = crate::instrument::InlineContext {
+            call_file: Some("validate.rs".to_string()),
+            call_line: 5,
+        };
+        let ctx_b = crate::instrument::InlineContext {
+            call_file: Some("validate.rs".to_string()),
+            call_line: 10,
+        };
+        let mk_row = |id: u32,
+                      evaluated: &[(u32, bool)],
+                      outcome: Option<bool>,
+                      ctx: &crate::instrument::InlineContext|
+         -> DecisionRow {
+            DecisionRow {
+                row_id: id,
+                evaluated: evaluated.iter().copied().collect(),
+                outcome,
+                raw_brvals: BTreeMap::new(),
+                inline_context: Some(ctx.clone()),
+            }
+        };
+        // Decision shape: `c0 && c1` (masking MC/DC, &&-style). When
+        // c0 is false, c1 is short-circuited and absent from the
+        // evaluated map.
+        let d = DecisionRecord {
+            id: 0,
+            source_file: Some("lib.rs".to_string()),
+            source_line: Some(1),
+            inline_context: None,
+            condition_branch_ids: vec![10, 11],
+            rows: vec![
+                // ctx_a: 3 rows. Proves c0 (rows 0+2 differ on c0
+                // and outcome) and c1 (rows 1+2 differ on c1 and
+                // outcome with c0 fixed at T).
+                mk_row(0, &[(0, false)], Some(false), &ctx_a),
+                mk_row(1, &[(0, true), (1, false)], Some(false), &ctx_a),
+                mk_row(2, &[(0, true), (1, true)], Some(true), &ctx_a),
+                // ctx_b: 2 rows that prove c0 only (c1 absent in
+                // row 3 → can't pair for c1).
+                mk_row(3, &[(0, false)], Some(false), &ctx_b),
+                mk_row(4, &[(0, true), (1, true)], Some(true), &ctx_b),
+            ],
+        };
+        let report =
+            McdcReport::from_record_with_schema(&record_with_decision(d), McdcSchemaVersion::V2);
+        let dec = report.decisions.first().expect("decision");
+        assert_eq!(
+            dec.per_context.len(),
+            2,
+            "two distinct contexts → two per_context entries (got {:?})",
+            dec.per_context
+        );
+        let ctx_a_view = dec
+            .per_context
+            .iter()
+            .find(|p| p.inline_context.call_line == 5)
+            .expect("ctx_a present");
+        let ctx_b_view = dec
+            .per_context
+            .iter()
+            .find(|p| p.inline_context.call_line == 10)
+            .expect("ctx_b present");
+        // ctx_a has rows 0, 1, 2 — both conditions proved.
+        assert_eq!(ctx_a_view.row_ids, vec![0, 1, 2]);
+        assert!(
+            matches!(ctx_a_view.status, DecisionStatus::FullMcdc),
+            "ctx_a should be FullMcdc; got {:?}, conditions={:?}",
+            ctx_a_view.status,
+            ctx_a_view.conditions
+        );
+        assert_eq!(ctx_a_view.proved_conditions, 2);
+        // ctx_b has rows 3, 4 — c0 proves, c1 has no pair (only one
+        // row evaluates c1).
+        assert_eq!(ctx_b_view.row_ids, vec![3, 4]);
+        assert!(
+            matches!(ctx_b_view.status, DecisionStatus::Partial),
+            "ctx_b should be Partial (c0 proved, c1 gap); got {:?}",
+            ctx_b_view.status
         );
     }
 

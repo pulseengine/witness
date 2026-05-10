@@ -44,7 +44,7 @@
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use walrus::ir::{
     BinaryOp, Binop, BrIf, Const, GlobalGet, GlobalSet, IfElse, Instr, InstrSeqId, InstrSeqType,
@@ -350,6 +350,17 @@ pub struct Manifest {
     /// Hosts that don't care about MC/DC can ignore this field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decisions: Vec<Decision>,
+    /// v0.13.0 — per-branch DWARF inlined-call-site context. Maps
+    /// `branch_id → InlineContext` for every branch whose byte offset
+    /// fell inside a `DW_TAG_inlined_subroutine` address range during
+    /// reconstruction. Empty when DWARF is absent, when no inlines
+    /// were detected, or when the manifest came from a pre-v0.13
+    /// instrumentation pass. The runner consumes this to stamp each
+    /// `DecisionRow.inline_context` so the mcdc-v2 reporter can build
+    /// per-context verdict views without re-reading the source wasm.
+    /// Pre-v0.13 manifests deserialise unchanged via `#[serde(default)]`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub branch_inline_contexts: BTreeMap<u32, InlineContext>,
 }
 
 impl Manifest {
@@ -412,8 +423,11 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
 
     // v0.2: attempt DWARF-grounded decision reconstruction. v0.2.0 ships
     // the stub (always empty); v0.2.1 fills in the algorithm. Empty list
-    // means hosts use the strict per-br_if fallback.
-    let mut decisions = crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
+    // means hosts use the strict per-br_if fallback. v0.13.0 — also
+    // returns a per-branch InlineContext map (Variant B substrate)
+    // that the runner consumes to tag each row.
+    let (mut decisions, branch_inline_contexts) =
+        crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
     // v0.8: classify each decision's chain direction (And/Or/Mixed/Unknown)
     // using the per-branch hints captured during instrument_module.
     apply_chain_kinds(&mut decisions);
@@ -430,6 +444,7 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
         original_module_sha256,
         branches: entries,
         decisions,
+        branch_inline_contexts,
     };
     let manifest_path = Manifest::path_for(output);
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(Error::Serde)?;

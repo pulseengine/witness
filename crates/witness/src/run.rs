@@ -24,8 +24,9 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 use witness_core::Result;
 use witness_core::error::Error;
 use witness_core::instrument::{
-    BRCNT_EXPORT_PREFIX, BRVAL_EXPORT_PREFIX, COUNTER_EXPORT_PREFIX, ChainKind, Manifest,
-    ROW_RESET_EXPORT, TRACE_HEADER_BYTES, TRACE_MEMORY_EXPORT, TRACE_RESET_EXPORT,
+    BRCNT_EXPORT_PREFIX, BRVAL_EXPORT_PREFIX, COUNTER_EXPORT_PREFIX, ChainKind, Decision,
+    InlineContext, Manifest, ROW_RESET_EXPORT, TRACE_HEADER_BYTES, TRACE_MEMORY_EXPORT,
+    TRACE_RESET_EXPORT,
 };
 use witness_core::run_record::{
     BranchHit, DecisionRecord, DecisionRow, HarnessSnapshot, RunRecord, TraceHealth,
@@ -152,6 +153,14 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
         .iter()
         .map(|d| (d.id, d.chain_kind))
         .collect();
+    // v0.13.0 — per-decision lookup from condition_index → branch_id
+    // → InlineContext. Built once up front so the per-row tagger in
+    // both the trace path and the per-row-globals fallback can hit
+    // it without re-walking the manifest. Empty when the manifest
+    // came from pre-v0.13 instrumentation (then per-row tags stay
+    // None, and the mcdc-v2 reporter no-ops the per_context view —
+    // graceful fallback to v1 shape).
+    let branch_inline_contexts = &manifest.branch_inline_contexts;
 
     // v0.9.6 — combine no-arg `--invoke` entries with typed
     // `--invoke-with-args` specs into a single ordered invocation list.
@@ -310,8 +319,17 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
             // kind=2 trace records when available; otherwise falls
             // back to the row-level function-return value.
             for (dec_id, iters) in trace_iterations {
+                let dec_lookup: Option<&Decision> =
+                    manifest.decisions.iter().find(|d| d.id == dec_id);
                 for (evaluated, iter_outcome) in iters {
                     let row_outcome = iter_outcome.or(outcome);
+                    // v0.13.0 — tag each row with its modal inline
+                    // context. Falls out to None for pre-v0.13
+                    // manifests (empty branch_inline_contexts) or
+                    // tied modal counts.
+                    let row_ctx = dec_lookup
+                        .map(|d| row_modal_context(&evaluated, d, branch_inline_contexts))
+                        .unwrap_or(None);
                     rows_per_decision
                         .entry(dec_id)
                         .or_default()
@@ -326,6 +344,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                             // Empty map → audit layer no-ops for
                             // these rows.
                             raw_brvals: BTreeMap::new(),
+                            inline_context: row_ctx,
                         });
                     next_row_id = next_row_id.saturating_add(1);
                 }
@@ -351,6 +370,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                         raw_brvals.insert(cond_idx_u32, val);
                     }
                 }
+                let row_ctx = row_modal_context(&evaluated, d, branch_inline_contexts);
                 rows_per_decision
                     .entry(d.id)
                     .or_default()
@@ -359,6 +379,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                         evaluated,
                         outcome,
                         raw_brvals,
+                        inline_context: row_ctx,
                     });
             }
         }
@@ -442,6 +463,55 @@ fn derive_outcome(chain_kind: ChainKind, evaluated: &BTreeMap<u32, bool>) -> Opt
     match chain_kind {
         ChainKind::And | ChainKind::Or => evaluated.values().next_back().copied(),
         ChainKind::Mixed | ChainKind::Unknown => None,
+    }
+}
+
+/// v0.13.0 — pick the modal `InlineContext` across the row's
+/// evaluated conditions. For each condition_index in `evaluated`,
+/// look up the corresponding branch_id in the decision's
+/// `condition_branch_ids` and resolve to an `InlineContext` via
+/// the manifest's `branch_inline_contexts` map. Whichever context
+/// wins the count (strict majority) becomes the row's headline
+/// tag; ties resolve to `None` so reporters can route the row to
+/// the headline (all-rows) verdict view rather than misattributing
+/// it to one context.
+///
+/// Empty `branch_inline_contexts` (pre-v0.13 instrumentation) →
+/// always returns `None`. Empty `evaluated` (degenerate row) →
+/// returns `None`.
+fn row_modal_context(
+    evaluated: &BTreeMap<u32, bool>,
+    decision: &Decision,
+    branch_inline_contexts: &BTreeMap<u32, InlineContext>,
+) -> Option<InlineContext> {
+    if branch_inline_contexts.is_empty() || evaluated.is_empty() {
+        return None;
+    }
+    let mut counts: BTreeMap<Option<InlineContext>, u32> = BTreeMap::new();
+    for &cond_idx in evaluated.keys() {
+        let Some(&branch_id) = decision
+            .conditions
+            .get(usize::try_from(cond_idx).unwrap_or(usize::MAX))
+        else {
+            continue;
+        };
+        let key = branch_inline_contexts.get(&branch_id).cloned();
+        let entry = counts.entry(key).or_insert(0);
+        *entry = entry.saturating_add(1);
+    }
+    if counts.is_empty() {
+        return None;
+    }
+    let max_count = counts.values().copied().max().unwrap_or(0);
+    let winners: Vec<&Option<InlineContext>> = counts
+        .iter()
+        .filter(|(_, c)| **c == max_count)
+        .map(|(k, _)| k)
+        .collect();
+    if winners.len() == 1 {
+        winners.first().cloned().cloned().unwrap_or(None)
+    } else {
+        None
     }
 }
 
@@ -701,6 +771,8 @@ fn harness_v2_to_run_record(
         .iter()
         .map(|d| (d.id, d.chain_kind))
         .collect();
+    // v0.13.0 — same per-row tagging substrate as run_via_embedded.
+    let branch_inline_contexts = &manifest.branch_inline_contexts;
 
     let mut rows_per_decision: BTreeMap<u32, Vec<DecisionRow>> = BTreeMap::new();
     for d in &manifest.decisions {
@@ -764,8 +836,13 @@ fn harness_v2_to_run_record(
 
         if !trace_iterations.is_empty() {
             for (dec_id, iters) in trace_iterations {
+                let dec_lookup: Option<&Decision> =
+                    manifest.decisions.iter().find(|d| d.id == dec_id);
                 for (evaluated, iter_outcome) in iters {
                     let row_outcome = iter_outcome.or(outcome);
+                    let row_ctx = dec_lookup
+                        .map(|d| row_modal_context(&evaluated, d, branch_inline_contexts))
+                        .unwrap_or(None);
                     rows_per_decision
                         .entry(dec_id)
                         .or_default()
@@ -774,6 +851,7 @@ fn harness_v2_to_run_record(
                             evaluated,
                             outcome: row_outcome,
                             raw_brvals: BTreeMap::new(),
+                            inline_context: row_ctx,
                         });
                     next_row_id = next_row_id.saturating_add(1);
                 }
@@ -806,6 +884,7 @@ fn harness_v2_to_run_record(
                         raw_brvals.insert(cond_idx_u32, val_i32);
                     }
                 }
+                let row_ctx = row_modal_context(&evaluated, d, branch_inline_contexts);
                 rows_per_decision
                     .entry(d.id)
                     .or_default()
@@ -814,6 +893,7 @@ fn harness_v2_to_run_record(
                         evaluated,
                         outcome,
                         raw_brvals,
+                        inline_context: row_ctx,
                     });
             }
         }
@@ -1081,6 +1161,7 @@ mod tests {
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1135,6 +1216,7 @@ mod tests {
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -1181,6 +1263,7 @@ mod tests {
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let harness_cmd = r#"cat > "$WITNESS_OUTPUT" <<'EOF'
@@ -1237,6 +1320,7 @@ EOF"#;
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -1287,6 +1371,7 @@ EOF"#;
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -1341,6 +1426,7 @@ EOF"#;
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1413,6 +1499,7 @@ EOF"#
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1479,6 +1566,7 @@ EOF"#;
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1569,6 +1657,7 @@ EOF"#;
             original_module_sha256: None,
             branches: entries.clone(),
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1663,6 +1752,7 @@ EOF"#;
             original_module_sha256: None,
             branches: entries,
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1694,6 +1784,7 @@ EOF"#;
             original_module_sha256: None,
             branches: vec![],
             decisions: vec![],
+            branch_inline_contexts: std::collections::BTreeMap::new(),
         };
         let manifest_path = dir.path().join("manifest.json");
         let module_path = dir.path().join("prog.wasm");

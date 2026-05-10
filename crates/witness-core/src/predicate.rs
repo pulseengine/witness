@@ -45,6 +45,13 @@ pub const PREDICATE_TYPE: &str = "https://pulseengine.eu/witness-coverage/v1";
 /// Schema-publishing subagents target this constant when wiring the
 /// JSON-Schema URL — keep them in sync.
 pub const MCDC_PREDICATE_TYPE: &str = "https://pulseengine.eu/witness-mcdc/v1";
+/// v0.13.0 — predicateType for mcdc-v2 envelopes. Tracks
+/// `MCDC_SCHEMA_URL_V2` in `mcdc_report`. Producers select via
+/// `--mcdc-schema v2`; the v2 envelope ships v2 in BOTH the in-toto
+/// `predicateType` field AND the embedded `predicate.report.schema`
+/// field so consumers validating against either coordinate stay in
+/// sync.
+pub const MCDC_PREDICATE_TYPE_V2: &str = "https://pulseengine.eu/witness-mcdc/v2";
 
 /// In-toto Statement v1.0. The `predicate` body is held as
 /// `serde_json::Value` so a single Statement type round-trips both the
@@ -461,10 +468,19 @@ pub fn build_mcdc_statement_with_original(
         });
     }
 
+    // v0.13.0 — pick the predicateType from the report's schema URL
+    // so v2 envelopes don't ship a v1 predicateType (would confuse
+    // schema-aware consumers). report.schema is the authoritative
+    // source set by `McdcReport::from_record_with_schema`.
+    let predicate_type = if report.schema == crate::mcdc_report::MCDC_SCHEMA_URL_V2 {
+        MCDC_PREDICATE_TYPE_V2.to_string()
+    } else {
+        MCDC_PREDICATE_TYPE.to_string()
+    };
     Ok(Statement {
         statement_type: "https://in-toto.io/Statement/v1".to_string(),
         subject: subjects,
-        predicate_type: MCDC_PREDICATE_TYPE.to_string(),
+        predicate_type,
         predicate: serde_json::to_value(&predicate).map_err(Error::Serde)?,
     })
 }
@@ -837,6 +853,7 @@ mod tests {
             evaluated: evaluated.iter().copied().collect::<BTreeMap<_, _>>(),
             outcome,
             raw_brvals: BTreeMap::new(),
+            inline_context: None,
         };
         let full = DecisionRecord {
             id: 0,
