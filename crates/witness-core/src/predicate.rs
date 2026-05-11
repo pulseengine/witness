@@ -917,14 +917,14 @@ mod tests {
         // v0.13.1 — `McdcReport::from_record` now defaults to v2,
         // so the predicate type follows. v1 envelopes still
         // available via `from_record_with_schema(record, V1)`.
-        assert_eq!(stmt.predicate_type, MCDC_PREDICATE_TYPE_V2);
+        assert_eq!(stmt.predicate_type, MCDC_PREDICATE_TYPE_V3);
         assert_eq!(stmt.subject.len(), 1);
         assert_eq!(stmt.subject[0].name, "app.instrumented.wasm");
 
         // JSON round-trip: write, read, parse the predicate body.
         let json = serde_json::to_string(&stmt).unwrap();
         let parsed: Statement = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.predicate_type, MCDC_PREDICATE_TYPE_V2);
+        assert_eq!(parsed.predicate_type, MCDC_PREDICATE_TYPE_V3);
         let predicate = parsed.mcdc_predicate().expect("mcdc predicate");
 
         // Overall counts survive the trip.
