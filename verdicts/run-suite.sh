@@ -66,6 +66,7 @@ VERDICTS=(
     state_machine:27
     json_lite:28
     base64_decode:24
+    multi_context:8
 )
 
 mkdir -p "$OUT_DIR"
