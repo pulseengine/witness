@@ -32,7 +32,7 @@ do a great job and witness deliberately doesn't try to replace them).
 The argument for why this tool exists lives in two blog posts:
 
 - [Spec-driven development is half the loop](https://pulseengine.eu/blog/spec-driven-development-is-half-the-loop/)
-- *MC/DC for AI-authored Rust is tractable — the variant-pruning argument* (draft)
+- [MC/DC for AI-authored Rust is tractable — the variant-pruning argument](https://pulseengine.eu/blog/variant-pruning-rust-mcdc/)
 
 Short version: pattern-matching, `?` desugaring, and cfg expansion have all
 resolved by the time a Wasm module exists. Coverage measured at the Wasm
@@ -504,6 +504,26 @@ budget; the cost of picking one is a certification campaign that stalls
 on a missing technique. witness is the post-rustc Wasm measurement
 point; rustc-mcdc and Ferrous/DLR are the pre-LLVM source-level
 measurement point. Resistance is futile.
+
+### Upstream — equivalence-class inference on legacy binaries
+
+De Luca, De Angelis, Amalfitano, and Cimmino — *Inferring
+Equivalence Classes from Legacy Undocumented Embedded Binaries for
+ISO 26262-Compliant Testing* ([arXiv:2604.22673](https://arxiv.org/abs/2604.22673)) —
+addresses the *input-side* problem that witness assumes solved:
+when the test corpus does not exist and the source has been lost,
+how do you derive equivalence classes of inputs from a binary that
+still has to be re-qualified under ISO 26262? Their work recovers
+the input partitions; witness measures MC/DC on the executable
+those inputs exercise. Read as a chain: arXiv:2604.22673 produces
+the witness vectors a §6.4.2-style structural-coverage argument
+needs, and witness measures whether those vectors actually
+discriminate the post-codegen decisions the runtime executes. The
+two halves are complementary — input-domain reconstruction
+upstream, structural-coverage measurement downstream — and form
+one shape of evidence chain a 26262 or DO-178C dossier expects.
+The citation here is bibliographic; we don't yet integrate with
+their pipeline.
 
 ## License
 

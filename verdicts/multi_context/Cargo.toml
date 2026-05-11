@@ -1,0 +1,27 @@
+[package]
+name = "verdict-multi-context"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Witness verdict: per_context drill-down demo. The same source predicate is inlined at two call sites within one wasm function, so v0.13+ mcdc reports populate per_context with two buckets."
+license = "Apache-2.0 OR MIT"
+
+# Standalone — not part of the witness workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+debug = true
+strip = false
+codegen-units = 1
+lto = false
+panic = "abort"
+# opt-level = 3 — rustc/LLVM emit DW_TAG_inlined_subroutine entries
+# for the inlined helpers and predicate at this level (verified
+# empirically against the httparse fixture, which sees 106
+# inline-tagged branches in its manifest at default release
+# optimisation). opt-level=1 inlines without leaving inline-
+# subroutine DIE entries; the v0.14 DIE walker then sees nothing.
+opt-level = 3

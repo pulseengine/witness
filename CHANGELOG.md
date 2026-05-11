@@ -7,6 +7,66 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.2] — 2026-05-11
+
+Adds the first verdict-suite fixture written specifically to
+exercise v0.13+ inline-context tagging and v0.14's chain
+drill-down. Also picks up two README touch-ups: the
+variant-pruning blog post is no longer "(draft)" — it's live at
+pulseengine.eu — and a new Related Work subsection cites the
+arXiv 2604.22673 input-side equivalence-class inference work as
+the upstream complement to witness's downstream MC/DC
+measurement.
+
+### Added — `verdicts/multi_context/`
+
+13th verdict-suite fixture. Predicate `is_valid(s: &[u8])` uses
+stdlib slice helpers (`is_empty`, `contains`, `first`) so
+rustc/LLVM reliably emit `DW_TAG_inlined_subroutine` DIEs across
+stdlib + the user's two wrappers `check_first` / `check_second`.
+Eight exported `run_row_*` no-arg functions split between the
+two wrappers (even rows go via `check_first`, odd via
+`check_second`).
+
+End-to-end at v0.14:
+- Manifest carries **16 entries** in `branch_inline_contexts`
+  and `branch_inline_chains`.
+- The decision at `memchr.rs:40` (stdlib `slice::contains`)
+  carries inline chains **4 frames deep**:
+  `[run-call-to-wrapper, wrapper-call-to-is_valid,
+  is_valid-call-to-contains, contains-call-to-memchr]`.
+- v3 mcdc envelope's `RowView.inline_chain` populates for every
+  row in that decision.
+
+### Known limitation documented (`verdicts/multi_context/TRUTH-TABLE.md`)
+
+The fixture demonstrates v0.14 chain extraction, **not**
+`per_context.len() == 2`. The runner's trace parser emits one
+`DecisionRow` per function-return boundary; within a single
+`run_row_*` invocation no boundary separates the wrapper from
+the dispatcher (both inlined), so the row's modal inline-context
+tag aggregates across the invocation. Multiple invocations each
+carry a single context tag, but rows-with-the-same-context
+group into one bucket → `per_context.len() == 1`.
+
+Producing two buckets would require row-per-iteration trace
+records firing inside a loop that alternates between wrappers,
+or runner-side support for multi-context row tags
+(`Vec<InlineContext>` rather than `Option<InlineContext>`).
+Both are deferred to v0.14.x or v0.15.
+
+### Documentation — README
+
+- The blog-post bullet at the top of the file no longer says
+  "(draft)" — it's now a live link to
+  `https://pulseengine.eu/blog/variant-pruning-rust-mcdc/`.
+- New subsection "Upstream — equivalence-class inference on
+  legacy binaries" under "Related work" cites
+  [arXiv:2604.22673](https://arxiv.org/abs/2604.22673) (De Luca,
+  De Angelis, Amalfitano, Cimmino) as the input-side complement
+  to witness's structural-coverage measurement. The citation is
+  bibliographic; no pipeline integration.
+
 ## [0.14.1] — 2026-05-10
 
 Closes the v0.14.0 deferral on `PerContextVerdict.inline_chain`
