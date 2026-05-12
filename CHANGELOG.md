@@ -7,6 +7,71 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-05-12
+
+DW_AT_ranges scattered-inline support — closes the
+v0.14.0-noted limitation where `DW_TAG_inlined_subroutine`
+entries using `DW_AT_ranges` (multi-range scattered code) were
+silently skipped by the DIE walker. The walker now resolves
+both range forms uniformly and emits one `InlineEntry` per
+range.
+
+### Why this matters
+
+LLVM emits `DW_AT_ranges` (rather than `DW_AT_low_pc` +
+`DW_AT_high_pc`) when an inlined call's emitted code is not
+contiguous. Three real-world shapes that trigger it:
+
+- **Tail-merged code** — LLVM merges identical exit sequences
+  across two call sites of the same inlined function.
+- **Hot/cold splitting** — panic-bearing paths get pushed to
+  cold sections. Common in stdlib paths.
+- **Cross-crate inlining with LTO** — distinct
+  monomorphisations merge after monomorphisation.
+
+Pre-v0.17.0, witness silently produced no inline-context tags
+for any branch landing inside such an inlined frame. v0.17.0
+captures them.
+
+### Refactor — walker now uses `gimli::UnitRef::die_ranges`
+
+`crates/witness-core/src/decisions.rs::build_inline_map` was
+parsing `DW_AT_low_pc` + `DW_AT_high_pc` attributes manually
+to derive a single `(low_pc, high_pc)` interval per DIE. v0.17
+delegates to `gimli`'s `UnitRef::die_ranges(entry)` which
+handles both `DW_AT_low_pc + DW_AT_high_pc` AND `DW_AT_ranges`
+forms uniformly, yielding a `RangeIter` over one-or-more
+intervals. Each interval becomes its own `InlineEntry` sharing
+the same chain (parents-on-stack at this DIE's depth + self).
+
+Net change: contiguous-form inlines (the common case) produce
+exactly one `InlineEntry` per DIE as before — bit-for-bit
+identical output on the verdict suite. Scattered-form inlines
+now produce N `InlineEntry`s (one per range) where v0.14-v0.16
+produced zero.
+
+### Verified
+
+- Workspace tests pass (69 mcdc_report + others; 1 new test).
+- Verdict suite at v0.17.0 vs v0.16.0 baseline: byte-identical
+  (21/177 full-MC/DC, httparse 7/86, all counts match).
+- No regression in `branch_inline_contexts` /
+  `branch_inline_chains` counts on httparse (106 entries
+  unchanged) — the corpus's inline DIEs all use contiguous
+  form.
+
+### Notes for v0.17.x and v0.18
+
+- Synthetic `gimli::write` test for the DW_AT_ranges path —
+  the implementation is gimli-API-delegated and the existing
+  walker tests cover the contiguous form; targeted ranges-form
+  tests are nice-to-have but not blocking. `docs/research/
+  dw-at-ranges-test-cases.md` has the full sketch.
+- Real-world LTO fixture for end-to-end ranges-form signal —
+  could ship as `verdicts/lto_split/` when needed.
+- macOS Developer ID signing + notarisation — waiting on user
+  cert plumbing.
+
 ## [0.16.0] — 2026-05-12
 
 Refines the per-context drill-down bucketing rule. Previously

@@ -575,35 +575,21 @@ fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineM
                 continue;
             }
 
-            let mut low_pc: Option<u64> = None;
-            let mut high_pc_form: Option<HighPcForm> = None;
+            // v0.17.0 — extract only the call-site attributes here
+            // (`DW_AT_call_file` + `DW_AT_call_line`). Address
+            // ranges resolve via gimli's `die_ranges`, which
+            // handles BOTH the `DW_AT_low_pc + DW_AT_high_pc`
+            // contiguous form AND the `DW_AT_ranges` scattered
+            // form uniformly. Scattered inlines (LLVM hot/cold
+            // splits, tail-merged code, cross-crate LTO) now
+            // produce one `InlineEntry` per range, all sharing
+            // the same chain.
             let mut call_file_idx: Option<u64> = None;
             let mut call_line: Option<u64> = None;
 
             let mut attrs = entry.attrs();
             while let Some(attr) = attrs.next()? {
                 match attr.name() {
-                    gimli::constants::DW_AT_low_pc => {
-                        if let gimli::AttributeValue::Addr(a) = attr.value() {
-                            low_pc = Some(a);
-                        }
-                    }
-                    gimli::constants::DW_AT_high_pc => {
-                        // Two encodings only: absolute address or
-                        // offset-from-low_pc. Other DWARF attribute
-                        // forms aren't legal for DW_AT_high_pc per
-                        // the standard, so silently ignore them.
-                        #[allow(clippy::wildcard_enum_match_arm)]
-                        match attr.value() {
-                            gimli::AttributeValue::Addr(a) => {
-                                high_pc_form = Some(HighPcForm::Addr(a));
-                            }
-                            gimli::AttributeValue::Udata(d) => {
-                                high_pc_form = Some(HighPcForm::Offset(d));
-                            }
-                            _ => {}
-                        }
-                    }
                     gimli::constants::DW_AT_call_file => {
                         if let Some(idx) = attr.udata_value() {
                             call_file_idx = Some(idx);
@@ -618,19 +604,9 @@ fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineM
                 }
             }
 
-            // Need both endpoints + a call line to be useful for
-            // decision-key splitting. Without `call_line` the
-            // inlined entry can't act as a discriminator.
-            let (Some(lo), Some(hpc), Some(line)) = (low_pc, high_pc_form, call_line) else {
+            let Some(line) = call_line else {
                 continue;
             };
-            let hi_excl = match hpc {
-                HighPcForm::Addr(a) => a,
-                HighPcForm::Offset(off) => lo.saturating_add(off),
-            };
-            if hi_excl <= lo {
-                continue;
-            }
             let line_u32 = u32::try_from(line).unwrap_or(u32::MAX);
             let call_file = call_file_idx
                 .and_then(|idx| usize::try_from(idx).ok())
@@ -649,17 +625,29 @@ fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineM
                 .chain(std::iter::once(context.clone()))
                 .collect();
 
-            // BTreeMap keyed on low_pc; later inlines at the same
-            // low_pc overwrite earlier ones. Rare; if it happens
-            // both ranges cover the same code so either is fine.
-            out.insert(
-                lo,
-                InlineEntry {
-                    high_pc_exclusive: hi_excl,
-                    context: context.clone(),
-                    chain,
-                },
-            );
+            // v0.17.0 — resolve address ranges via gimli's unified
+            // API. Yields one or more `gimli::Range { begin, end }`
+            // tuples. Each becomes an independent `InlineEntry`
+            // sharing the same chain. Empty ranges + degenerate
+            // entries (begin >= end) are skipped.
+            let Ok(mut ranges) = unit_ref.die_ranges(entry) else {
+                continue;
+            };
+            while let Some(gimli::Range { begin, end }) = ranges.next()? {
+                if end <= begin {
+                    continue;
+                }
+                // BTreeMap keyed on low_pc; later inlines at the
+                // same low_pc overwrite earlier ones (rare).
+                out.insert(
+                    begin,
+                    InlineEntry {
+                        high_pc_exclusive: end,
+                        context: context.clone(),
+                        chain: chain.clone(),
+                    },
+                );
+            }
 
             // Push self onto the parent stack so any nested inlines
             // visited deeper in the DFS see this frame as their parent.
