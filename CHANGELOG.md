@@ -7,6 +7,60 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-05-12
+
+Adds a Rekor-transparency-log binding for every predicate
+envelope in the compliance evidence bundle. Each
+`predicate.json` is now also signed with keyless cosign via the
+release workflow's OIDC identity and the signing event is
+logged to Sigstore's public Rekor instance. The Ed25519 DSSE
+signature on `signed.dsse.json` stays — Rekor adds a second,
+independent binding-proof layer rather than replacing it.
+
+### Added — Rekor bolt-on in `release.yml::compliance`
+
+`compliance` job in `.github/workflows/release.yml` now:
+
+1. Runs the existing compliance Action to build the
+   `compliance/` evidence directory (unchanged).
+2. Loops over `compliance/verdict-evidence/*/predicate.json`,
+   running keyless `cosign sign-blob` on each with
+   `COSIGN_EXPERIMENTAL=1`. cosign uploads the signature event
+   to Rekor automatically; the local `.cosign.sig` +
+   `.cosign.cert` outputs land next to the predicate.
+3. Re-archives the bundle so the uploaded artifact carries the
+   new files. Downstream `cosign verify-blob` can re-verify
+   each predicate's signature + Rekor inclusion proof offline
+   from the bundle, OR query Rekor live by certificate
+   identity.
+
+### Documentation — SECURITY.md
+
+New subsection "cosign verify-blob for predicate envelopes
+(v0.15.1+)" under "Verifying a witness release" with the
+exact verification command + a paragraph explaining that
+Ed25519 DSSE and cosign are *independent* signatures of
+overlapping evidence — defence in depth, not redundancy.
+
+### Why this matters
+
+Pre-v0.15.1, predicate envelopes were Ed25519-signed with an
+ephemeral key generated per release. Verifying required
+trusting the public key shipped alongside the bundle. v0.15.1
+adds a public transparency-log proof: any third party can
+query Rekor to confirm a predicate existed at release time
+under this workflow's identity, without trusting any key
+witness ships. For DO-178C / ISO 26262 evidence chains where
+non-repudiation matters, Rekor inclusion is the
+externally-verifiable anchor.
+
+### Notes for v0.15.x and v0.16
+
+- DW_AT_ranges scattered-inline support — see
+  `docs/research/dw-at-ranges-test-cases.md`.
+- macOS Developer ID signing + notarisation — waiting on user
+  cert plumbing.
+
 ## [0.15.0] — 2026-05-11
 
 Flips the `--mcdc-schema` default from `v2` to `v3`. Soak

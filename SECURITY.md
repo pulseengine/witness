@@ -244,6 +244,37 @@ shape applies to:
 (certificate identity mismatch, OIDC issuer mismatch, signature
 mismatch, or Rekor inclusion proof failure) and exits non-zero.
 
+### Step-by-step: cosign verify-blob for predicate envelopes (v0.15.1+)
+
+v0.15.1 added a second binding-proof layer on top of the existing
+Ed25519 DSSE signature: every `predicate.json` inside the
+compliance-evidence bundle is also signed with keyless cosign via
+the workflow's OIDC identity and logged to Sigstore's Rekor
+transparency log. The bundle ships `predicate.cosign.sig` +
+`predicate.cosign.cert` alongside each `predicate.json` for
+offline verification.
+
+```sh
+# After unpacking the compliance archive:
+cd verdict-evidence/leap_year
+cosign verify-blob \
+  --certificate-identity 'https://github.com/pulseengine/witness/.github/workflows/release.yml@refs/tags/v0.15.1' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  --signature predicate.cosign.sig \
+  --certificate predicate.cosign.cert \
+  predicate.json
+```
+
+The Ed25519 DSSE signature on `signed.dsse.json` and the cosign
+signature on `predicate.json` are **independent** signatures of
+overlapping evidence: the Ed25519 path is fast, offline, and
+qualifies under the existing witness-attestation chain; the
+cosign path adds a public transparency-log proof that the
+predicate existed at release time and was produced by this
+workflow's OIDC identity. Either path verifying is sufficient
+for non-repudiation; both verifying together is the
+defence-in-depth path.
+
 ### Step-by-step: witness verify
 
 After unpacking the compliance-evidence archive, the bundle contains

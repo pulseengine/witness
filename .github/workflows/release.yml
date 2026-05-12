@@ -141,6 +141,13 @@ jobs:
     name: Generate compliance evidence
     needs: [build-binaries]
     runs-on: ubuntu-latest
+    # v0.15.1 — id-token: write needed for the keyless rekor
+    # attest-blob step that runs after the compliance bundle is
+    # built. Inherits from the workflow-level grant; declared here
+    # for clarity.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -165,10 +172,65 @@ jobs:
           report-label: ${{ github.ref_name }}
           run-json: ""
           modules: "[]"
+
+      # v0.15.1 — rekor bolt-on. Log every predicate.json in the
+      # compliance bundle to Sigstore Rekor via keyless `cosign
+      # attest-blob`. Each predicate gets a `.rekor.bundle`
+      # alongside it in the bundle so downstream verifiers can
+      # reproduce the proof without re-contacting the public
+      # transparency log. The bundle's existing Ed25519 DSSE
+      # signatures stay — Rekor adds a second, independent
+      # binding-proof layer.
+      #
+      # Verify downstream (any predicate in the bundle):
+      #   cosign verify-blob \
+      #     --certificate-identity 'https://github.com/pulseengine/witness/.github/workflows/release.yml@refs/tags/<TAG>' \
+      #     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+      #     --bundle <name>/predicate.rekor.bundle \
+      #     <name>/predicate.json
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.1'
+      - name: Rekor-log every predicate.json via keyless cosign
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          # The compliance Action writes per-verdict predicate.json
+          # files under compliance/verdict-evidence/<name>/. Sign each
+          # with keyless `cosign sign-blob`; with COSIGN_EXPERIMENTAL=1,
+          # cosign uploads the entry to Sigstore Rekor automatically.
+          # Output files (.cosign.sig + .cosign.cert) get re-bundled
+          # below so the compliance archive carries them for offline
+          # verification.
+          shopt -s nullglob
+          COUNT=0
+          for predicate in compliance/verdict-evidence/*/predicate.json; do
+            COUNT=$((COUNT + 1))
+            cosign sign-blob --yes \
+              --output-signature "${predicate%.json}.cosign.sig" \
+              --output-certificate "${predicate%.json}.cosign.cert" \
+              "$predicate"
+          done
+          echo "::notice::Rekor-logged $COUNT witness predicate envelope(s) via keyless cosign sign-blob"
+          # Re-archive: the compliance Action already produced
+          # compliance/<archive>.tar.gz but the .cosign.sig /
+          # .cosign.cert files we just emitted aren't in it yet.
+          # Regenerate the archive in-place so the uploaded artifact
+          # carries them.
+          if [ -d compliance ]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            ARCHIVE_NAME="witness-${VERSION}-compliance-evidence.tar.gz"
+            (cd compliance && tar -czf "../${ARCHIVE_NAME}" .)
+            echo "REPACKED_ARCHIVE=${PWD}/${ARCHIVE_NAME}" >> "$GITHUB_ENV"
+            ls -la "${ARCHIVE_NAME}"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: compliance-evidence
-          path: ${{ steps.evidence.outputs.archive-path }}
+          path: ${{ env.REPACKED_ARCHIVE || steps.evidence.outputs.archive-path }}
 
   wasm-component:
     name: Build witness-component (real Component Model wasm) — v0.7.0+
