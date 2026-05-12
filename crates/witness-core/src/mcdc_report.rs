@@ -884,27 +884,49 @@ fn derive_per_context(
     headline_conditions: &[ConditionVerdict],
 ) -> Vec<PerContextVerdict> {
     use std::collections::BTreeMap;
-    // Group rows by their inline_context tag. None-tagged rows are
-    // not bucketed — they aggregate into the headline only.
-    let mut buckets: BTreeMap<crate::instrument::InlineContext, Vec<&DecisionRow>> =
+    // v0.16.0 — chain-based bucketing. When rows carry
+    // `inline_chain` (v0.14+ wire format), bucket by the *full
+    // chain* rather than just the leaf inline_context. This
+    // matters whenever two rows share an innermost call site but
+    // arrive there from different parent paths (the same
+    // predicate inlined into two distinct wrapper-inlined-into-
+    // dispatcher contexts produces identical leaves but different
+    // chains). Rows without `inline_chain` (pre-v0.14) fall back
+    // to leaf-bucketing — preserves v0.13 behaviour bit-for-bit.
+    //
+    // Bucket key shape: `Option<Vec<InlineContext>>`. The chain
+    // is the primary key when present; the leaf wraps as a
+    // single-element Vec when chain is absent (so v0.13 and v0.14
+    // rows can co-exist in one buckets map without leaking chain
+    // info to leaf-only consumers).
+    let mut buckets: BTreeMap<Vec<crate::instrument::InlineContext>, Vec<&DecisionRow>> =
         BTreeMap::new();
     for r in &d.rows {
-        if let Some(ctx) = r.inline_context.as_ref() {
-            buckets.entry(ctx.clone()).or_default().push(r);
-        }
+        let key: Vec<crate::instrument::InlineContext> =
+            if let Some(chain) = r.inline_chain.as_ref() {
+                chain.clone()
+            } else if let Some(ctx) = r.inline_context.as_ref() {
+                vec![ctx.clone()]
+            } else {
+                continue;
+            };
+        buckets.entry(key).or_default().push(r);
     }
-    // Skip if no tagged rows OR all rows tagged the same context (one
-    // bucket whose size equals the total tagged-row count and there
-    // are no untagged rows). The headline already captures that case.
+    // Skip if no tagged rows OR all rows landed in a single
+    // bucket (the headline already captures that case).
     if buckets.is_empty() {
         return Vec::new();
     }
-    if buckets.len() == 1 && d.rows.iter().all(|r| r.inline_context.is_some()) {
+    if buckets.len() == 1
+        && d.rows
+            .iter()
+            .all(|r| r.inline_chain.is_some() || r.inline_context.is_some())
+    {
         return Vec::new();
     }
     let n = d.condition_branch_ids.len();
     let mut out: Vec<PerContextVerdict> = Vec::with_capacity(buckets.len());
-    for (ctx, rows) in buckets {
+    for (chain_key, rows) in buckets {
         if rows.len() < 2 {
             // Single-row context can't prove independent effect of
             // any condition; skip rather than produce a noisy verdict.
@@ -971,14 +993,32 @@ fn derive_per_context(
             (false, false) => DecisionStatus::FullMcdc,
         };
         let row_ids: Vec<u32> = ctx_rows.iter().map(|r| r.row_id).collect();
-        // v0.14.1 — chain label for the drill-down bucket. Pick any
-        // row's chain (they're filtered to the same context, so any
-        // row in the bucket carries the same chain by construction).
-        // Falls out to None when pre-v0.14 rows didn't carry chain
-        // tags, in which case v3 envelopes simply skip the field.
-        let inline_chain = ctx_rows.iter().find_map(|r| r.inline_chain.clone());
+        // v0.16.0 — the bucket key is now the full chain
+        // (`chain_key`, with single-element Vec for v0.13-leaf-only
+        // rows). The bucket's `inline_context` field carries the
+        // leaf (`chain.last()` semantics — innermost frame); the
+        // bucket's `inline_chain` field carries the whole chain
+        // when it's multi-frame. Single-element chains keep
+        // inline_chain = None so v3 envelopes for v0.13-style
+        // rows don't ship a redundant one-element Vec.
+        // chain_key is guaranteed non-empty: we only inserted into
+        // buckets when either inline_chain or inline_context was
+        // Some, so the constructed Vec has >= 1 frame.
+        let inline_context =
+            chain_key
+                .last()
+                .cloned()
+                .unwrap_or(crate::instrument::InlineContext {
+                    call_file: None,
+                    call_line: 0,
+                });
+        let inline_chain = if chain_key.len() > 1 {
+            Some(chain_key.clone())
+        } else {
+            None
+        };
         out.push(PerContextVerdict {
-            inline_context: ctx,
+            inline_context,
             inline_chain,
             conditions,
             status,
@@ -1719,6 +1759,84 @@ mod tests {
             "v2 keeps RowView.inline_context"
         );
         assert_eq!(dec.per_context.len(), 2);
+    }
+
+    #[test]
+    fn per_context_buckets_by_full_chain_not_just_leaf() {
+        // v0.16.0 — two rows with identical leaf inline_context but
+        // distinct inline_chains (different outer frames) must
+        // produce two per_context buckets, not one. Pre-v0.16
+        // bucketing keyed on leaf only would have collapsed them.
+        let leaf = crate::instrument::InlineContext {
+            call_file: Some("predicate.rs".to_string()),
+            call_line: 42,
+        };
+        let outer_a = crate::instrument::InlineContext {
+            call_file: Some("validate.rs".to_string()),
+            call_line: 5,
+        };
+        let outer_b = crate::instrument::InlineContext {
+            call_file: Some("validate.rs".to_string()),
+            call_line: 10,
+        };
+        let chain_a = vec![outer_a.clone(), leaf.clone()];
+        let chain_b = vec![outer_b.clone(), leaf.clone()];
+        let mk_row = |id: u32,
+                      evaluated: &[(u32, bool)],
+                      outcome: Option<bool>,
+                      chain: &Vec<crate::instrument::InlineContext>|
+         -> DecisionRow {
+            DecisionRow {
+                row_id: id,
+                evaluated: evaluated.iter().copied().collect(),
+                outcome,
+                raw_brvals: BTreeMap::new(),
+                inline_context: Some(leaf.clone()),
+                inline_chain: Some(chain.clone()),
+            }
+        };
+        let d = DecisionRecord {
+            id: 0,
+            source_file: Some("predicate.rs".to_string()),
+            source_line: Some(42),
+            inline_context: None,
+            condition_branch_ids: vec![100, 101],
+            rows: vec![
+                // chain_a rows — both prove c0 + c1 under masking.
+                mk_row(0, &[(0, false)], Some(false), &chain_a),
+                mk_row(1, &[(0, true), (1, false)], Some(false), &chain_a),
+                mk_row(2, &[(0, true), (1, true)], Some(true), &chain_a),
+                // chain_b rows — only 2 rows, c1 has no proving pair.
+                mk_row(3, &[(0, false)], Some(false), &chain_b),
+                mk_row(4, &[(0, true), (1, true)], Some(true), &chain_b),
+            ],
+        };
+        let report =
+            McdcReport::from_record_with_schema(&record_with_decision(d), McdcSchemaVersion::V3);
+        let dec = report.decisions.first().expect("decision");
+        assert_eq!(
+            dec.per_context.len(),
+            2,
+            "rows with same leaf but different chains → 2 buckets (got {:?})",
+            dec.per_context
+        );
+        // Both buckets have the same leaf inline_context.
+        for p in &dec.per_context {
+            assert_eq!(p.inline_context.call_line, leaf.call_line);
+        }
+        // Buckets differ in their inline_chain's outer frame.
+        let chains: Vec<Option<u32>> = dec
+            .per_context
+            .iter()
+            .map(|p| {
+                p.inline_chain
+                    .as_ref()
+                    .and_then(|c| c.first())
+                    .map(|f| f.call_line)
+            })
+            .collect();
+        // BTreeMap sort order: outer_a (call_line 5) < outer_b (call_line 10)
+        assert_eq!(chains, vec![Some(5), Some(10)]);
     }
 
     #[test]
