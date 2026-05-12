@@ -7,6 +7,70 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-05-12
+
+Refines the per-context drill-down bucketing rule. Previously
+buckets keyed only on the leaf inline_context — two rows with
+the same leaf but different parent paths through the inline
+hierarchy would collapse into one bucket and conceal the
+distinction. v0.16.0 keys on the *full chain* (v0.14+ rows) or
+falls back to the leaf (v0.13 rows). v0.13-only fields stay
+bit-for-bit compatible.
+
+### Changed — `derive_per_context` bucketing
+
+`crates/witness-core/src/mcdc_report.rs::derive_per_context`
+now buckets `DecisionRow`s by `inline_chain` (Vec) when present,
+falling back to `[inline_context]` when chain is absent. Bucket
+key is `Vec<InlineContext>` uniformly. Rows whose chains differ
+in any frame land in distinct buckets even when their leaves
+match — the case `is_safe()` inlined via two distinct wrapper
+paths within the same function.
+
+`PerContextVerdict.inline_context` continues to carry the leaf
+(`chain.last()` semantics). `PerContextVerdict.inline_chain`
+ships the full chain when chain length > 1; stays `None` for
+single-frame buckets (legacy v0.13 leaf-only rows) so v3
+envelopes from v0.13-vintage records stay byte-clean.
+
+### Why this is a correctness fix, not a feature
+
+v0.13's leaf-bucketing assumed rows with the same leaf
+inline_context arrived through identical inline hierarchies.
+For predicates inlined into a function from multiple distinct
+parent inlines (the design's headline use case), rows DO share
+the leaf but DIFFER in the chain. v0.13 grouped them; v0.16
+splits them — same data, more honest grouping.
+
+The verdict-suite `multi_context` fixture documented in v0.14.2
+still doesn't populate per_context with > 1 bucket: that
+fixture's stdlib-anchored br_ifs end up in `memchr` /
+`<[u8]>::contains` function bodies (not in the user's wrapper),
+so the chain captures stdlib's internal frames but not the
+wrapper's call site. Resolving that fixture's empty per_context
+needs runner-side multi-context row tagging (`Vec<InlineContext>`
+per row) or a different fixture shape (dispatcher pattern with
+inlined wrappers + invocation count emitting per-iteration
+rows). Both are v0.16.x / v0.17 work.
+
+### Tests
+
+- `mcdc_report::tests::per_context_buckets_by_full_chain_not_just_leaf`
+  — synthesises 5 rows with identical leaf inline_context but
+  two distinct chains (`outer_a` vs `outer_b`). Asserts
+  `per_context.len() == 2`; both buckets share the leaf; each
+  bucket's `inline_chain.first()` matches its respective outer
+  frame.
+
+### Notes for v0.16.x / v0.17
+
+- DW_AT_ranges scattered-inline support — implementation
+  plan at `docs/research/dw-at-ranges-test-cases.md`; ~430 LoC.
+- Runner-side multi-context row tagging (`Vec<InlineContext>`)
+  for rows whose conditions span multiple call sites.
+- macOS Developer ID signing + notarisation — waiting on user
+  cert plumbing.
+
 ## [0.15.1] — 2026-05-12
 
 Adds a Rekor-transparency-log binding for every predicate
