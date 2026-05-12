@@ -7,6 +7,42 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-05-11
+
+Flips the `--mcdc-schema` default from `v2` to `v3`. Soak
+validated: v0.14.0 + v0.14.1 + v0.14.2 v2-mode output remained
+byte-identical to v0.13.1 baseline (21/177 full-MC/DC, httparse
+7/86 across all releases); v3-mode adds the per-row inline
+call chain (up to 8 levels deep on httparse) without regression.
+
+### Changed — `--mcdc-schema` default v2 → v3
+
+- `McdcSchemaVersion::default()` now returns `V3` (was `V2`).
+- `witness predicate --kind mcdc` without an explicit
+  `--mcdc-schema` flag now emits v3 envelopes by default.
+  The wrapper's `predicateType` AND the embedded
+  `predicate.report.schema` both ship the v3 URL.
+- Pass `--mcdc-schema v2` to lock to the v2 shape, or `v1` to
+  fall back to the pre-v0.13 single-Decision-per-cluster shape.
+
+### Tests
+
+- `predicate::tests::mcdc_predicate_round_trips_truth_tables_and_gaps`
+  and `attest::tests::mcdc_predicate_sign_then_verify_round_trip`
+  now assert against `MCDC_PREDICATE_TYPE_V3` (was
+  `MCDC_PREDICATE_TYPE_V2`), matching the new default.
+
+### Notes for v0.15.x and v0.16
+
+- `DW_AT_ranges` scattered-inline support — currently skipped
+  silently when DWARF reports inlined-subroutine address ranges
+  via `DW_AT_ranges` instead of `DW_AT_low_pc + DW_AT_high_pc`.
+  See `docs/research/dw-at-ranges-test-cases.md` for the test-
+  case design analysis.
+- Rekor binding for predicate envelopes — v0.15.1.
+- macOS Developer ID signing + notarisation — waiting on user
+  cert plumbing.
+
 ## [0.14.2] — 2026-05-11
 
 Adds the first verdict-suite fixture written specifically to

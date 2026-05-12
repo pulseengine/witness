@@ -121,7 +121,7 @@ pub fn verify_envelope(envelope_bytes: &[u8], public_key_bytes: &[u8]) -> Result
 mod tests {
     use super::*;
     use crate::predicate::{
-        CoveragePredicate, Digests, MCDC_PREDICATE_TYPE_V2, McdcPredicate, Measurement,
+        CoveragePredicate, Digests, MCDC_PREDICATE_TYPE_V3, McdcPredicate, Measurement,
         PREDICATE_TYPE, Statement, Subject, build_mcdc_statement,
     };
     use crate::report::{FunctionReport, Report};
@@ -249,7 +249,8 @@ mod tests {
 
         let recovered = verify_envelope(&envelope, key_pair.pk.as_ref()).unwrap();
         // v0.13.1 — default predicate type now v2.
-        assert_eq!(recovered.predicate_type, MCDC_PREDICATE_TYPE_V2);
+        // v0.15.0 — default mcdc schema flipped to v3.
+        assert_eq!(recovered.predicate_type, MCDC_PREDICATE_TYPE_V3);
         assert_eq!(recovered.subject.len(), 1);
 
         // Truth tables survived sign + verify intact.

@@ -41,11 +41,13 @@ pub enum McdcSchemaVersion {
     /// v0.13.0 shipped V1 as default for a soak window. v0.13.1
     /// flipped the default to V2.
     V1,
-    #[default]
+    /// v0.13.0 superset. Default in v0.13.1..v0.14.x. Pass
+    /// `--mcdc-schema v2` to lock to this version explicitly.
     V2,
     /// v0.14.0 — adds full inline call chain (`Vec<InlineContext>`)
     /// per row + per `RowView`, on top of v2's single-hop leaf.
-    /// Opt-in via `--mcdc-schema v3`.
+    /// v0.15.0 (this release) flips the default to V3.
+    #[default]
     V3,
 }
 

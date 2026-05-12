@@ -147,11 +147,13 @@ enum Command {
         kind: PredicateKind,
         /// v0.13.0 — MC/DC schema version. Only consulted when
         /// `--kind mcdc`. v0.13.0 defaulted to `v1` for a soak
-        /// window; v0.13.1 flips the default to `v2` (the per-
-        /// context drill-down + per-row inline_context tags). Pass
-        /// `--mcdc-schema v1` to preserve byte-identical output for
-        /// strict v1 schema-validating consumers.
-        #[arg(long = "mcdc-schema", value_enum, default_value_t = McdcSchemaArg::V2)]
+        /// window; v0.13.1 moved the default to `v2`; v0.15.0
+        /// flips the default to `v3` (adds full DWARF inline call
+        /// chain per row and per `RowView`, up to 8 levels deep on
+        /// real Rust like httparse). Pass `--mcdc-schema v2` to lock
+        /// to the v2 shape; `--mcdc-schema v1` for strict v1
+        /// schema-validating consumers.
+        #[arg(long = "mcdc-schema", value_enum, default_value_t = McdcSchemaArg::V3)]
         mcdc_schema: McdcSchemaArg,
         /// Output path for the JSON Statement.
         #[arg(short, long, default_value = "witness-predicate.json")]
