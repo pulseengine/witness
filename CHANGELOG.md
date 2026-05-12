@@ -7,6 +7,96 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-05-12
+
+Documents witness's cross-language story honestly. Ships the
+first non-Rust probe (a C leap-year fixture via clang +
+wasm-ld), `docs/cross-language.md` as the long-running language
+matrix, and README framing of witness's position vs the
+existing OSS MC/DC tooling.
+
+### Reframing the OSS landscape
+
+Earlier README framing implied OSS MC/DC tooling for non-Rust
+languages didn't exist. That was wrong. The actual landscape:
+
+- **GCC 14 (2024)** ships `-fcondition-coverage` covering
+  C/C++/D/Rust at the source-level (frontend) chain layer.
+- **[Coveron](https://coveron.github.io/)** is an OSS C/C++
+  MC/DC tool aimed at automotive/aviation.
+- **[linux-mcdc](https://github.com/xlab-uiuc/linux-mcdc)** is
+  a 2025-published Linux-kernel MC/DC tool (DASC 2025 best
+  paper) layered on GCC's `-fcondition-coverage`.
+- **[GNATcoverage](https://github.com/AdaCore/gnatcoverage)**
+  covers Ada and C at source + object level.
+
+These all measure pre-codegen at the **source layer**. Witness
+measures **post-codegen at the wasm bytecode layer** — same
+DO-178C "post-preprocessor C" precedent the variant-pruning
+blog post leans on. Different chain layer, additive evidence.
+
+### Added — `examples/languages/c/leap-year/`
+
+First C-language probe. `leap.c` compiles the canonical
+leap-year predicate via `clang --target=wasm32-unknown-unknown
+-g -O1` with `wasm-ld` linkage. Outcomes verified against
+witness v0.17:
+
+- ✅ Wasm produced with `.debug_info` sections.
+- ✅ Witness instruments cleanly (1264 → 2178 bytes).
+- ✅ DWARF byte-offset → source-line attribution resolves.
+- ✅ 12 branches captured (4 funcs × 3 each).
+- ❌ **0 decisions reconstructed** because clang's `&&` / `||`
+  lowering emits `if/else` + 1 br_if per function instead of
+  the br_if chain rustc produces. `decisions.rs::group_into_decisions`
+  only clusters `BrIf`s today; `IfThen` / `IfElse` entries
+  are counted but never form decisions.
+
+The `examples/languages/c/leap-year/README.md` documents the
+limitation, the two design choices that could fix it, and
+witness's already-better-than-source claim even at the partial
+v0.17 level (post-LLVM transformations like inlining are
+visible in witness's branch view; source-level tools can't
+see them by definition).
+
+### Added — `docs/cross-language.md`
+
+Long-running language matrix. Four tiers:
+
+- **A — Verified**: Rust (full witness pipeline, 12 fixtures).
+- **B — Partial**: C (as documented above).
+- **C — Should work, untested**: C++ / Zig / Swift / TinyGo /
+  Kotlin/Wasm. Each entry documents the toolchain, expected
+  test cases (templates / comptime / optionals / channels /
+  sealed classes), and the open probe question.
+- **D — Won't work without compiler changes**: Go (no DWARF in
+  standard go build), AssemblyScript (sourcemaps only),
+  MoonBit (DWARF emission status unknown in current
+  toolchain).
+
+Plus a probe recipe for new languages: compile → confirm
+DWARF → instrument → check `(branches, decisions,
+branch_inline_contexts)` counts in the manifest. Distinguishes
+"instrumentation works, clustering doesn't" (file an issue)
+from "compiler isn't emitting DWARF" (different problem).
+
+### README — Cross-language reach section
+
+New section under "Cross-language reach" before "Where it
+fits". Cites the four existing OSS tools (GCC 14, Coveron,
+linux-mcdc, GNATcoverage) with hyperlinks; positions witness
+as the post-codegen layer. References `docs/cross-language.md`
+for the matrix.
+
+### Notes for v0.19+
+
+The C-fixture finding tracks the next planned increment:
+extend `decisions.rs::group_into_decisions` to cluster
+`IfThen` entries alongside `BrIf` when they share a
+`(function_index, source_file)` key. Small code change;
+unlocks C / C++ / Zig / TinyGo / Swift / Kotlin in one go.
+Tracked as v0.19+.
+
 ## [0.17.0] — 2026-05-12
 
 DW_AT_ranges scattered-inline support — closes the
