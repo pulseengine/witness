@@ -36,26 +36,27 @@ already language-agnostic.
 
 ## Language matrix
 
-### Tier A — verified (witness end-to-end works at v0.17)
+### Tier A — verified (witness end-to-end works at v0.19)
 
 | Language | Toolchain | Status | Notes |
 |---|---|---|---|
 | **Rust** | rustc + wasm32-unknown-unknown / wasm32-wasip2 | ✅ shipped | 12 fixtures in `verdicts/`; httparse demonstrates chains up to 8 levels deep |
+| **C** (`-O0`) | clang + wasm-ld + DWARF | ✅ probed | Decision clustering works post-v0.19 (IfThen + BrIf clustered). 2 branches → 1 Decision verified on the leap-year fixture at `-O0`. |
 
-### Tier B — probed, partial result
+### Tier B — clustering works, upstream DWARF gap at `-O1`+
 
 | Language | Toolchain | Status | Notes |
 |---|---|---|---|
-| **C** | clang + wasm-ld + DWARF | ⚠️ partial | Instrumentation, branch detection, DWARF attribution all work. Decision reconstruction returns 0 because clang's `&&`/`||` lowering emits `if/else` + 1 br_if per function instead of the br_if chain rustc produces. See `examples/languages/c/leap-year/README.md`. Fix tracked as v0.19+. |
+| **C** (`-O1`+) | clang + wasm-ld + `wasm32-unknown-unknown` | ⚠️ blocked upstream | v0.19 IfThen clustering is correct. `wasm-ld` for this target emits an empty `.debug_line` program (40-byte prologue, zero rows) when inlining or DWARF relocation is involved. Workaround: build at `-O0`, switch to wasi-sdk + `wasm32-wasi`, or use `__attribute__((noinline))` (partial — still wasm-ld-dependent). See `examples/languages/c/leap-year/README.md`. |
 
 ### Tier C — should work, untested
 
 These languages produce wasm with DWARF when configured
 appropriately. End-to-end through witness is unverified but
-expected to work to at least the same partial level as C
-(instrumentation + branch capture + DWARF attribution; decision
-reconstruction depends on the same clang-style lowering fix as
-C).
+expected to work — v0.19's IfThen+BrIf clustering covers
+LLVM-frontend lowering shapes. The remaining unknown is
+whether each toolchain's linker preserves the `.debug_line`
+program at the same level wasi-sdk does for C/C++.
 
 | Language | Toolchain | Special features to test |
 |---|---|---|
@@ -73,7 +74,7 @@ C).
 | **AssemblyScript** | Source maps only; no DWARF (historically). Recent versions may have improved; needs probing. |
 | **MoonBit** | Wasm-first language, but DWARF emission status in the 2026 toolchain unverified. Quick probe: `wasm-tools dump out.wasm \| grep .debug_` after compilation. If no `.debug_*` sections, witness has no source attribution. |
 
-## What works language-agnostic at v0.17
+## What works language-agnostic at v0.19
 
 These witness features apply to any wasm input with DWARF, regardless of source language:
 
@@ -87,7 +88,7 @@ These witness features apply to any wasm input with DWARF, regardless of source 
 
 These witness components were tuned to rustc:
 
-- **`decisions.rs::group_into_decisions`** — clusters by `BrIf` entries only. clang/zig emit `if/else` + `BrIf` for the same source decision; cluster rule needs extension. **Active limitation; fix tracked as v0.19+.**
+- ~~**`decisions.rs::group_into_decisions`** — clusters by `BrIf` only.~~ **Resolved in v0.19** — `IfThen` now clusters alongside `BrIf` for decision-key purposes (the IfThen arm is the "predicate was true" outcome, semantically equivalent to a BrIf). `IfElse` stays excluded. clang/zig/Swift/TinyGo shapes (one `if/else` + 1 `br_if` per `&&`/`||` source decision) now form Decisions.
 - **`instrument.rs::detect_chain_kind`** — looks for rustc's `i32.eqz; br_if` pattern as the `&&` lowering. Other compilers may use different bytecode shapes for short-circuit operators; chain_kind degrades to `Unknown` which means outcome derivation falls back to function-return (still works, just less precise per-iteration).
 - **`MAX_DECISION_LINE_SPAN = 10`** — tuned to Rust's source density. C/C++ may want a smaller window; Lean/Coq want larger. Configurable would be a small future change.
 

@@ -2,7 +2,7 @@
 name = "witness-viz"
 version = "0.19.0"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.92"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/pulseengine/witness"
 description = "HTMX-powered MC/DC truth-table visualiser for witness compliance bundles"

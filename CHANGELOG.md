@@ -58,6 +58,14 @@ MoonBit. Once their builds clear wasm-ld's DWARF gap (most via
 wasi-sdk by default), the cross-language matrix can extend
 without further clustering work in witness.
 
+### MSRV bump — 1.91 → 1.92
+
+Picks up the rustc floor that wasmtime 44.0.1 + cranelift
+0.131.x require (introduced in the v0.13 security bump for
+RUSTSEC-2026-0114). The CI MSRV job was failing on main from
+that bump forward; this commit aligns `rust-version` in both
+Cargo.toml files and the `ci.yml` MSRV job to 1.92.0.
+
 ## [0.18.0] — 2026-05-12
 
 Documents witness's cross-language story honestly. Ships the

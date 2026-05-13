@@ -57,11 +57,11 @@ jobs:
       - run: cargo test --all-targets
 
   msrv:
-    name: MSRV (1.91)
+    name: MSRV (1.92)
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.92.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-targets
 
