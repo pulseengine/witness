@@ -447,6 +447,32 @@ producing branch coverage like before. Migrate when you need truth
 tables — v1 → v2 is a strict superset, no breaking changes to the v1
 fields.
 
+## Cross-language reach
+
+witness operates at the wasm + DWARF layer, not at any specific
+source language. In principle, any language that compiles to
+wasm with debug info is a candidate — see
+[docs/cross-language.md](docs/cross-language.md) for the honest
+matrix: Rust is verified end-to-end; C is partially verified
+(instrumentation works, decision clustering needs a v0.19+
+extension to handle clang's `if/else` lowering); C++ / Zig /
+Swift / TinyGo / Kotlin/Wasm are documented as "should work,
+untested." Probes welcome.
+
+This positions witness alongside but distinct from existing
+OSS MC/DC tools:
+
+- **[GCC 14 `-fcondition-coverage`](https://arxiv.org/html/2501.02133v1)**
+  (C/C++/D/Rust), **[Coveron](https://coveron.github.io/)**
+  (C/C++), and **[linux-mcdc](https://github.com/xlab-uiuc/linux-mcdc)**
+  (Linux kernel) all measure at the **source-level** (frontend).
+- **[GNATcoverage](https://github.com/AdaCore/gnatcoverage)** (Ada) measures at the
+  source level and object level.
+- **witness** measures at the **post-codegen wasm bytecode**
+  layer. The same DO-178C "post-preprocessor C" precedent
+  applies: measure what the compiler emits, not what the
+  engineer typed. Different chain layer → additive evidence.
+
 ## Where it fits
 
 witness is one piece of a composed pipeline. Each tool owns a narrow mechanical
