@@ -7,6 +7,57 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-05-13
+
+Extends decision clustering to recognise clang/LLVM-frontend
+short-circuit lowering shapes. v0.18.0's C probe revealed that
+clang emits `if/else` + 1 `br_if` per `&&`/`||` source decision
+rather than rustc's `br_if` chain, so the v0.17 clustering rule
+(BrIf-only) couldn't form Decisions for clang-shaped wasm.
+
+### Changed — `decisions.rs::group_into_decisions`
+
+`IfThen` entries now cluster alongside `BrIf` for decision-key
+purposes. The IfThen arm is the "predicate was true" outcome,
+semantically equivalent to a `BrIf` for chain-shape decision
+reconstruction. `IfElse` stays excluded — it's the negation of
+the same site within a single source decision, so counting it
+would inflate the condition count and double-bill the same
+predicate. `BrTableTarget` / `BrTableDefault` clustering is
+unchanged.
+
+The cluster threshold (`cluster.len() >= 2`) holds. A lone
+IfThen with no companion still drops out, mirroring the
+pre-v0.19 behaviour for singleton BrIfs.
+
+Two new regression tests in `crates/witness-core/src/decisions.rs`
+pin this — `group_into_decisions_clusters_if_then_with_br_if`
+(IfThen + BrIf on the same line → 1 Decision with IfElse
+excluded from `conditions`) and `group_into_decisions_drops_lone_if_then`
+(singleton IfThen → 0 Decisions). 15 / 15 decisions tests pass.
+
+### Cross-language probe — C leap-year, the upstream gap
+
+Updated `examples/languages/c/leap-year/README.md` with the
+full diagnosis. v0.19 unblocks the clustering rule, but the
+clang `-O1` + wasm-ld build path on the `wasm32-unknown-unknown`
+target still hits an upstream wall: `wasm-ld` emits an empty
+`.debug_line` program (40 bytes total, prologue-only, zero
+rows) when the predicate function is force-inlined or when
+target-specific DWARF relocation isn't applied. The fixture
+verifies cleanly at `-O0` (1 Decision reconstructed), confirms
+the v0.19 clustering rule, and documents wasi-sdk +
+`wasm32-wasi` as the workaround for the line-program gap.
+
+### Why ship v0.19 even when the C probe still hits the
+upstream wall
+
+The clustering change is load-bearing for every clang/LLVM-
+frontend probe coming next — Zig, TinyGo, Swift, Kotlin/Wasm,
+MoonBit. Once their builds clear wasm-ld's DWARF gap (most via
+wasi-sdk by default), the cross-language matrix can extend
+without further clustering work in witness.
+
 ## [0.18.0] — 2026-05-12
 
 Documents witness's cross-language story honestly. Ships the

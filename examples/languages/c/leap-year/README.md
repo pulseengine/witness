@@ -19,56 +19,54 @@ witness run inst.wasm \
 witness report --input run.json --format mcdc
 ```
 
-## What v0.17 picks up — and what it doesn't
+## What v0.19 picks up — and the upstream blocker
 
-Probe results against witness v0.17 (verified 2026-05-12):
+Probe results against witness v0.19 (verified 2026-05-13):
 
 | | Result |
 |---|---|
 | Wasm produced | ✅ 1264 bytes with `.debug_info` |
-| Branches detected | ✅ 12 (4 funcs × 3 each) |
-| DWARF byte-offset → source attribution | ✅ resolves correctly |
-| **Decisions reconstructed** | ❌ **0** |
-| `branch_inline_contexts` populated | ❌ 0 |
+| Branches detected | ✅ 12 (4 funcs × 3 each: IfThen + IfElse + BrIf) |
+| DWARF line-program rows present | ❌ **empty at `-O1`** |
+| Decisions reconstructed at `-O1` | ❌ 0 (no line rows → can't resolve file/line) |
+| Decisions reconstructed at `-O0` | ✅ 1 (post-v0.19 IfThen clustering) |
 
-### Why decisions count is zero
+### Two layered issues — one fixed in v0.19, one upstream
 
-clang lowers `&& ` chains into a different wasm shape than rustc:
+**Issue 1 — clustering rule** (fixed in v0.19): clang lowers
+`a && b` to a wasm `if/else` block followed by one `br_if` —
+historically witness's clustering only paired `BrIf` entries, so
+clang shapes got 1 BrIf + 1 IfThen + 1 IfElse per source decision
+and never reached the `cluster.len() >= 2` gate.
 
-- **rustc** lowers `a && b` to `local.get; i32.eqz; br_if N`
-  — a chain of `br_if`s witness clusters into a Decision.
-- **clang** lowers `a && b` to a wasm `if/else` block followed
-  by one `br_if` — witness's `decisions.rs::group_into_decisions`
-  only clusters `BrIf` entries (line 263); `IfThen`/`IfElse`
-  entries from clang's `if/else` lowering get counted but never
-  form a decision (need ≥ 2 BrIfs in a cluster).
+v0.19 extends `decisions.rs::group_into_decisions` to cluster
+`IfThen` alongside `BrIf` for decision-key purposes (the IfThen
+arm is the "predicate was true" outcome, semantically equivalent
+to a BrIf). `IfElse` stays excluded — it's the negation of the
+same site, counting it would inflate condition counts.
 
-For this fixture, each `run_row_*` has 1 BrIf and 2 If entries,
-not enough to form a multi-condition Decision under v0.17's
-clustering rule.
+**Issue 2 — empty DWARF line program at `-O1`** (upstream, not
+witness): when clang force-inlines `leap_year` (it has the
+`DW_AT_inline = DW_INL_inlined` flag), wasm-ld for the
+`wasm32-unknown-unknown` target drops the line program rows for
+the inlined function. `llvm-dwarfdump` confirms `.debug_line`
+contains only the prologue (40 bytes, zero rows). Without line
+rows, no branch offset resolves to a `(file, line)` tuple, and
+the decision-clustering pass never runs.
 
-## What would fix this
+### Workarounds for the upstream DWARF gap
 
-Two design choices, neither implemented yet:
+| Workaround | Effect |
+|---|---|
+| Build at `-O0` | Restores line program; decision count climbs (see leap-o0 example) |
+| Switch to wasi-sdk + `wasm32-wasi` | wasi-sdk's linker preserves line rows at `-O2` |
+| Use `__attribute__((noinline))` on `leap_year` | Keeps the inline site, line program intact at `-O1` |
+| Wait for an upstream wasm-ld fix | Tracked LLVM bug, no ETA |
 
-1. **Cluster `IfThen` + `BrIf` entries together** when they
-   share a `(function_index, source_file)` key and the source
-   lines fall within `MAX_DECISION_LINE_SPAN`. Treat the
-   `if/else` lowering's `IfThen` arm as a condition equivalent
-   to a `BrIf`. Small code change in `decisions.rs`; risk is
-   over-clustering when an `if/else` is a separate source
-   statement.
-
-2. **Lowering-aware reconstruction** — detect clang vs rustc
-   emission style at instrument time (looking at the
-   surrounding bytecode shape) and apply per-style clustering
-   rules. Bigger change; gives more precise decisions but
-   couples reconstruction to compiler heuristics.
-
-Tracked as **v0.19+** ("decision reconstruction for clang/zig/
-other LLVM-frontend wasm shapes"). The instrumentation +
-runtime counter / brval / inline-context substrate already
-works; only the clustering rule needs the extension.
+The v0.19 change is load-bearing for clang/zig/TinyGo/Swift/
+Kotlin probes once their DWARF makes it to the clustering pass —
+those need to clear issue 2 separately (most don't, since
+wasm32-wasi or wasi-sdk is the standard build path).
 
 ## Why witness still beats source-level C tools at this layer
 
