@@ -307,7 +307,15 @@ fn group_into_decisions(
             branch_inline_chains.insert(entry.id, chain.clone());
         }
         match entry.kind {
-            BranchKind::BrIf => {
+            // v0.19.0 — cluster `IfThen` alongside `BrIf` for
+            // decision-key purposes. clang's lowering of `a && b`
+            // emits `if/else` + 1 br_if per source decision (vs
+            // rustc's br_if chain). The IfThen arm is the
+            // "predicate was true" condition equivalent to a br_if.
+            // IfElse stays excluded — it's the negation of IfThen
+            // for the same branching site, double-counting it would
+            // inflate the condition count.
+            BranchKind::BrIf | BranchKind::IfThen => {
                 resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
             }
             // v0.9.7 — br_table entries from the same match arm
@@ -318,11 +326,8 @@ fn group_into_decisions(
             BranchKind::BrTableTarget | BranchKind::BrTableDefault => {
                 brtable_resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
             }
-            // IfThen / IfElse counters are emitted by the if/else
-            // lowering and don't represent independent conditions in
-            // the source-MC/DC sense. They're already consumed by the
-            // BrIf path's per-decision aggregation when present.
-            BranchKind::IfThen | BranchKind::IfElse => {}
+            // IfElse stays out of the cluster pass; see IfThen note above.
+            BranchKind::IfElse => {}
         }
     }
 
@@ -753,6 +758,19 @@ mod tests {
         }
     }
 
+    fn entry_with_kind(id: u32, byte_offset: u32, kind: BranchKind) -> BranchEntry {
+        BranchEntry {
+            id,
+            function_index: 0,
+            function_name: None,
+            kind,
+            instr_index: id,
+            target_index: None,
+            byte_offset: Some(byte_offset),
+            seq_debug: format!("Id {{ idx: {id} }}"),
+        }
+    }
+
     #[test]
     fn empty_module_yields_no_decisions() {
         let entries = vec![entry_with_offset(0, 0), entry_with_offset(1, 4)];
@@ -1164,6 +1182,69 @@ mod tests {
         assert!(
             decisions[0].inline_context.is_none(),
             "Decision.inline_context absent when no inlines detected"
+        );
+    }
+
+    /// v0.19.0 — `IfThen` clusters alongside `BrIf` so clang-shaped
+    /// short-circuit chains (one `if/else` + one `br_if` per source
+    /// decision) produce a Decision. `IfElse` is excluded — it's the
+    /// negation of the same site and counting it would inflate the
+    /// condition count.
+    #[test]
+    fn group_into_decisions_clusters_if_then_with_br_if() {
+        let mut line_map = LineMap::new();
+        line_map.insert(
+            100,
+            LineLocation {
+                file: "leap.c".to_string(),
+                line: 6,
+            },
+        );
+        line_map.insert(
+            104,
+            LineLocation {
+                file: "leap.c".to_string(),
+                line: 6,
+            },
+        );
+        let entries = vec![
+            entry_with_kind(0, 100, BranchKind::IfThen),
+            entry_with_kind(1, 100, BranchKind::IfElse),
+            entry_with_kind(2, 104, BranchKind::BrIf),
+        ];
+        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        assert_eq!(
+            decisions.len(),
+            1,
+            "IfThen + BrIf on same line → one Decision (IfElse stays out)"
+        );
+        assert_eq!(
+            decisions[0].conditions,
+            vec![0, 2],
+            "Decision conditions must include the IfThen id and the BrIf id, NOT the IfElse"
+        );
+        assert_eq!(decisions[0].source_line, Some(6));
+    }
+
+    /// v0.19.0 — a lone `IfThen` (no BrIf companion, no second IfThen)
+    /// stays below the cluster threshold and is dropped, mirroring the
+    /// pre-v0.19 singleton handling for BrIf. Prevents the cluster
+    /// rule from emitting spurious 1-condition decisions.
+    #[test]
+    fn group_into_decisions_drops_lone_if_then() {
+        let mut line_map = LineMap::new();
+        line_map.insert(
+            50,
+            LineLocation {
+                file: "leap.c".to_string(),
+                line: 6,
+            },
+        );
+        let entries = vec![entry_with_kind(0, 50, BranchKind::IfThen)];
+        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        assert!(
+            decisions.is_empty(),
+            "singleton IfThen → no Decision (cluster.len() >= 2 gate holds)"
         );
     }
 }
