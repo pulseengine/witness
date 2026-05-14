@@ -12,8 +12,12 @@ DWARF survives.
 ## How to run
 
 ```sh
+# Defaults to -O0 — that's the 79-decision case (see results below).
 WASI_SDK_PATH=~/.local/opt/wasi-sdk-33.0-arm64-macos ./build.sh
 witness instrument leap.wasm -o inst.wasm
+
+# To reproduce the -O1 upstream-blocked case:
+OPT=-O1 WASI_SDK_PATH=~/.local/opt/wasi-sdk-33.0-arm64-macos ./build.sh
 ```
 
 ## v0.19 results (verified 2026-05-14)
