@@ -22,9 +22,17 @@ fi
 CLANG="$WASI_SDK_PATH/bin/clang"
 SYSROOT="$WASI_SDK_PATH/share/wasi-sysroot"
 
+# Default to -O0 — that's the level where wasi-sdk's wasm-ld
+# preserves the DWARF line program addresses well enough for
+# witness to reconstruct 79 decisions across libc. At -O1+
+# wasm-ld's missing DWARF address relocations collapse the line
+# program and witness reports 0 decisions. Override with OPT=-O1
+# to reproduce the gap.
+OPT="${OPT:--O0}"
+
 "$CLANG" --sysroot="$SYSROOT" \
     --target=wasm32-wasip1 \
-    -g -O1 \
+    -g "$OPT" \
     leap.c -o leap.wasm
 
-echo "built: $SCRIPT_DIR/leap.wasm ($(wc -c < leap.wasm) bytes)"
+echo "built: $SCRIPT_DIR/leap.wasm ($(wc -c < leap.wasm) bytes, opt=$OPT)"
