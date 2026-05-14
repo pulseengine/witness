@@ -7,6 +7,73 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-05-14
+
+Cross-language sweep. Adds three new Tier A fixtures exercising
+v0.19's IfThen+BrIf clustering against LLVM-frontend toolchains
+beyond Rust/clang-unknown-unknown, plus one new Tier B fixture
+documenting the upstream wasm-ld DWARF gap at `-O1`+.
+
+### Added — fixtures
+
+- **`examples/languages/zig/leap-year/`** — Zig 0.16 +
+  `wasm32-freestanding -OReleaseSafe`. 1 Decision on
+  `leap.zig:17` with `chain_kind = or` detected. Surprise:
+  Zig lowers `or` to br_if chains (rustc-style), not clang's
+  `if/else` shape. v0.19's IfThen clustering isn't load-
+  bearing here; the existing BrIf clustering catches the
+  pattern.
+
+- **`examples/languages/go/leap-year/`** — TinyGo 0.41 +
+  `wasm-unknown -opt 1`. 4 Decisions total: 2 in `leap.go:28`
+  (TinyGo inlined `leapYear` into both call sites — exactly
+  the multi-context scenario v0.14's chain tracker was built
+  for), 2 in TinyGo's `float.go` runtime primitives.
+  `chain_kind = or` detected, 2 inline chains populated.
+  Strongest non-Rust DWARF probe.
+
+- **`examples/languages/c/leap-year-wasi/`** — wasi-sdk 33 +
+  `wasm32-wasip1 -O0`. **79 Decisions + 92 inline chains**
+  across full libc (`vfprintf`, `fwrite`, `memchr`,
+  `__stdio_exit`, `wcrtomb`, …) — the biggest witness
+  coverage demo to date on non-Rust code. Source attribution
+  is partly cross-contaminated by wasm-ld's missing DWARF
+  address relocations (multi-CU line programs collapse to a
+  flat address space); decision clusters themselves are
+  structurally correct.
+
+### Cross-language docs
+
+`docs/cross-language.md` updated: three new Tier A entries
+(Zig, Go-via-TinyGo, wasi-sdk-C-at-O0); one new Tier B entry
+(wasi-sdk-C-at-O1 documenting the same upstream wasm-ld gap as
+`wasm32-unknown-unknown`); Tier C trimmed by removing the
+entries that just moved up.
+
+### Findings — what we learned about each toolchain
+
+- **Rust + Zig** — both lower `||` and `or` to br_if chains.
+  IfThen clustering is structurally additive but not
+  triggered by these.
+- **clang + TinyGo** — both use LLVM frontends that lower
+  `&&`/`||` to `if/else` blocks. IfThen clustering is
+  load-bearing on these.
+- **wasi-sdk DWARF is the best non-Rust toolchain** — line
+  program survives linking, inlined-subroutine entries get
+  populated, address relocations apply at `-O0`. At `-O1`+
+  the LLVM optimiser folds the line program past wasm-ld's
+  ability to re-link DWARF addresses — same upstream gap as
+  `wasm32-unknown-unknown`.
+- **TinyGo's inline-chain tracking is fully cross-language**
+  — v0.14's chain implementation isn't Rust-specific.
+
+### No code changes
+
+Pure additions under `examples/languages/` + doc updates.
+Version bump signals the cross-language story expanded; no
+behaviour changes in the witness CLI, witness-core decision
+reconstruction, or any schemas.
+
 ## [0.19.0] — 2026-05-13
 
 Extends decision clustering to recognise clang/LLVM-frontend
