@@ -7,6 +7,76 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-05-15
+
+Cross-language sweep continued. Adds three more probes covering
+C++ (success), Swift (toolchain-version blocked), and
+Kotlin/Wasm (tool-side blocked on wasm-gc). The two blocked
+fixtures still ship so future work can pick up from the
+documented state without re-discovering the gaps.
+
+### Added — fixtures
+
+- **`examples/languages/cpp/leap-year/`** (Tier A) — wasi-sdk
+  clang++ + `wasm32-wasip1 -std=c++20 -O0`. 79 Decisions
+  (libc dominates) + 92 inline chains. **C++ specific signal**:
+  template instantiation visible in `function_name` field:
+  `bool leap_year<unsigned int>(unsigned int)`. The 2 br_ifs
+  of the template instantiation cluster into a Decision with
+  `chain_kind = or` detected. Same wasm-ld cross-CU
+  attribution caveat as the C wasi-sdk fixture applies.
+
+- **`examples/languages/swift/leap-year/`** (Tier C, blocked) —
+  SwiftWasm 6.3-RELEASE SDK was built against `apple/swift
+  6.3-RELEASE`; macOS ships swift-6.3.2 which is patch-level
+  ahead. Swiftmodule binary format is patch-sensitive, so the
+  SDK's Swift stdlib refuses to load. Fixture source is
+  well-formed; unblock requires either a newer SwiftWasm
+  release or installing the matching apple/swift snapshot
+  toolchain. No witness-side change needed.
+
+- **`examples/languages/kotlin/leap-year/`** (Tier D, blocked) —
+  Kotlin Multiplatform 2.2 `wasmJs()` target builds cleanly
+  via Gradle, but witness can't parse the output:
+  `Error: gc proposal not supported (at offset 0x10)`.
+  Walrus 0.24 (witness's wasm-rewriter) rejects the wasm-gc
+  proposal Kotlin emits. Independently, Kotlin uses
+  `.wasm.map` source maps rather than DWARF — even with
+  walrus GC support, source attribution would need a new
+  source-map ingestion path in witness.
+
+### Cross-language docs
+
+`docs/cross-language.md` updated:
+- Tier A: 6 entries (Rust, C, C wasi-sdk, Zig, TinyGo, **C++**)
+- Tier B: 2 entries (C `-O1`+, C wasi-sdk `-O1`+ — both
+  blocked on the upstream wasm-ld DWARF gap)
+- Tier C: 1 entry (Swift — toolchain mismatch, recoverable)
+- Tier D: 3 entries (standard `go build`, AssemblyScript,
+  **Kotlin/Wasm**)
+
+### Findings
+
+- **C++ adds template signal on top of C** — same structural
+  decision count, but `function_name` carries the demangled
+  template instantiation. Important for compliance reviewers
+  doing per-monomorphisation audits.
+- **wasm-gc is a real boundary for witness** — current walrus
+  cannot parse modules using GC reference types. Until
+  walrus ships GC support, Kotlin/Wasm + Dart-wasm + any
+  future wasm-gc language stays in Tier D.
+- **Source maps are a separate gap from DWARF** — Kotlin's
+  decision to ship `.wasm.map` instead of `.debug_line`
+  means even a hypothetical walrus-GC-aware witness still
+  wouldn't have source attribution without a source-map
+  ingestion design.
+
+### No code changes
+
+Pure additions under `examples/languages/` + doc updates.
+Same shape as v0.20.0 — version bump signals the cross-
+language matrix expanded.
+
 ## [0.20.0] — 2026-05-14
 
 Cross-language sweep. Adds three new Tier A fixtures exercising

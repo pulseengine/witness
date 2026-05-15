@@ -45,6 +45,7 @@ already language-agnostic.
 | **C** (wasi-sdk `-O0`) | wasi-sdk clang + wasm-ld + `wasm32-wasip1` | ✅ probed | **79 decisions** + 92 inline chains across libc (`vfprintf`, `fwrite`, `memchr`, …). Best demo of witness on real C code. Source attribution partly cross-contaminated by the wasm-ld address-relocation gap. See `examples/languages/c/leap-year-wasi/README.md`. |
 | **Zig** | zig 0.16 + wasm32-freestanding `-OReleaseSafe` | ✅ probed | 1 Decision on `leap.zig:17`, `chain_kind = or` detected. Zig lowers `or` to br_if chains (rustc-style), not clang's `if/else`. See `examples/languages/zig/leap-year/README.md`. |
 | **Go (TinyGo)** | tinygo 0.41 + wasm-unknown `-opt 1` | ✅ probed | 4 Decisions, 2 in `leap.go:28` (inline copies of `leapYear` into both call sites), `chain_kind = or` + inline chains populated. Cleanest non-Rust DWARF. See `examples/languages/go/leap-year/README.md`. |
+| **C++** (wasi-sdk `-O0`) | wasi-sdk clang++ + `wasm32-wasip1 -std=c++20` | ✅ probed | 79 decisions (same shape as C wasi-sdk — libc dominates). C++ specific signal: template monomorphisation visible in `function_name` (`bool leap_year<unsigned int>(unsigned int)`). `chain_kind = or` on the predicate cluster. See `examples/languages/cpp/leap-year/README.md`. |
 
 ### Tier B — clustering works, upstream DWARF gap at `-O1`+
 
@@ -53,27 +54,19 @@ already language-agnostic.
 | **C** (`-O1`+) | clang + wasm-ld + `wasm32-unknown-unknown` | ⚠️ blocked upstream | v0.19 IfThen clustering is correct. `wasm-ld` for this target emits an empty `.debug_line` program (40-byte prologue, zero rows) when inlining or DWARF relocation is involved. Workaround: build at `-O0`, switch to wasi-sdk + `wasm32-wasi`, or use `__attribute__((noinline))` (partial — still wasm-ld-dependent). See `examples/languages/c/leap-year/README.md`. |
 | **C** (wasi-sdk `-O1`+) | wasi-sdk clang + `wasm32-wasip1` | ⚠️ blocked upstream | Same wasm-ld DWARF address-relocation gap as `wasm32-unknown-unknown` at `-O1`. wasi-sdk preserves the line program at `-O0` (proven by the 79-Decision result), then collapses it once LTO/inlining kicks in. See `examples/languages/c/leap-year-wasi/README.md`. |
 
-### Tier C — should work, untested
+### Tier C — should work, untested or toolchain-blocked
 
-These languages produce wasm with DWARF when configured
-appropriately. End-to-end through witness is unverified but
-expected to work — v0.19's IfThen+BrIf clustering covers
-LLVM-frontend lowering shapes. The remaining unknown is
-whether each toolchain's linker preserves the `.debug_line`
-program at the same level wasi-sdk does for C/C++.
+| Language | Toolchain | Block | Notes |
+|---|---|---|---|
+| **Swift (SwiftWasm)** | swiftc + wasm32-wasip1 SDK | ⏳ toolchain-version mismatch | Tried 2026-05-14: SwiftWasm 6.3-RELEASE was built against `apple/swift 6.3-RELEASE`; macOS ships 6.3.2. Swiftmodule binary format is patch-sensitive — incompatible. Unblocks when SwiftWasm catches up to 6.3.2 OR a matching swift-6.3-RELEASE toolchain is installed. See `examples/languages/swift/leap-year/README.md`. |
 
-| Language | Toolchain | Special features to test |
-|---|---|---|
-| **C++** | clang + wasm-ld + `-g` | Template monomorphisation produces deep inline chains; the v0.14 chain tracker should expose them. Virtual dispatch is `call_indirect`, not a "decision" in MC/DC sense — would show up in branch counts only. |
-| **Swift (SwiftWasm)** | swiftc with wasm target + `-g` | Optional pattern matching (`if let`) lowers to br_if chains; should produce textbook MC/DC. Protocol witness tables are runtime dispatch (not MC/DC-applicable). |
-| **Kotlin/Wasm** | Kotlin 2.0+ with `wasm-js` target + sourcemaps | Sealed-class exhaustive `when` lowers to br_table — textbook br_table audit case. |
-
-### Tier D — likely won't work without compiler changes
+### Tier D — likely won't work without compiler / tool changes
 
 | Language | Issue |
 |---|---|
 | **Go (standard `go build`)** | Wasm output has no DWARF. TinyGo is the path. |
 | **AssemblyScript** | Source maps only; no DWARF (historically). Recent versions may have improved; needs probing. |
+| **Kotlin/Wasm** | Probed 2026-05-14. Two layered blocks: (1) Output targets the wasm-gc proposal — witness's wasm-rewriter (walrus 0.24) rejects it with `gc proposal not supported (at offset 0x10)`. (2) Even with walrus GC support, Kotlin emits source maps (`.wasm.map` V3), not DWARF — witness would need a source-map ingestion path. See `examples/languages/kotlin/leap-year/README.md`. |
 | **MoonBit** | Wasm-first language, but DWARF emission status in the 2026 toolchain unverified. Quick probe: `wasm-tools dump out.wasm \| grep .debug_` after compilation. If no `.debug_*` sections, witness has no source attribution. |
 
 ## What works language-agnostic at v0.19

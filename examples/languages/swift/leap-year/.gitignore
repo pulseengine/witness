@@ -1,0 +1,7 @@
+# SwiftPM build artefacts.
+.build/
+.swiftpm/
+Package.resolved
+leap.wasm
+leap.instr.wasm
+leap.instr.wasm.witness.json

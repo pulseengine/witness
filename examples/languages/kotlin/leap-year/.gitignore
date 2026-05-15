@@ -1,0 +1,9 @@
+# Gradle artefacts.
+build/
+.gradle/
+.kotlin/
+
+# Kotlin/Wasm output (copied from build/ by build.sh).
+leap.wasm
+leap.instr.wasm
+leap.instr.wasm.witness.json
