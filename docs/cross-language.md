@@ -46,6 +46,7 @@ already language-agnostic.
 | **Zig** | zig 0.16 + wasm32-freestanding `-OReleaseSafe` | ✅ probed | 1 Decision on `leap.zig:17`, `chain_kind = or` detected. Zig lowers `or` to br_if chains (rustc-style), not clang's `if/else`. See `examples/languages/zig/leap-year/README.md`. |
 | **Go (TinyGo)** | tinygo 0.41 + wasm-unknown `-opt 1` | ✅ probed | 4 Decisions, 2 in `leap.go:28` (inline copies of `leapYear` into both call sites), `chain_kind = or` + inline chains populated. Cleanest non-Rust DWARF. See `examples/languages/go/leap-year/README.md`. |
 | **C++** (wasi-sdk `-O0`) | wasi-sdk clang++ + `wasm32-wasip1 -std=c++20` | ✅ probed | 79 decisions (same shape as C wasi-sdk — libc dominates). C++ specific signal: template monomorphisation visible in `function_name` (`bool leap_year<unsigned int>(unsigned int)`). `chain_kind = or` on the predicate cluster. See `examples/languages/cpp/leap-year/README.md`. |
+| **Swift** (SwiftWasm `-Onone`) | swift 6.3.0 (via swiftly) + SwiftWasm 6.3-RELEASE SDK + `wasm32-wasip1` | ✅ probed | **4,915 decisions** — biggest single fixture; Swift runtime dominates. `chain_kind = or / and / mixed` all detected. Predicate visible by mangled name `$s4leap0A4YearySbs6UInt32VF`. Same wasm-ld cross-CU attribution caveat as wasi-sdk. See `examples/languages/swift/leap-year/README.md`. |
 
 ### Tier B — clustering works, upstream DWARF gap at `-O1`+
 
@@ -56,9 +57,7 @@ already language-agnostic.
 
 ### Tier C — should work, untested or toolchain-blocked
 
-| Language | Toolchain | Block | Notes |
-|---|---|---|---|
-| **Swift (SwiftWasm)** | swiftc + wasm32-wasip1 SDK | ⏳ toolchain-version mismatch | Tried 2026-05-14: SwiftWasm 6.3-RELEASE was built against `apple/swift 6.3-RELEASE`; macOS ships 6.3.2. Swiftmodule binary format is patch-sensitive — incompatible. Unblocks when SwiftWasm catches up to 6.3.2 OR a matching swift-6.3-RELEASE toolchain is installed. See `examples/languages/swift/leap-year/README.md`. |
+_(Tier C empty after Swift moved to Tier A on 2026-05-16. Setup requirements documented in the Swift fixture README.)_
 
 ### Tier D — likely won't work without compiler / tool changes
 

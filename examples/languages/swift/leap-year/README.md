@@ -1,80 +1,89 @@
-# Swift — leap-year fixture (cross-language probe, BLOCKED)
+# Swift — leap-year fixture (cross-language probe)
 
 ## Status
 
-⚠️ **Blocked on SwiftWasm toolchain compatibility** — fixture
-exists but does not build end-to-end yet. See "What blocks
-this" below.
+✅ **Tier A** — unblocked 2026-05-16 after installing matching
+swift-6.3.0 toolchain via swiftly (no sudo required).
 
-## What this would demonstrate
+## What this demonstrates
 
-Same predicate as the other fixtures, in Swift. Swift's
-`&&`/`||` are short-circuit operators that swiftc → LLVM IR
-lowers similarly to clang. Expected wasm shape: `if/else` +
-1 `br_if` per source decision — the v0.19 IfThen clustering
-target.
+Swift's `&&`/`||` short-circuit operators lower (via swiftc →
+LLVM IR) similarly to clang. v0.19's IfThen clustering applies.
+The fixture's predicate `leapYear(_ y: UInt32) -> Bool` becomes
+the Swift-name-mangled `$s4leap0A4YearySbs6UInt32VF` in wasm.
 
-## Files
+## How to run
 
-- `leap.swift` — the predicate (UInt32 input via a small
-  reference-type box, `@inline(never)` predicate to defeat
-  constant-folding).
-- `Package.swift` — minimal SwiftPM manifest (SwiftWasm
-  cross-compilation requires SwiftPM, not bare swiftc).
-- `build.sh` — invokes `swift build --swift-sdk
-  6.3-RELEASE-wasm32-unknown-wasip1`.
+Toolchain alignment matters — SwiftWasm 6.3-RELEASE SDK was
+built against `apple/swift swift-6.3-RELEASE` (= Swift 6.3.0).
+Apple's bundled macOS Swift is 6.3.2, which has a different
+swiftmodule binary format. Use swiftly to install the matching
+host:
 
-## What blocks this
+```sh
+# One-time setup:
+brew install swiftly
+swiftly init --assume-yes
+. ~/.swiftly/env.sh
+swiftly install 6.3.0      # installs into ~/.swiftly, no sudo
 
-Verified 2026-05-14 with:
-- Host: Apple Swift 6.3.2 (built into macOS / Xcode)
-- SDK: `swift-wasm-6.3-RELEASE-wasm32-unknown-wasip1`
-  (latest official SwiftWasm release)
+# Install SwiftWasm SDK against it:
+swift sdk install \
+  https://github.com/swiftwasm/swift/releases/download/swift-wasm-6.3-RELEASE/swift-wasm-6.3-RELEASE-wasm32-unknown-wasip1.artifactbundle.zip \
+  --checksum 6704d137e532f1ac31eafedd80658f9ee61239f2b6291216a02da32361ea9dcb
 
-Result: `error: compiled module was created by a different
-version of the compiler ''; rebuild 'Swift' and try again`
-when SwiftPM tries to import the SDK's Swift stdlib
-swiftmodule.
+# Then:
+./build.sh
+witness instrument leap.wasm -o inst.wasm
+```
 
-The SwiftWasm release notes name `apple/swift swift-6.3-RELEASE`
-as the compatible host. Apple ships **swift-6.3.2** with
-current Xcode — and swiftmodule binary format is sensitive to
-patch-level differences. The SDK's stdlib was sealed against
-6.3-RELEASE's swift-frontend; 6.3.2's frontend refuses to load
-it.
+## v0.21+walrus0.26 results (verified 2026-05-16)
 
-## How to unblock
+| Metric | Value |
+|---|---|
+| Wasm size | ~7 MB (full Swift runtime statically linked) |
+| Branches | 66,811 |
+| **Decisions** | **4,915** |
+| `chain_kind` distribution | or / and / mixed all detected ✅ |
+| leap-named branches | 2 (in `$s4leap0A4YearySbs6UInt32VF`) ✅ |
+| Inline contexts populated | 0 (Swift's DWARF doesn't reach the inlined-subroutine DIE level in this binary) |
 
-Three paths, in increasing order of cost:
+The 4,915 decisions are the biggest single-fixture haul yet —
+Swift's standard library adds enormous decision surface
+(`Sequence`, `Optional`, `String`, runtime metadata machinery,
+etc.). Witness instrumented all of it.
 
-1. **Wait for SwiftWasm 6.3.2 / 6.4 release** — SwiftWasm
-   typically catches up within weeks. New SDK release →
-   re-run `swift sdk install`.
+## Caveats — same wasm-ld DWARF gap as wasi-sdk
 
-2. **Install matching apple/swift snapshot toolchain** —
-   download `swift-6.3-RELEASE` (~1.5 GB), use it as the
-   host via `xcrun -toolchain swift-6.3-RELEASE swift build
-   ...`. Heavier setup, fully unblocks.
+Every Decision's `source_file` reports `leap.swift:38` — that's
+because wasm-ld doesn't relocate DWARF addresses per-CU, so
+`lookup_line(byte_offset)` returns whichever line program row
+happens to be at the largest `<=` offset, which is our
+fixture's last line (leap.swift:38) for all 4,915 clusters.
 
-3. **Build SwiftWasm SDK from source** — full SwiftWasm
-   build against the host swift-6.3.2. Multiple hours.
+**Structural finding is real**: 4,915 valid clusters of 2+
+conditions sharing a line + chain_kind heuristic firing
+correctly (`or`, `and`, `mixed`). The per-decision source
+labels need cross-attribution awareness.
 
-For this fixture's purposes, the gap is purely toolchain
-alignment — the fixture source is well-formed and witness's
-clustering logic doesn't change. No witness-side fix is
-required.
+## Name mangling signal
+
+Each branch's `function_name` carries the Swift-mangled
+signature. Example for our predicate:
+
+```
+id=3 kind=br_if fn='$s4leap0A4YearySbs6UInt32VF'
+id=4 kind=br_if fn='$s4leap0A4YearySbs6UInt32VF'
+```
+
+Decoded: module `leap`, function `leapYear`, takes `Swift.UInt32`,
+returns `Swift.Bool`. Witness preserves this mangled name end-
+to-end so reviewers can demangle (via `swift demangle`) when
+they need the human-readable signature.
 
 ## Cross-language placement
 
-Stays in **Tier C** (should work, not yet probed end-to-end).
-The SwiftWasm 6.3-RELEASE SDK install + matching toolchain is
-the only thing between here and Tier A.
-
-## What we expect once unblocked
-
-| Metric | Predicted |
-|---|---|
-| Decisions on leap.swift | 1 (the `\|\|`-arm cluster) |
-| `chain_kind` | `or` |
-| Inline chains | Some — Swift heavily inlines stdlib calls |
-| Source attribution | Subject to the same wasm-ld DWARF gap as C wasi-sdk; expect cross-CU contamination |
+**Tier A** — full end-to-end works once swiftly + matching
+swift-6.3.0 toolchain are installed. The required setup is
+documented above; once toolchain alignment is solved, the
+witness side has zero gaps.
