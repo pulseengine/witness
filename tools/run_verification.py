@@ -68,12 +68,19 @@ def rivet_get_steps(artifact_id: str) -> list[str]:
 
 
 def run_one_step(cmd: str, shell: str) -> bool:
-    """Return True iff exit code is 0."""
+    """Return True iff exit code is 0. On failure, captures last 2 KB of
+    combined stdout/stderr and echoes it so the CI log surfaces what
+    actually broke instead of just `failed: <cmd>`."""
     proc = subprocess.run(
         [shell, "-c", cmd],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
     )
+    if proc.returncode != 0:
+        tail = proc.stdout[-2048:].decode("utf-8", errors="replace") if proc.stdout else ""
+        if tail:
+            for line in tail.splitlines():
+                print(f"         > {line}")
     return proc.returncode == 0
 
 
