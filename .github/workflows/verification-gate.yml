@@ -35,7 +35,11 @@ jobs:
   rivet-verification:
     name: Verification Gate (rivet-driven)
     runs-on: [self-hosted, linux, x64, rust-cpu]
-    timeout-minutes: 30
+    # First runs need ~6min for the rivet source install + ~24min for
+    # the gated tests. Subsequent runs hit the Swatinem rust-cache and
+    # skip the rivet install (see the guard below), running in ~25min.
+    # 45min headroom covers both cold and warm cases.
+    timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -D warnings
@@ -47,12 +51,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install rivet
+      - name: Install rivet (skip if cached)
         run: |
-          cargo install --locked --git https://github.com/pulseengine/rivet \
-            --rev b7a17bef \
-            --bin rivet \
-            rivet-cli
+          # Swatinem's rust-cache restores ~/.cargo/bin/ between runs,
+          # so once rivet's installed it stays. Guard to skip the
+          # ~6min build on warm runs.
+          if command -v rivet >/dev/null 2>&1; then
+            echo "rivet already on PATH: $(rivet --version)"
+          else
+            cargo install --locked --git https://github.com/pulseengine/rivet \
+              --rev b7a17bef \
+              --bin rivet \
+              rivet-cli
+          fi
 
       - name: Pick verification filter (per-PR override via body)
         id: pick
