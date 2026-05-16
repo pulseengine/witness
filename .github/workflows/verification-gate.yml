@@ -1,0 +1,100 @@
+name: Verification Gate
+
+# Mirrors the pulseengine/spar pattern (commit ba329f3d): iterate
+# every `type: feature` artifact in artifacts/verification.yaml,
+# run each one's `fields.steps[].run` commands via tools/run_verification.py,
+# and upsert a sticky PR comment with pass/fail counts.
+#
+# Security note: every untrusted input (PR body, etc.) is bound
+# via `env:` then dereferenced through `$VAR` with proper quoting
+# in `run:`. Never expand `${{ ... }}` directly inside `run:` —
+# that's the classic GitHub Actions command-injection vector.
+#
+# Locally:
+#     tools/run_verification.py
+# Or scoped:
+#     tools/run_verification.py --filter '(and (= type "test-case") (has-tag "unit-tests"))'
+#
+# Per-PR scoping via the PR body:
+#     Verify-Filter: (and (= type "test-case") (has-tag "cross-language"))
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  rivet-verification:
+    name: Verification Gate (rivet-driven)
+    runs-on: [self-hosted, linux, x64, rust-cpu]
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -D warnings
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install rivet
+        run: |
+          cargo install --locked --git https://github.com/pulseengine/rivet \
+            --rev b7a17bef \
+            --bin rivet \
+            rivet-cli
+
+      - name: Pick verification filter (per-PR override via body)
+        id: pick
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          DEFAULT='(and (= type "test-case") (or (has-tag "unit-tests") (has-tag "static-analysis") (has-tag "security")))'
+          OVERRIDE=$(printf '%s' "$PR_BODY" | grep -m1 -E '^Verify-Filter:' | sed 's/^Verify-Filter:[[:space:]]*//' || true)
+          if [ -n "${OVERRIDE:-}" ]; then
+            printf 'filter=%s\n' "$OVERRIDE" >>"$GITHUB_OUTPUT"
+          else
+            printf 'filter=%s\n' "$DEFAULT" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Run rivet verification gate
+        id: verify
+        continue-on-error: true
+        env:
+          FILTER: ${{ steps.pick.outputs.filter }}
+        run: |
+          tools/run_verification.py \
+            --filter "$FILTER" \
+            --results-json verification-results.json
+
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-results
+          path: verification-results.json
+          if-no-files-found: warn
+
+      - name: Post sticky PR comment
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          tools/post_verification_comment.py "$PR_NUMBER"
+
+      - name: Fail job if any verification artifact failed
+        if: steps.verify.outcome != 'success'
+        run: |
+          echo "::error::One or more verification artifacts failed; see PR comment for details"
+          exit 1

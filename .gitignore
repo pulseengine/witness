@@ -29,3 +29,6 @@ tests/playwright/test-results/
 tests/playwright/playwright-report/
 tests/playwright/.last-run.json
 
+# Local smoke-test output from tools/run_verification.py.
+verification-results.json
+

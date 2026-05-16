@@ -1,0 +1,187 @@
+# Witness verification measures — maps each test suite + end-to-end
+# step to one rivet `test-case` artifact whose `fields.steps[].run`
+# commands are executed by the verification gate workflow.
+#
+# The `test-case` type is defined in schemas/witness-verification.yaml
+# (rivet's built-in `feature` type doesn't recognise method/steps;
+# defining a proper schema keeps `rivet validate` clean of warnings).
+#
+# Mirrored from pulseengine/spar's pattern (commit ba329f3d). Run
+# locally:
+#     tools/run_verification.py
+# Or scope per-PR via the PR body:
+#     Verify-Filter: (and (= type "test-case") (has-tag "unit-tests"))
+
+artifacts:
+
+  # -------------------------------------------------------------------------
+  # Unit test crates — one verification artifact per crate
+  # -------------------------------------------------------------------------
+
+  - id: TEST-CORE
+    type: test-case
+    title: witness-core unit tests
+    description: >
+      Unit tests for decisions.rs (DWARF reconstruction + IfThen/BrIf
+      clustering), mcdc_report.rs (schema versioning + per_context
+      bucketing), instrument.rs (counter rewrite), and surrounding
+      modules. Includes the v0.19 IfThen+BrIf clustering regression
+      tests.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --release -p witness-core
+    links:
+      - type: satisfies
+        target: REQ-001
+      - type: satisfies
+        target: REQ-002
+      - type: satisfies
+        target: REQ-003
+      - type: satisfies
+        target: REQ-004
+
+  - id: TEST-CLI
+    type: test-case
+    title: witness CLI unit tests
+    description: >
+      Tests for the witness binary: argument parsing, subcommand
+      routing, schema version flags, error handling.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --release -p witness
+    links:
+      - type: satisfies
+        target: REQ-001
+
+  - id: TEST-CHECKER
+    type: test-case
+    title: witness-mcdc-checker unit tests
+    description: >
+      Tests for the mcdc-v1/v2/v3 schema validator and predicate
+      envelope checker.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --release -p witness-mcdc-checker
+    links:
+      - type: satisfies
+        target: REQ-001
+
+  # -------------------------------------------------------------------------
+  # Static analysis — clippy / format / cargo-deny / security audit
+  # -------------------------------------------------------------------------
+
+  - id: TEST-CLIPPY
+    type: test-case
+    title: Clippy lints — SCRC Phase 1 + Phase 2 + safety-critical set
+    description: >
+      Workspace-wide clippy with -D warnings, including
+      unwrap_used / expect_used / indexing_slicing /
+      arithmetic_side_effects / panic / todo / unimplemented /
+      undocumented_unsafe_blocks etc. (the safety-critical set
+      defined in workspace.lints.clippy in Cargo.toml).
+    tags: [verification, static-analysis]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo clippy --workspace --release --all-targets -- -D warnings
+    links:
+      - type: satisfies
+        target: REQ-001
+
+  - id: TEST-FORMAT
+    type: test-case
+    title: rustfmt compliance
+    description: All workspace code passes cargo fmt --check.
+    tags: [verification, static-analysis]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo fmt --all -- --check
+    links:
+      - type: satisfies
+        target: REQ-001
+
+  - id: TEST-DENY
+    type: test-case
+    title: cargo-deny — license + advisory check
+    description: >
+      Audits the workspace dep tree for forbidden licenses,
+      unmaintained crates, and RUSTSEC advisories.
+    tags: [verification, security]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo deny check
+    links:
+      - type: satisfies
+        target: REQ-001
+
+  # -------------------------------------------------------------------------
+  # End-to-end verification — verdict suite + cross-language probes
+  # -------------------------------------------------------------------------
+
+  - id: TEST-VERDICT-SUITE
+    type: test-case
+    title: Canonical 7 verdict suite — end-to-end MC/DC
+    description: >
+      Build → instrument → run → report on the canonical 7 Rust
+      verdicts. Decision-count delta vs main is the canary that
+      catches clustering regressions.
+    tags: [verification, end-to-end]
+    fields:
+      method: automated-test
+      steps:
+        - run: verdicts/build-all.sh
+        - run: cargo build --release -p witness
+        - run: WITNESS=target/release/witness verdicts/run-suite.sh
+    links:
+      - type: satisfies
+        target: REQ-001
+      - type: satisfies
+        target: REQ-002
+
+  - id: TEST-CROSS-LANG-RUST
+    type: test-case
+    title: Rust cross-language fixture instrumentation
+    description: >
+      Verifies that each verdict in verdicts/ instruments cleanly
+      and produces the expected branch + Decision counts. Specific
+      regression target after v0.19 IfThen clustering change.
+    tags: [verification, cross-language, end-to-end]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo build --release -p witness
+        - run: |
+            for v in leap_year range_overlap triangle state_guard mixed_or_and safety_envelope parser_dispatch; do
+              target/release/witness instrument "verdicts/$v/verdict_$v.wasm" -o "/tmp/witness_${v}.wasm" >/dev/null
+            done
+    links:
+      - type: satisfies
+        target: REQ-001
+
+  # -------------------------------------------------------------------------
+  # Schema validation — mcdc-v1/v2/v3 envelopes round-trip
+  # -------------------------------------------------------------------------
+
+  - id: TEST-SCHEMAS
+    type: test-case
+    title: mcdc-v1/v2/v3 schema validation
+    description: >
+      Validates shipped predicate envelopes against the JSON Schema
+      docs at docs/schemas/. Catches schema drift introduced by
+      witness-core changes.
+    tags: [verification, schemas]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --release -p witness-mcdc-checker -- --include-ignored
+    links:
+      - type: satisfies
+        target: REQ-001
