@@ -4,6 +4,10 @@ project:
   schemas:
     - common
     - dev
+    - witness-verification
+
+schema-paths:
+  - schemas
 
 sources:
   - path: artifacts

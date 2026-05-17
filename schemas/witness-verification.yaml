@@ -1,0 +1,68 @@
+# Witness verification schema — defines the `test-case` artifact type.
+#
+# Mirrors the pulseengine/spar verification-gate pattern (commit
+# ba329f3d) but as a proper rivet schema instead of overloading the
+# built-in `feature` type with unrecognised `method`/`steps` fields.
+#
+# A `test-case` artifact carries:
+#   - method: how the test is executed (automated-test | manual-check |
+#     review | inspection)
+#   - steps: ordered list of `{run: <shell command>}` entries that
+#     tools/run_verification.py iterates and runs under bash
+#
+# Test cases link to the artifacts they verify via `satisfies`
+# (covering a REQ or design-decision) or `verifies` (covering a
+# feature or specific behaviour).
+
+schema:
+  name: witness-verification
+  version: "0.1.0"
+  namespace: "http://pulseengine.dev/ns/witness-verification#"
+  extends: [common, dev]
+  description: >
+    Defines the test-case artifact type for executable verification
+    artifacts used by tools/run_verification.py + the verification
+    gate workflow.
+
+artifact-types:
+
+  - name: test-case
+    description: >
+      An executable verification artifact. Each `fields.steps[].run`
+      command is executed by the verification gate; non-zero exit
+      code marks the test-case as failed.
+    fields:
+      - name: method
+        type: string
+        required: true
+        description: How this test-case is executed.
+        allowed-values:
+          - automated-test
+          - manual-check
+          - review
+          - inspection
+      - name: steps
+        type: list
+        required: false
+        description: >
+          Ordered list of `{run: <shell command>}` entries that the
+          verification gate executes in order. First non-zero exit
+          stops execution and marks the test-case failed. Empty or
+          missing means the test-case is reported as skipped (use
+          for review/inspection methods that aren't automatable).
+    link-fields:
+      - name: satisfies
+        link-type: satisfies
+        cardinality: zero-or-many
+        required: false
+        description: >
+          The requirements / features / decisions this test-case
+          covers. A test-case satisfying multiple requirements is
+          common (e.g. a single unit-test run covers REQ-001..004).
+      - name: verifies
+        link-type: verifies
+        cardinality: zero-or-many
+        required: false
+        description: >
+          Alternative to `satisfies` for features whose acceptance
+          criteria this test-case checks.
