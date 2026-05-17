@@ -109,15 +109,27 @@ artifacts:
 
   - id: TEST-DENY
     type: test-case
-    title: cargo-deny — license + advisory check
+    title: cargo-deny — bans / licenses / sources check
     description: >
       Audits the workspace dep tree for forbidden licenses,
-      unmaintained crates, and RUSTSEC advisories.
+      banned crates, and approved source registries. Matches
+      the existing `Cargo Deny` CI job's invocation
+      (`cargo deny check bans licenses sources`).
+
+      The `advisories` check is intentionally skipped here while
+      smithy ships cargo-audit < 0.22.1 — newer RUSTSEC
+      advisories (e.g. RUSTSEC-2026-0037 for quinn-proto) use
+      CVSS 4.0 format which the bundled rustsec parser can't
+      read, breaking `cargo deny check advisories` on every
+      runner. The Security Audit job on ubuntu-latest covers
+      the advisory check separately until smithy bumps the
+      parser.
     tags: [verification, security]
     fields:
       method: automated-test
       steps:
-        - run: cargo deny check
+        - run: cargo install cargo-deny --locked --version 0.16.4 || true
+        - run: cargo deny check bans licenses sources
     links:
       - type: satisfies
         target: REQ-001
