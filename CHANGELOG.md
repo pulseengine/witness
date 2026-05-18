@@ -7,6 +7,112 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-05-17
+
+Three landed since v0.21: deeper C++ probes, Swift promoted to
+Tier A, and a rivet-driven verification gate mirroring spar's
+pattern. No witness-core code changes; CI infrastructure +
+fixtures + schema extension.
+
+### Added — C++ deeper probes (PR #30)
+
+Three new sub-fixtures under `examples/languages/cpp/`:
+
+- **virtual-dispatch/** — null-result probe: 627 branches, 107
+  Decisions, but **zero** attributed to the Shape hierarchy.
+  Doctrinal proof: `call_indirect` (vtable dispatch) is NOT an
+  MC/DC Decision.
+- **eh-table/** — br_table audit on a 4-arm switch (parse_token)
+  + vfprintf's 57-arm format-specifier dispatch. v0.9.7's
+  br_table clustering pass exercised on real-world tables.
+  Found wasi-sdk 33 ships libcxx without `__cxa_throw` shims;
+  build.sh has graceful `-fno-exceptions` fallback.
+- **stl-shortcircuit/** — exposes the optimisation-vs-DWARF
+  trade-off: at -O0, 26 of 105 inline chains hit depth 2 in
+  printf_core; at -O1 the wasm-ld DWARF gap kicks in (0
+  decisions). Real upstream limitation, not witness-side.
+
+### Added — Swift promoted to Tier A (PR #32)
+
+`examples/languages/swift/leap-year/` was Tier C (blocked on
+swiftmodule version mismatch between Apple swift-6.3.2 and
+SwiftWasm built against swift-6.3-RELEASE). Unblock 2026-05-16
+via `swiftly install 6.3.0` (no sudo, ~/.swiftly install).
+
+Result: **4,915 Decisions** — biggest single fixture yet.
+Swift's standard library adds enormous decision surface
+(Sequence, Optional, String, runtime metadata). The predicate
+itself is visible by Swift's mangled name
+`$s4leap0A4YearySbs6UInt32VF`, with `chain_kind = or / and /
+mixed` all detected. Same wasm-ld cross-CU attribution caveat
+as the wasi-sdk C/C++ fixtures.
+
+Source change beyond the README: `leap.swift` uses
+`nonisolated(unsafe) var yearInput: UInt32` instead of a
+reference-typed holder — Swift 6 strict-concurrency rejects
+unannotated global mutable state.
+
+### Added — rivet-driven verification gate (PR #31)
+
+Mirrors the [spar verification-gate pattern](https://github.com/pulseengine/spar/commit/ba329f3d44da4098f462f272fef17b6540f02a13).
+Makes verification artifacts EXECUTABLE rather than purely
+descriptive. New CI job iterates `type: test-case` artifacts,
+runs each one's `fields.steps[].run` commands, and upserts a
+sticky PR comment with pass/fail counts.
+
+What landed:
+
+- **`artifacts/verification.yaml`** — 9 `test-case` artifacts
+  covering unit tests per crate (TEST-CORE / TEST-CLI /
+  TEST-CHECKER), static analysis (TEST-CLIPPY / TEST-FORMAT),
+  security (TEST-DENY — aligned with ci.yml's `cargo deny
+  check bans licenses sources` invocation; advisories skipped
+  while smithy ships cargo-audit < 0.22.1), end-to-end
+  (TEST-VERDICT-SUITE, TEST-CROSS-LANG-RUST), schemas
+  (TEST-SCHEMAS).
+
+- **`schemas/witness-verification.yaml`** — defines the
+  `test-case` artifact type with proper `method` (enum) +
+  `steps` fields. Resolves the `rivet validate` INFO warnings
+  that would have appeared if we'd overloaded the built-in
+  `feature` type as spar does.
+
+- **`tools/run_verification.py`** — pure stdlib Python that
+  iterates matching test-cases, runs each step's `run` under
+  bash, writes `verification-results.json`. Captures last 2 KB
+  of stdout/stderr on failure so CI logs surface what
+  actually broke (not just `failed: <cmd>`).
+
+- **`tools/post_verification_comment.py`** — upserts a single
+  marker-tagged PR comment from the results JSON. Pure stdlib
+  urllib, no `gh` CLI dependency.
+
+- **`.github/workflows/verification-gate.yml`** — 45-minute
+  timeout, cached-rivet guard (skips ~6 min `cargo install`
+  on warm runs), env-var-bound untrusted inputs (no `${{ ...
+  }}` in `run:`).
+
+Run locally:
+
+```sh
+tools/run_verification.py
+tools/run_verification.py --filter '(and (= type "test-case") (has-tag "unit-tests"))'
+```
+
+Per-PR scope via PR body: `Verify-Filter: <sexp>`.
+
+### Adjacent fix
+
+- **`clippy.toml`** MSRV 1.91 → 1.92 — the v0.19 MSRV bump
+  missed this file. Surfaced by the gate's TEST-CLIPPY step
+  (with `-D warnings`, the mismatch escalates to a failure).
+
+### No code changes
+
+Pure additions under `examples/`, `tools/`, `schemas/`,
+`artifacts/`, `.github/workflows/` + doc updates. No
+witness-core / instrument / decisions changes.
+
 ## [0.21.0] — 2026-05-15
 
 Cross-language sweep continued. Adds three more probes covering
