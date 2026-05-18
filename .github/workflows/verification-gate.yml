@@ -47,7 +47,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # `dtolnay/rust-toolchain@stable` defaults to installing only
+      # rustc + cargo + clippy. `rustfmt` and `clippy` must be named
+      # explicitly via `components:`, otherwise `cargo fmt` / `cargo
+      # clippy` fail with `'cargo-fmt' is not installed for the
+      # toolchain` (seen on PR #34). Other CI workflows here either
+      # use `@stable` for tests-only or run their own component
+      # install; the verification gate executes both fmt and clippy
+      # in test-cases, so the components have to be present.
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
 
