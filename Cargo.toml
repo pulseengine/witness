@@ -65,7 +65,7 @@ thiserror = "2"
 sha2 = "0.10"
 gimli = { version = "0.31", default-features = false, features = ["read", "std"] }
 wasmparser = "0.240"
-walrus = "0.24"
+walrus = "0.26"
 wasmtime = "44"
 wasmtime-wasi = "44"
 clap = { version = "4", features = ["derive"] }
