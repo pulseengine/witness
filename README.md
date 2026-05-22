@@ -14,6 +14,34 @@ predicate.
 > br_if, post-codegen, polarity inversion, DSSE envelope, in-toto* — with
 > a worked leap-year example. New users should start there.
 
+## TL;DR — what's MC/DC, and why care?
+
+"Did the test exercise this `if`?" is the wrong question. **Modified
+Condition / Decision Coverage** is the right one: for each condition
+in a branch — say `a && b && c` — at least one test must flip *just
+that condition* and demonstrate that the flip changes the branch's
+outcome. Three conditions → at least three meaningful tests, not one
+"happy path" that covers the whole expression by accident.
+
+The aviation industry (DO-178C Level A), automotive (ISO 26262 ASIL D),
+and medical-device software (IEC 62304 Class C) require MC/DC because
+line-coverage doesn't catch the failures that kill people: short-
+circuit operands that never get evaluated, fused conditions where one
+flip masks another, dead arms the optimiser left in. MC/DC forces
+your test corpus to actually distinguish each condition.
+
+**Why care if you're not building a plane?** Same reason regulated
+industries demand it: MC/DC tells you whether your tests *would catch*
+a bug, not just whether they *touched* the code. It's a sharper
+signal than line-coverage at low cost — a few extra tests per
+predicate. And once you have it, you can refuse to ship a PR whose
+new conditions aren't proved.
+
+Witness measures MC/DC **after rustc + LLVM finish lowering** — on the
+actual Wasm the runtime executes. Same DO-178C *"post-preprocessor C"*
+precedent, applied to *"post-rustc Wasm"*. See the blog posts below
+for the long argument.
+
 ### Is this for you?
 
 Witness is **for** you if any of these match: you ship a Wasm module
@@ -44,17 +72,12 @@ is structurally the same move as *"post-rustc Wasm"*.
 
 ## Status
 
-**v0.10.x is the current release line.** v0.6.x ratcheted from
-"consumer-side schema only" up to a complete signed-evidence
-pipeline. v0.7.x added the trace-buffer primitive that lifts the
-per-row-globals limit on loop-bearing programs. v0.8.0 added
-chain-direction analysis + three new real-application fixtures.
-v0.9.0 shipped the visualiser, the MCP server, and the agent
-contract. **v0.10.0 closes the signed-evidence chain end to end**
-(the MC/DC truth tables themselves are signed, not just the branch
-summary; release tarballs are cosign-signed via GitHub OIDC) and
-adds the `docs/concepts.md` glossary that names the polarity
-convention and the post-codegen view explicitly.
+Witness is pre-1.0 and ships frequent tagged releases. The
+[**CHANGELOG**](CHANGELOG.md) is the source of truth for what's
+in any given version — including newly probed languages, schema
+revisions, and which fixtures count as Tier A. The
+[**latest GitHub Release**](https://github.com/pulseengine/witness/releases/latest)
+is the recommended pin for production use.
 
 ### What witness measures (and what it doesn't)
 
@@ -75,16 +98,16 @@ the wasm `br_if` value, not the source-level condition value).
 This is the same move DO-178C made for "post-preprocessor C" in
 1992: measure what the compiler emits, not what the engineer typed.
 
-### Stability contract — v0.10.x
+### Stability contract
 
 | Surface | Stability |
 |---|---|
-| Schema URLs (`witness-mcdc/v1`, `witness-coverage/v1`, …) | **Stable from v0.10.** Breaking changes bump the version path. |
-| CLI flags + subcommands | **Stable from v0.10** unless the CHANGELOG calls out an explicit deprecation. |
-| `witness-mcdc-checker` crate (qualifiable kernel) | **Stable from v0.10** — kept deliberately tiny so it can be audited. |
-| `RunRecord` / `Manifest` JSON shape | **Stable from v0.10** with serde aliases for v0.9.x field names (e.g. `ambiguous_rows` → `trace_parser_active`). |
-| Rust public API of `witness-core` and `witness-viz` | **Use at your own risk** until v1.0. Major bumps may change types. |
-| MCP wire (`/mcp` JSON-RPC) | Stable from v0.10. rmcp adoption deferred to v0.11+ if a real spec-feature need surfaces. |
+| Schema URLs (`witness-mcdc/v1`, `witness-mcdc/v2`, `witness-mcdc/v3`, `witness-coverage/v1`, …) | Stable per version path. Breaking changes bump the version segment; older schema URLs keep validating older predicates. |
+| CLI flags + subcommands | Stable unless the CHANGELOG calls out an explicit deprecation in the entry that ships the change. |
+| `witness-mcdc-checker` crate (qualifiable kernel) | Stable surface — deliberately kept tiny so it can be audited. |
+| `RunRecord` / `Manifest` JSON shape | Stable; serde aliases preserved when fields are renamed (the CHANGELOG notes the alias and when it'll be removed). |
+| Rust public API of `witness-core` and `witness-viz` | Use at your own risk until v1.0. Pre-1.0 bumps may change types. |
+| MCP wire (`/mcp` JSON-RPC) | Stable. Major adoption changes (e.g. rmcp) gated on spec-feature need. |
 
 v1.0 ships the **Check-It qualification artifact** — a small
 qualified checker (the `witness-mcdc-checker` crate today)
@@ -92,13 +115,11 @@ validates witness output, audited under DO-330 instead of trying
 to qualify the whole pipeline. Until v1.0, witness is positioned as
 **supplementary evidence** in a qualification dossier, not primary.
 
-The release cadence is high (witness shipped 16 tagged releases in
-its first month). The discipline is: every fix lands in a numbered
-release with green CI, signed binaries, and a CHANGELOG entry. If
-you're tracking witness for production, **pin to a v0.10.x patch**
-and read the CHANGELOG before bumping.
+Release discipline: every fix lands in a numbered release with
+green CI, signed binaries, and a CHANGELOG entry. For production
+use, pin to a specific tag and read the CHANGELOG before bumping.
 
-### The reviewer experience — v0.9.0
+### The reviewer experience
 
 ```
 $ witness viz --reports-dir compliance/verdict-evidence/ --port 3037
@@ -121,7 +142,7 @@ truth table — and an agent contract over the same surface. Every
 gap-closing test the agent proposes is verifiable: re-run witness, see
 the row appear, see the pair turn from `gap` to `proved`.
 
-### Current verdict suite — v0.8.0
+### Current verdict suite
 
 ```
 verdict              branches  decisions full      proved  gap   dead   rows
@@ -149,41 +170,13 @@ oracle truth tables for verifier confidence.
 
 ### Version history
 
-| Version | What it added |
-|---|---|
-| **v0.11.0** | Audit-grade evidence: predicate `measurement.toolchain` (rust + wasmtime) + `test_cases` (row_id ↔ invocation map); `witness verify --check-content`; SECURITY.md rewritten for cosign chain; Action silent-no-op fixes |
-| **v0.10.4** | Round-3 evaluator bugs: SOURCE_DATE_EPOCH expression fixed; Action sha256-verifies the tarball; `@v0.10.4` pinned in docs; "Is this for you?" framing |
-| **v0.10.3** | DSSE error variants (no more "wasm runtime error" mistag); `seq_debug` stable string; compliance bundle de-nested; `witness rivet-evidence` + GH Action sections in quickstart |
-| **v0.10.2** | Tester caveats — post-codegen framing in README, harness mode lifted into `docs/quickstart.md` §7, prominent Gatekeeper note + cosign verify command, "Stability contract" table |
-| **v0.10.1** | Windows path-stripping fix + SOURCE_DATE_EPOCH test race fix |
-| **v0.10.0** | "Signed evidence chain, end to end": `witness predicate --kind mcdc` + sigstore-OIDC release signing + `interpretation_polarity` field + `docs/concepts.md` + `witness-mcdc-checker` crate + 4 published JSON schemas + `SOURCE_DATE_EPOCH` |
-| **v0.9.12** | `witness quickstart` embedded subcommand + `docs/proposals/v0.10.0.md` + 2026-05-05 blog draft staged in pulseengine.eu |
-| **v0.9.11** | scaffold→viz bridge (auto-emit `verdict-evidence/`) + typed-args default + MCP `initialize` handshake + chatty success + `docs/quickstart.md` |
-| **v0.9.10** | `witness new <fixture>` — template scaffold (Cargo.toml + lib.rs + build.sh + run.sh) eliminating the fiddly first-run setup |
-| **v0.9.9** | Composite GitHub Action (`pulseengine/witness/.github/actions/witness@v1`) + ISSUE_TEMPLATE + `witness-reporter-component` artefact rename |
-| **v0.9.8** | `WITNESS_TRACE_PAGES` env override at instrument time + `TraceHealth.bytes_used`/`pages_allocated` telemetry |
-| **v0.9.7** | Per-target `br_table` decision reconstruction — httparse +26, json_lite +10 conditions correctly counted as proved |
-| **v0.9.6** | `--invoke-with-args 'name:val,...'` — typed positional args (eliminates `core::hint::black_box` workaround) |
-| **v0.9.5** | `witness-harness-v2` — MC/DC-capable subprocess protocol (counters + brvals + brcnts + base64 trace memory) |
-| **v0.9.4** | Tester-review Tier 0: ship witness-viz in releases, component preflight, harness protocol docs, error-tag fixes, walrus warning silenced |
-| **v0.9.3** | Fix `json_lite` Linux CI build (`unused_mut` under `-D warnings`) |
-| **v0.9.2** | Stacked coverage bars on dashboard + 12th verdict (base64_decode) + visual TOTAL row |
-| **v0.9.1** | Gap drill-down view (tutorial-style explanation + copy-paste test stub) + real HTMX 2.0.4 bundle |
-| **v0.9.0** | witness-viz Axum visualiser + MCP server (`get_decision_truth_table`, `find_missing_witness`, `list_uncovered_conditions`) + Playwright suite |
-| **v0.8.0..2** | Chain-direction analysis + 3 real-app fixtures + scoreboard + suite-index.html |
-| **v0.7.5** | Expanded httparse rows (15→40); 6× full MC/DC, 2.3× proved |
-| **v0.7.4** | Per-function-call decision outcome capture (kind=2 trace records) |
-| **v0.7.3** | Trace-buffer parser → per-iteration `DecisionRow`s |
-| **v0.7.2** | Trace-buffer write side (1582 records on httparse) |
-| **v0.7.1** | Module-rollup report (`--format mcdc-rollup`) |
-| **v0.7.0** | Real Wasm Component (witness-component, ~400 KB) + httparse fixture |
-| **v0.6.7..9** | README quickstart, release-self-verify, SECURITY.md threat model |
-| **v0.6.4..6** | DSSE-signed verdict predicates (ephemeral keys), V-model traceability matrix, PR delta comments |
-| **v0.6.0..3** | MC/DC schema + reporter + verdict-suite scaffolding + populated compliance bundle |
-| v0.1.0–v0.5.0 | Branch coverage, DWARF reconstruction, rivet evidence, sigil predicate format, workspace split, LCOV |
+See [**CHANGELOG.md**](CHANGELOG.md) for the per-version
+"what changed" list — schema bumps, new probed languages,
+clustering rule changes, bug fixes. The README intentionally
+stays version-agnostic; pinning version detail here just
+drifts.
 
-See [DESIGN.md](DESIGN.md) for the roadmap and
-[`docs/roadmap.md`](docs/roadmap.md) for v0.9+.
+See [DESIGN.md](DESIGN.md) for the roadmap.
 
 Counter values are exposed as exported mutable globals named
 `__witness_counter_<id>` (plus `__witness_brval_<id>` /
