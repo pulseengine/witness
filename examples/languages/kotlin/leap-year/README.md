@@ -1,13 +1,20 @@
-# Kotlin/Wasm — leap-year fixture (cross-language probe, BLOCKED)
+# Kotlin/Wasm — leap-year fixture (cross-language probe, partial)
 
 ## Status
 
-❌ **Blocked on wasm-gc + DWARF support** — fixture builds
-cleanly via Kotlin Multiplatform's `wasmJs()` target, but
-witness's wasm-rewriter (walrus 0.24) cannot parse the output
-because it uses the wasm-gc proposal. Independently, Kotlin
-emits source maps (`.wasm.map`) rather than DWARF, so even if
-parsing succeeded, source-line attribution wouldn't work.
+⚠️ **Branch-level only.** As of walrus 0.26 + the legacy-`try`/`catch`
+fix (pinned via witness PR #37 from the `pulseengine/walrus` fork;
+upstream PR `wasm-bindgen/walrus#316`), `witness instrument`
+**succeeds** on Kotlin/Wasm output — 54 branches captured on this
+fixture. **Decisions stay at 0** because Kotlin emits source maps
+(`.wasm.map` V3), not DWARF. Witness's decision reconstruction
+(`decisions.rs`) needs `.debug_line` rows to attribute branches to
+source and cluster them. The next step to unlock decisions is a
+source-map ingestion path in witness-core.
+
+Previous status (pre walrus 0.26 fix): hard panic at parse time —
+walrus could not even read the wasm-gc TYPE section. That blocker
+is gone.
 
 ## What this would demonstrate
 
@@ -27,52 +34,42 @@ once the tooling caught up.
 - `settings.gradle.kts` — Gradle project name
 - `build.sh` — invokes `gradle compileProductionExecutableKotlinWasmJsOptimize`
 
-## What blocks this
+## Current results (verified 2026-05-23, witness #37 + walrus fork)
 
-Verified 2026-05-14:
-
-```
-$ witness instrument leap.wasm -o leap.instr.wasm
-Error: failed to parse Wasm module at leap.wasm
-Caused by:
-    gc proposal not supported (at offset 0x10)
-```
-
-The error fires at the TYPE section (offset 0x10) because
-Kotlin/Wasm emits GC-typed types. Two layered blockers:
-
-1. **walrus 0.24 doesn't support wasm-gc** — the wasm
-   rewriter witness uses to insert counters can't parse
-   the module. This is a witness-side blocker that would
-   need a walrus upgrade with GC support (in flight at
-   walrus repo but not yet released in 0.x).
-
-2. **No DWARF, only source maps** — Kotlin/Wasm emits
-   `.wasm.map` source maps (V3 format), not DWARF. Even
-   with walrus support for wasm-gc, witness would need a
-   source-map ingestion path to attribute branches to
-   `.kt` source lines.
-
-The fixture output `leap.wasm` (3.5 KB) confirms both: header
-shows `TAG` (exception handling), `DATACOUNT`, and
-`sourceMappingURL` sections — no `.debug_*` sections at all.
-
-## What unblocking would look like
-
-| Change | Effect |
+| Metric | Value |
 |---|---|
-| walrus 0.24+ → wasm-gc support | Witness can instrument the module; decisions on br_ifs/IfThens would land but with no source attribution |
-| witness gains `--source-map` flag accepting V3 .wasm.map | Source attribution works; v0.19's IfThen clustering applies as normal |
+| `witness instrument` | ✅ succeeds (was: hard panic) |
+| Branches captured | **54** (27 if_then + 27 if_else) |
+| Decisions reconstructed | **0** |
+| Source attribution | ❌ no DWARF; Kotlin emits `.wasm.map` |
 
-Both are non-trivial. Kotlin/Wasm sits in Tier D until both
-land.
+The fixture output `leap.wasm` (3.5 KB) shows the wasm sections:
+no `.debug_*` at all, but a `sourceMappingURL` custom section
+pointing at `.wasm.map` (V3 source maps). Witness reads DWARF;
+ingesting V3 source maps is the remaining gap.
+
+## What's left to unlock decisions
+
+A single witness-side change: parse V3 source maps and build a
+`LineMap`-equivalent that feeds `decisions.rs` when DWARF is
+absent. Scoped as the next feature; design note tracked
+separately. Once it lands, the 54 branches above should cluster
+into decisions per `v0.19`'s existing IfThen / BrIf rules.
+
+Note that source maps are structurally weaker than DWARF:
+- No `DW_TAG_inlined_subroutine` → no inline-chain tracking
+- No address-range info → no per-range coverage
+- Only `(file, line, column, name)` tuples
+
+So Kotlin's MC/DC report will be flatter than (e.g.) the Rust
+verdicts — but it'll be real coverage data, not zero.
 
 ## Cross-language placement
 
-Moves from **Tier C** (should work, untested) → **Tier D**
-(blocked on upstream tool changes). The blocker isn't a wasm-
-ld DWARF gap (that's Tier B); it's a more fundamental wasm-gc
-parsing block + a separate source-map ingestion design.
+Was Tier D (couldn't parse). Now **Tier B-ish** — instruments
+cleanly, branch-level coverage works, decisions blocked on
+source-map ingestion (same tier as `C -O1` is blocked on the
+wasm-ld DWARF gap, but witness-side rather than upstream).
 
 ## Comparison with prior probes
 
@@ -83,5 +80,5 @@ parsing block + a separate source-map ingestion design.
 | Zig | None | A |
 | TinyGo | None | A |
 | C++ wasi-sdk -O0 | None | A |
-| Swift | Toolchain version alignment (apple 6.3.2 vs SwiftWasm-built-against 6.3.0) | C |
-| **Kotlin/Wasm** | **walrus wasm-gc + DWARF missing** | **D** |
+| Swift | Toolchain version alignment (apple 6.3.2 vs SwiftWasm-built-against 6.3.0) | A |
+| **Kotlin/Wasm** | **Source maps not DWARF (decisions); walrus wasm-gc fixed via #37** | **B (partial)** |
