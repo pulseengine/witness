@@ -54,6 +54,7 @@ already language-agnostic.
 |---|---|---|---|
 | **C** (`-O1`+) | clang + wasm-ld + `wasm32-unknown-unknown` | ⚠️ blocked upstream | v0.19 IfThen clustering is correct. `wasm-ld` for this target emits an empty `.debug_line` program (40-byte prologue, zero rows) when inlining or DWARF relocation is involved. Workaround: build at `-O0`, switch to wasi-sdk + `wasm32-wasi`, or use `__attribute__((noinline))` (partial — still wasm-ld-dependent). See `examples/languages/c/leap-year/README.md`. |
 | **C** (wasi-sdk `-O1`+) | wasi-sdk clang + `wasm32-wasip1` | ⚠️ blocked upstream | Same wasm-ld DWARF address-relocation gap as `wasm32-unknown-unknown` at `-O1`. wasi-sdk preserves the line program at `-O0` (proven by the 79-Decision result), then collapses it once LTO/inlining kicks in. See `examples/languages/c/leap-year-wasi/README.md`. |
+| **Kotlin/Wasm** (branch-level only) | Kotlin 2.2 `wasmJs()` + Gradle | ⚠️ partial | After walrus 0.26 + the legacy-`try`/`catch` fix (pulseengine/walrus pinned via #37, upstream PR `wasm-bindgen/walrus#316`), `witness instrument` succeeds: 54 branches captured on the leap-year fixture. **Decisions stay at 0** because Kotlin emits source maps (`.wasm.map` V3), not DWARF — witness's decision reconstruction needs `.debug_line` rows. Tracked as the next feature: source-map ingestion in witness-core. See `examples/languages/kotlin/leap-year/README.md`. |
 
 ### Tier C — should work, untested or toolchain-blocked
 
@@ -65,7 +66,6 @@ _(Tier C empty after Swift moved to Tier A on 2026-05-16. Setup requirements doc
 |---|---|
 | **Go (standard `go build`)** | Wasm output has no DWARF. TinyGo is the path. |
 | **AssemblyScript** | Source maps only; no DWARF (historically). Recent versions may have improved; needs probing. |
-| **Kotlin/Wasm** | Probed 2026-05-14. Two layered blocks: (1) Output targets the wasm-gc proposal — witness's wasm-rewriter (walrus 0.24) rejects it with `gc proposal not supported (at offset 0x10)`. (2) Even with walrus GC support, Kotlin emits source maps (`.wasm.map` V3), not DWARF — witness would need a source-map ingestion path. See `examples/languages/kotlin/leap-year/README.md`. |
 | **MoonBit** | Wasm-first language, but DWARF emission status in the 2026 toolchain unverified. Quick probe: `wasm-tools dump out.wasm \| grep .debug_` after compilation. If no `.debug_*` sections, witness has no source attribution. |
 
 ## What works language-agnostic at v0.19
