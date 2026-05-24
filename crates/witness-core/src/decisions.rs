@@ -49,31 +49,61 @@ use std::collections::BTreeMap;
 /// reconstruction phase yields no multi-condition groups (i.e. every
 /// surviving group is a single condition — strict per-`br_if` is the
 /// correct interpretation, no need to materialise a `Decision`).
-/// v0.14.0 — return tuple of `reconstruct_decisions` /
-/// `group_into_decisions`. Tuple is wide enough that clippy's
-/// `type_complexity` lint flags it; aliasing keeps signatures clean.
-pub type ReconstructionResult = (
-    Vec<Decision>,
-    BTreeMap<u32, InlineContext>,
-    BTreeMap<u32, Vec<InlineContext>>,
-);
+/// How the source-line attribution that produced this result was
+/// obtained. Populated by `reconstruct_decisions` so downstream
+/// reporters (and reviewers reading manifests) can tell whether the
+/// `(file, line)` labels come from DWARF — with its full structural
+/// signal (`DW_AT_ranges`, `DW_TAG_inlined_subroutine` chains) — or
+/// from a weaker source-map fallback, or are absent entirely.
+///
+/// `SourceMapV3` is reserved for an upcoming feature
+/// (`docs/research/source-map-ingestion.md`) and is not yet produced
+/// by any code path; this commit lays the type in place ahead of
+/// the V3 reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AttributionSource {
+    /// No source-line attribution available — neither DWARF nor a
+    /// source map was found. Decisions, if any, carry no
+    /// `source_file` / `source_line`.
+    #[default]
+    None,
+    /// Built from DWARF `.debug_line` rows. Includes inline-chain
+    /// tracking (`DW_TAG_inlined_subroutine`) and range info
+    /// (`DW_AT_ranges`).
+    Dwarf,
+    /// Built from a V3 source map. Line-only — no inline chains
+    /// (V3 has no equivalent of `DW_TAG_inlined_subroutine`) and no
+    /// address ranges.
+    SourceMapV3,
+}
+
+/// What `reconstruct_decisions` returns: the clustered decisions
+/// plus per-branch inline metadata, tagged with the attribution
+/// source so reporters know what the source-line labels mean.
+#[derive(Debug, Default, Clone)]
+pub struct ReconstructionResult {
+    pub decisions: Vec<Decision>,
+    pub branch_inline_contexts: BTreeMap<u32, InlineContext>,
+    pub branch_inline_chains: BTreeMap<u32, Vec<InlineContext>>,
+    pub attribution_source: AttributionSource,
+}
 
 pub fn reconstruct_decisions(
     wasm_bytes: &[u8],
     branches: &[BranchEntry],
 ) -> Result<ReconstructionResult> {
-    let empty = || (Vec::new(), BTreeMap::new(), BTreeMap::new());
     let dwarf_sections = match extract_dwarf_sections(wasm_bytes) {
         Some(s) => s,
-        None => return Ok(empty()),
+        None => return Ok(ReconstructionResult::default()),
     };
 
     let line_map = match build_line_map(&dwarf_sections) {
         Ok(m) => m,
-        Err(_) => return Ok(empty()),
+        Err(_) => return Ok(ReconstructionResult::default()),
     };
     if line_map.is_empty() {
-        return Ok(empty());
+        return Ok(ReconstructionResult::default());
     }
 
     // v0.13.0 — Variant B: re-enable inline-map construction (v0.12.1
@@ -93,7 +123,14 @@ pub fn reconstruct_decisions(
     // single-hop view byte-identical.
     let inline_map = build_inline_map(&dwarf_sections).unwrap_or_default();
 
-    Ok(group_into_decisions(branches, &line_map, &inline_map))
+    let (decisions, branch_inline_contexts, branch_inline_chains) =
+        group_into_decisions(branches, &line_map, &inline_map);
+    Ok(ReconstructionResult {
+        decisions,
+        branch_inline_contexts,
+        branch_inline_chains,
+        attribution_source: AttributionSource::Dwarf,
+    })
 }
 
 /// DWARF custom sections lifted out of a Wasm module.
@@ -273,11 +310,20 @@ pub const MAX_DECISION_LINE_SPAN: u32 = 10;
 /// emission order from `walk_collect`), which preserves the
 /// short-circuit chain's natural sequence. A new cluster starts when
 /// the next br_if's line falls outside the current cluster's span.
+/// Internal return shape of `group_into_decisions` — the three data
+/// pieces the public `ReconstructionResult` wraps (plus an
+/// `attribution_source` tag added by `reconstruct_decisions`).
+type DecisionGroups = (
+    Vec<Decision>,
+    BTreeMap<u32, InlineContext>,
+    BTreeMap<u32, Vec<InlineContext>>,
+);
+
 fn group_into_decisions(
     branches: &[BranchEntry],
     line_map: &LineMap,
     inline_map: &InlineMap,
-) -> ReconstructionResult {
+) -> DecisionGroups {
     // Step 1: resolve each br_if's (function, file, line). Side-output
     // a per-branch `branch_id → InlineContext` map for everything
     // whose byte offset fell within an inlined-subroutine address
@@ -774,11 +820,16 @@ mod tests {
     #[test]
     fn empty_module_yields_no_decisions() {
         let entries = vec![entry_with_offset(0, 0), entry_with_offset(1, 4)];
-        let (decisions, _, _) =
+        let result =
             reconstruct_decisions(b"\x00asm\x01\x00\x00\x00", &entries).unwrap();
         assert!(
-            decisions.is_empty(),
+            result.decisions.is_empty(),
             "no DWARF sections → strict-per-br_if fallback (empty Decision list)"
+        );
+        assert_eq!(
+            result.attribution_source,
+            AttributionSource::None,
+            "no DWARF, no source map → attribution source is None"
         );
     }
 

@@ -439,8 +439,10 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
     // means hosts use the strict per-br_if fallback. v0.13.0 — also
     // returns a per-branch InlineContext map (Variant B substrate)
     // that the runner consumes to tag each row.
-    let (mut decisions, branch_inline_contexts, branch_inline_chains) =
-        crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
+    let reconstruction = crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
+    let mut decisions = reconstruction.decisions;
+    let branch_inline_contexts = reconstruction.branch_inline_contexts;
+    let branch_inline_chains = reconstruction.branch_inline_chains;
     // v0.8: classify each decision's chain direction (And/Or/Mixed/Unknown)
     // using the per-branch hints captured during instrument_module.
     apply_chain_kinds(&mut decisions);
