@@ -255,6 +255,8 @@ proptest! {
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         let json = serde_json::to_string(&manifest).unwrap();
         let parsed: Manifest = serde_json::from_str(&json).unwrap();

@@ -27,5 +27,6 @@ pub mod predicate;
 pub mod report;
 pub mod rivet_evidence;
 pub mod run_record;
+pub(crate) mod sourcemap;
 
 pub use error::{Error, Result};

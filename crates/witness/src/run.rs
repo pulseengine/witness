@@ -1222,6 +1222,8 @@ mod tests {
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1278,6 +1280,8 @@ mod tests {
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -1326,6 +1330,8 @@ mod tests {
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let harness_cmd = r#"cat > "$WITNESS_OUTPUT" <<'EOF'
@@ -1384,6 +1390,8 @@ EOF"#;
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -1436,6 +1444,8 @@ EOF"#;
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -1492,6 +1502,8 @@ EOF"#;
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1566,6 +1578,8 @@ EOF"#
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1634,6 +1648,8 @@ EOF"#;
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1726,6 +1742,8 @@ EOF"#;
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1822,6 +1840,8 @@ EOF"#;
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1855,6 +1875,8 @@ EOF"#;
             decisions: vec![],
             branch_inline_contexts: std::collections::BTreeMap::new(),
             branch_inline_chains: std::collections::BTreeMap::new(),
+
+            attribution_source: Default::default(),
         };
         let manifest_path = dir.path().join("manifest.json");
         let module_path = dir.path().join("prog.wasm");

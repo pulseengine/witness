@@ -374,6 +374,20 @@ pub struct Manifest {
     /// manifests deserialise unchanged via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub branch_inline_chains: BTreeMap<u32, Vec<InlineContext>>,
+
+    /// How the source-line labels on `decisions[].source_file` /
+    /// `source_line` were produced. `dwarf` means full structural
+    /// signal (ranges, inline chains). `source-map-v3` means a
+    /// weaker fallback — no inline chains, no ranges. `none` means
+    /// no attribution at all (decisions array typically empty).
+    /// Defaults to `none` so v0.22.x manifests deserialise
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "is_attribution_none")]
+    pub attribution_source: crate::decisions::AttributionSource,
+}
+
+fn is_attribution_none(s: &crate::decisions::AttributionSource) -> bool {
+    matches!(s, crate::decisions::AttributionSource::None)
 }
 
 impl Manifest {
@@ -390,6 +404,45 @@ impl Manifest {
             source,
         })
     }
+}
+
+/// Locate a V3 source-map for `input` and return its bytes if any.
+///
+/// Lookup order:
+/// 1. `override_path` — explicit `--source-map <path>`.
+/// 2. URL named by the wasm's `sourceMappingURL` custom section,
+///    resolved relative to the input wasm's directory.
+/// 3. Sidecar `<input>.map` by convention (some emitters omit the
+///    custom section).
+///
+/// Returns `None` if no source map is found or any read fails; the
+/// caller treats absence as "no source-map fallback available."
+fn discover_source_map(
+    input: &Path,
+    wasm_bytes: &[u8],
+    override_path: Option<&Path>,
+) -> Option<Vec<u8>> {
+    if let Some(p) = override_path {
+        return std::fs::read(p).ok();
+    }
+    let parent = input.parent().unwrap_or(Path::new("."));
+    if let Some(url) = crate::sourcemap::extract_source_mapping_url(wasm_bytes) {
+        // Only handle relative-path URLs (the common case for
+        // Kotlin/Wasm + similar toolchains). Skip `data:` URLs and
+        // anything absolute / `http(s):` for now.
+        if !url.starts_with("data:") && !url.contains("://") {
+            let resolved = parent.join(&url);
+            if let Ok(bytes) = std::fs::read(&resolved) {
+                return Some(bytes);
+            }
+        }
+    }
+    // Conventional sidecar fallback.
+    let sidecar = input.with_extension(format!(
+        "{}.map",
+        input.extension().and_then(|e| e.to_str()).unwrap_or("wasm")
+    ));
+    std::fs::read(&sidecar).ok()
 }
 
 /// Instrument the Wasm module at `input`, writing the instrumented module
@@ -439,8 +492,22 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
     // means hosts use the strict per-br_if fallback. v0.13.0 — also
     // returns a per-branch InlineContext map (Variant B substrate)
     // that the runner consumes to tag each row.
-    let (mut decisions, branch_inline_contexts, branch_inline_chains) =
-        crate::decisions::reconstruct_decisions(&original_bytes, &entries)?;
+    // v0.23.x — discover the optional V3 source map sidecar so that
+    // wasm modules with no DWARF (e.g. Kotlin/Wasm) still get
+    // source-line attribution. `instrument_file_with_source_map`
+    // takes an explicit override; this entry point only checks
+    // for a `sourceMappingURL` custom section in the wasm and a
+    // sidecar file next to the input wasm.
+    let source_map_bytes = discover_source_map(input, &original_bytes, None);
+    let reconstruction = crate::decisions::reconstruct_decisions(
+        &original_bytes,
+        &entries,
+        source_map_bytes.as_deref(),
+    )?;
+    let mut decisions = reconstruction.decisions;
+    let branch_inline_contexts = reconstruction.branch_inline_contexts;
+    let branch_inline_chains = reconstruction.branch_inline_chains;
+    let attribution_source = reconstruction.attribution_source;
     // v0.8: classify each decision's chain direction (And/Or/Mixed/Unknown)
     // using the per-branch hints captured during instrument_module.
     apply_chain_kinds(&mut decisions);
@@ -459,6 +526,7 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
         decisions,
         branch_inline_contexts,
         branch_inline_chains,
+        attribution_source,
     };
     let manifest_path = Manifest::path_for(output);
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(Error::Serde)?;
