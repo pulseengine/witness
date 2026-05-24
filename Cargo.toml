@@ -65,7 +65,14 @@ thiserror = "2"
 sha2 = "0.10"
 gimli = { version = "0.31", default-features = false, features = ["read", "std"] }
 wasmparser = "0.240"
-walrus = "0.26"
+# TEMPORARY — pinned to the pulseengine/walrus fork carrying the legacy
+# try/catch multi-value-handler panic fix. Upstream PR:
+#   https://github.com/wasm-bindgen/walrus/pull/316  (issue #315)
+# Without it, `witness instrument` panics on any module with a legacy
+# `try`/`catch` whose handler signature is multi-value — e.g. every
+# Kotlin/Wasm output. Revert to a crates.io `walrus = "0.26.x"` once
+# the fix ships in a release.
+walrus = { git = "https://github.com/pulseengine/walrus", rev = "ae623af0591d39a6ff8bd84fc6eca1ff3e533689" }
 wasmtime = "44"
 wasmtime-wasi = "44"
 clap = { version = "4", features = ["derive"] }
