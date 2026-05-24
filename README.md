@@ -42,6 +42,22 @@ actual Wasm the runtime executes. Same DO-178C *"post-preprocessor C"*
 precedent, applied to *"post-rustc Wasm"*. See the blog posts below
 for the long argument.
 
+**Prescriptive, not descriptive.** Most coverage tools end at
+"you're at 47%." Witness ends at "row `{c0=T, c1=T}` would flip
+condition 0's outcome — add a test that produces that row." Every
+gap is named with the exact input shape that closes it. That's the
+single biggest qualitative difference from line/statement coverage
+tools, and it's what makes MC/DC work as a feedback loop for both
+humans and AI agents writing tests.
+
+**The tool is the cheap part; the scenarios are the project.**
+Standing up the pipeline takes minutes (`witness new` → `instrument`
+→ `run` → `report`). Closing every gap is days-to-weeks of test-
+corpus design work, just like any MC/DC tool. Witness shrinks the
+*guessing* part of that work, not the *thinking* part. Budget
+accordingly: half a day for tool integration; the scenario design
+is the real engineering.
+
 ### Is this for you?
 
 Witness is **for** you if any of these match: you ship a Wasm module
@@ -97,6 +113,27 @@ the wasm `br_if` value, not the source-level condition value).
 
 This is the same move DO-178C made for "post-preprocessor C" in
 1992: measure what the compiler emits, not what the engineer typed.
+
+### What MC/DC isn't, and what to pair witness with
+
+MC/DC proves your tests **distinguish each condition** — flip
+condition 0 alone, observe an outcome change. It does **not** prove
+your tests **reach each error branch**. The `dead` column in
+witness's report is precisely that signal: branches witness
+instrumented but no test exercised at all.
+
+Closing the "dead" column requires a different testing technique —
+typically **fault injection** that drives the program through error
+paths an ordinary input never reaches: allocation failures, I/O
+errors, integer overflow, partial reads. For Rust on wasm, that
+usually means a small `failpoints`-style crate or a host-side
+harness that fails imports on demand. curl's torture-test suite is
+the canonical example of this discipline in C.
+
+Witness measures whether the tests you wrote exercise each
+condition meaningfully. Pair it with fault injection (or
+manual fault tests) for full structural confidence — neither
+substitutes for the other.
 
 ### Stability contract
 

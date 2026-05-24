@@ -4,6 +4,35 @@ This is what I wish I had on hand when I tried `witness` for the
 first time. It assumes macOS arm64 and a working Rust toolchain
 with `wasm32-unknown-unknown` installed.
 
+## Two things to get right before you start
+
+**1. Pick the right wasm target.** For Rust:
+
+| Target | When to use | Catches |
+|---|---|---|
+| `wasm32-wasip1` | **Anything that touches `std`** (any non-trivial crate using `Vec`, `String`, `HashMap`, `getrandom`, …) | Clean core module + WASI shim for syscalls; runs in witness's embedded wasmtime out of the box. **Recommended default.** |
+| `wasm32-unknown-unknown` | Pure `no_std` fixtures; minimal control-flow probes | Smaller binary, no syscall layer — but `std`-using deps will produce undefined `__wbindgen_*` symbols at link time |
+| `wasm32-wasip2` | You need the Component Model | Produces a *component*, not a core module — witness emits an explicit "unbundle this with `wasm-tools component unbundle`" message |
+
+The scaffolded leap-year fixture uses `wasm32-unknown-unknown`
+because it's `no_std`-compatible. For anything realistic, default
+to `wasm32-wasip1`.
+
+**2. Use the dev profile, not `--release`.** `cargo build
+--release` with the default `opt-level=z` (or `s`) dead-strips
+witness's counter globals and the branches it inserted, producing
+a near-empty manifest. The leap-year fixture's `build.sh` already
+uses `--release` with `opt-level=1` set explicitly — that works.
+For your own crates either:
+- Build with `cargo build --target wasm32-wasip1` (dev profile,
+  default `opt-level=0`), **or**
+- Set `[profile.release] opt-level = 1` in your `Cargo.toml`
+  before building with `--release`.
+
+If `witness instrument` reports zero branches on a non-trivial
+program, **the profile stripped them.** It's not witness's fault;
+it's the optimiser doing what you asked.
+
 ## What is witness?
 
 `witness` is a CLI that instruments a WebAssembly module, runs it
