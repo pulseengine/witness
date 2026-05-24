@@ -419,6 +419,36 @@ fn main() -> Result<()> {
                 );
                 println!("wrote {} (manifest)", manifest_path.display());
             }
+            // Profile-strip heuristic: post-instrumentation manifests
+            // with zero branches almost always mean the build profile
+            // (`opt-level = "z"` / `"s"`) dead-stripped the branches
+            // before witness saw them, not that the program had no
+            // branches. Sigil's PoC hit this with a `--release` build
+            // and got a silent zero-decision result. Warn the user
+            // before they conclude witness "doesn't work."
+            if let Ok(bytes) = std::fs::read(&manifest_path)
+                && let Ok(m) = serde_json::from_slice::<witness_core::instrument::Manifest>(&bytes)
+                && m.branches.is_empty()
+            {
+                // SAFETY-REVIEW: hint diagnostic on stderr; the CLI's
+                // print-stderr lint targets unconditional logs, not
+                // user-facing warnings.
+                #[allow(clippy::print_stderr)]
+                {
+                    eprintln!();
+                    eprintln!(
+                        "warning: instrumented module has 0 branches. This usually means the"
+                    );
+                    eprintln!("         build profile dead-stripped them before witness saw them.");
+                    eprintln!(
+                        "         Try `cargo build --target wasm32-wasip1` (dev profile) or set"
+                    );
+                    eprintln!("         `[profile.release] opt-level = 1` in Cargo.toml. See");
+                    eprintln!(
+                        "         docs/quickstart.md \"Two things to get right before you start\"."
+                    );
+                }
+            }
         }
         Command::Run {
             module,
