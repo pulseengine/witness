@@ -19,6 +19,13 @@ workspace = true
 name = "witness"
 path = "src/main.rs"
 
+# `cargo witness` subcommand alias — cargo invokes this binary when
+# a user runs `cargo witness ...`. The shim strips the leading
+# "witness" pseudo-arg and re-execs the sibling `witness` binary.
+[[bin]]
+name = "cargo-witness"
+path = "src/bin/cargo-witness.rs"
+
 [dependencies]
 witness-core = { path = "../witness-core" }
 walrus = { workspace = true }
