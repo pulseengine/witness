@@ -92,45 +92,45 @@ pub struct ReconstructionResult {
 pub fn reconstruct_decisions(
     wasm_bytes: &[u8],
     branches: &[BranchEntry],
+    source_map_bytes: Option<&[u8]>,
 ) -> Result<ReconstructionResult> {
-    let dwarf_sections = match extract_dwarf_sections(wasm_bytes) {
-        Some(s) => s,
-        None => return Ok(ReconstructionResult::default()),
-    };
-
-    let line_map = match build_line_map(&dwarf_sections) {
-        Ok(m) => m,
-        Err(_) => return Ok(ReconstructionResult::default()),
-    };
-    if line_map.is_empty() {
-        return Ok(ReconstructionResult::default());
+    // DWARF first — when present, it's strictly more capable than a
+    // source map (carries inline chains, ranges, etc.).
+    if let Some(dwarf_sections) = extract_dwarf_sections(wasm_bytes)
+        && let Ok(line_map) = build_line_map(&dwarf_sections)
+        && !line_map.is_empty()
+    {
+        let inline_map = build_inline_map(&dwarf_sections).unwrap_or_default();
+        let (decisions, branch_inline_contexts, branch_inline_chains) =
+            group_into_decisions(branches, &line_map, &inline_map);
+        return Ok(ReconstructionResult {
+            decisions,
+            branch_inline_contexts,
+            branch_inline_chains,
+            attribution_source: AttributionSource::Dwarf,
+        });
     }
 
-    // v0.13.0 — Variant B: re-enable inline-map construction (v0.12.1
-    // had gated this to an empty map after the v0.12.0 split-by-
-    // context regression). v0.13 doesn't use the inline_map as a
-    // bucket-key discriminator (that was Variant A's mistake);
-    // instead it threads per-branch InlineContext through to the
-    // manifest so the runner can stamp each row's inline_context tag
-    // and the mcdc-v2 reporter can build per-context verdict views
-    // *within* unified single-Decision clusters.
-    //
-    // v0.14.0 — also surfaces the full inline call CHAIN (Vec) per
-    // branch, alongside the single-hop leaf context. The chain
-    // captures multi-level inlines (e.g. `is_safe()` inlined into
-    // `validate()` itself inlined into `audit()` produces a chain
-    // of length 2). v3 mcdc envelopes ship the chain; v2 keeps the
-    // single-hop view byte-identical.
-    let inline_map = build_inline_map(&dwarf_sections).unwrap_or_default();
+    // No usable DWARF. If a V3 source map was provided, try that as
+    // a fallback. Source maps give us `(byte_offset → file, line)`
+    // but no inline-chain or range data.
+    if let Some(bytes) = source_map_bytes
+        && let Ok(map_json) = std::str::from_utf8(bytes)
+        && let Ok(line_map) = crate::sourcemap::build_line_map_from_v3(map_json)
+        && !line_map.is_empty()
+    {
+        let (decisions, _, _) = group_into_decisions(branches, &line_map, &InlineMap::new());
+        // Inline contexts / chains are intentionally empty — V3 has
+        // no equivalent of `DW_TAG_inlined_subroutine`.
+        return Ok(ReconstructionResult {
+            decisions,
+            branch_inline_contexts: BTreeMap::new(),
+            branch_inline_chains: BTreeMap::new(),
+            attribution_source: AttributionSource::SourceMapV3,
+        });
+    }
 
-    let (decisions, branch_inline_contexts, branch_inline_chains) =
-        group_into_decisions(branches, &line_map, &inline_map);
-    Ok(ReconstructionResult {
-        decisions,
-        branch_inline_contexts,
-        branch_inline_chains,
-        attribution_source: AttributionSource::Dwarf,
-    })
+    Ok(ReconstructionResult::default())
 }
 
 /// DWARF custom sections lifted out of a Wasm module.
@@ -823,8 +823,7 @@ mod tests {
     #[test]
     fn empty_module_yields_no_decisions() {
         let entries = vec![entry_with_offset(0, 0), entry_with_offset(1, 4)];
-        let result =
-            reconstruct_decisions(b"\x00asm\x01\x00\x00\x00", &entries).unwrap();
+        let result = reconstruct_decisions(b"\x00asm\x01\x00\x00\x00", &entries, None).unwrap();
         assert!(
             result.decisions.is_empty(),
             "no DWARF sections → strict-per-br_if fallback (empty Decision list)"

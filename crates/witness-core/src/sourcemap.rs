@@ -25,7 +25,7 @@
 //!   already has function names from the wasm name section, so it's
 //!   dropped).
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use crate::decisions::{LineLocation, LineMap};
 
@@ -107,8 +107,7 @@ mod tests {
     /// distinct LineMap keys.
     #[test]
     fn build_line_map_from_v3_multiple_mappings_same_line() {
-        let json =
-            r#"{"version":3,"sources":["a.kt"],"names":[],"mappings":"MAAA,MAAA"}"#;
+        let json = r#"{"version":3,"sources":["a.kt"],"names":[],"mappings":"MAAA,MAAA"}"#;
         let line_map = build_line_map_from_v3(json).unwrap();
         assert_eq!(line_map.len(), 2);
         let offsets: Vec<u64> = line_map.keys().copied().collect();
