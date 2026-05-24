@@ -259,6 +259,59 @@ enum Command {
     /// ships at https://github.com/pulseengine/witness/blob/main/docs/quickstart.md.
     Quickstart,
 
+    /// End-to-end pipeline: build, instrument, run, and report on a
+    /// cargo project in one command. Mirrors the manual sequence
+    /// `cargo build --target ... && witness instrument ... &&
+    /// witness run --invoke-all ... && witness report`, with
+    /// sensible defaults for new users coming from
+    /// `cargo-witness` (`cargo witness all ...`).
+    ///
+    /// Defaults: target `wasm32-wasip1`, release profile, every
+    /// no-arg export auto-invoked, outputs written under
+    /// `target/witness/`. Override any of those with the flags
+    /// below.
+    All {
+        /// Path to the cargo project (directory containing
+        /// Cargo.toml). Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        manifest_path: PathBuf,
+        /// Wasm target triple to build for. Defaults to
+        /// `wasm32-wasip1` because that's the path witness consumes
+        /// without intervention today (core module, no
+        /// component-unbundle step). The ecosystem is moving to
+        /// `wasm32-wasip2` (Component Model) and `wasm32-wasip3`
+        /// (futures, streams; still preview); both produce
+        /// components, which witness will tell you to unbundle
+        /// with `wasm-tools component unbundle` before it can
+        /// instrument them. Auto-unbundling is tracked work.
+        #[arg(long, default_value = "wasm32-wasip1")]
+        target: String,
+        /// Cargo profile name. Default is `release`; for crates
+        /// that haven't set `opt-level = 1` in `[profile.release]`,
+        /// `dev` is safer (avoids the dead-strip pitfall).
+        #[arg(long, default_value = "release")]
+        profile: String,
+        /// Extra arguments passed verbatim to `cargo build` after
+        /// the witness-set ones. Useful for `--features`, `-p`,
+        /// `--no-default-features`, etc.
+        #[arg(long = "cargo-arg", value_name = "ARG")]
+        cargo_args: Vec<String>,
+        /// Explicit export(s) to invoke. May be repeated. If
+        /// neither this nor `--invoke-with-args` is given,
+        /// witness auto-invokes every no-arg export
+        /// (`--invoke-all`).
+        #[arg(long = "invoke")]
+        invoke: Vec<String>,
+        /// Same shape as the `run` subcommand's `--invoke-with-args`:
+        /// `'name:val,val,...'`. May be repeated.
+        #[arg(long = "invoke-with-args")]
+        invoke_with_args: Vec<String>,
+        /// Output directory for instrumented module, run record,
+        /// and report. Defaults to `target/witness/`.
+        #[arg(long, default_value = "target/witness")]
+        output_dir: PathBuf,
+    },
+
     /// Scaffold a new witness fixture project (v0.9.10+). Writes a
     /// working `Cargo.toml`, `src/lib.rs`, `build.sh`, `run.sh`, and
     /// `.gitignore` into `<dir>/<name>/` (default dir: cwd). The
@@ -770,6 +823,25 @@ fn main() -> Result<()> {
                 print!("{}", QUICKSTART_TEXT);
             }
         }
+        Command::All {
+            manifest_path,
+            target,
+            profile,
+            cargo_args,
+            invoke,
+            invoke_with_args,
+            output_dir,
+        } => {
+            run_all(
+                &manifest_path,
+                &target,
+                &profile,
+                &cargo_args,
+                invoke,
+                invoke_with_args,
+                &output_dir,
+            )?;
+        }
         Command::New {
             name,
             dir,
@@ -1199,4 +1271,158 @@ fn init_tracing(verbosity: u8) {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_directive)),
         )
         .init();
+}
+
+/// End-to-end pipeline implementation for `witness all` / `cargo
+/// witness all`. Runs `cargo build`, locates the produced wasm
+/// artifact, instruments it, runs it, and prints a report — the
+/// manual `cargo build && witness instrument && witness run &&
+/// witness report` sequence in one command.
+fn run_all(
+    manifest_path: &std::path::Path,
+    target: &str,
+    profile: &str,
+    cargo_args: &[String],
+    invoke: Vec<String>,
+    invoke_with_args: Vec<String>,
+    output_dir: &std::path::Path,
+) -> Result<()> {
+    use std::process::{Command as Cmd, Stdio};
+
+    // 1. cargo build with JSON output so we can find the artifact.
+    //
+    // We use `--message-format=json-render-diagnostics` (not just
+    // `json`) so cargo still streams human-readable diagnostics to
+    // stderr; only the structured artifact lines go to our stdout
+    // pipe. The user sees a normal build.
+    let manifest_file = if manifest_path.is_dir() {
+        manifest_path.join("Cargo.toml")
+    } else {
+        manifest_path.to_path_buf()
+    };
+
+    // SAFETY-REVIEW: end-user CLI; stdout/stderr are the intended
+    // channels and the wrapper logs are explicitly part of the UX.
+    #[allow(clippy::print_stderr)]
+    {
+        eprintln!("witness all: cargo build --target {target} --profile {profile}");
+    }
+
+    let mut cargo = Cmd::new("cargo");
+    cargo
+        .arg("build")
+        .arg("--manifest-path")
+        .arg(&manifest_file)
+        .arg("--target")
+        .arg(target)
+        .arg("--profile")
+        .arg(profile)
+        .arg("--message-format=json-render-diagnostics")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    for arg in cargo_args {
+        cargo.arg(arg);
+    }
+    let cargo_out = cargo
+        .output()
+        .map_err(|source| anyhow::anyhow!("failed to spawn `cargo build`: {source}"))?;
+    if !cargo_out.status.success() {
+        anyhow::bail!(
+            "cargo build failed (exit {})",
+            cargo_out.status.code().unwrap_or(1)
+        );
+    }
+
+    // 2. Parse the artifact stream to find the produced .wasm. The
+    // last cdylib/bin artifact wins (for crates that produce
+    // both, the bin is what witness instruments; for cdylib-only
+    // crates that's what's there).
+    let wasm_path = find_wasm_artifact(&cargo_out.stdout)?;
+    #[allow(clippy::print_stderr)]
+    {
+        eprintln!("  built: {}", wasm_path.display());
+    }
+
+    // 3. instrument
+    std::fs::create_dir_all(output_dir).map_err(|source| {
+        anyhow::anyhow!(
+            "failed to create output dir {}: {source}",
+            output_dir.display()
+        )
+    })?;
+    let inst_path = output_dir.join("instrumented.wasm");
+    witness_core::instrument::instrument_file(&wasm_path, &inst_path)?;
+    let manifest_path_inst = witness_core::instrument::Manifest::path_for(&inst_path);
+    #[allow(clippy::print_stderr)]
+    {
+        eprintln!("  instrumented: {}", inst_path.display());
+    }
+
+    // 4. run — default to --invoke-all (auto-invoke every no-arg
+    // export) when the user hasn't passed any explicit invoke flags.
+    // For crates with parameter-taking entry points the user must
+    // pass `--invoke-with-args` explicitly; we can't guess values.
+    let invoke_all = invoke.is_empty() && invoke_with_args.is_empty();
+    let run_output = output_dir.join("run.json");
+    witness::run_module(&witness::RunOptions {
+        module: &inst_path,
+        manifest: manifest_path_inst,
+        output: &run_output,
+        invoke,
+        invoke_with_args,
+        call_start: false,
+        invoke_all,
+        harness: None,
+    })?;
+    #[allow(clippy::print_stderr)]
+    {
+        eprintln!("  ran: {}", run_output.display());
+        eprintln!();
+    }
+
+    // 5. report — text format on stdout.
+    let report = witness_core::report::from_run_file(&run_output)?;
+    // SAFETY-REVIEW: stdout is the intended channel for the report.
+    #[allow(clippy::print_stdout)]
+    {
+        println!("{}", report.to_text());
+    }
+    Ok(())
+}
+
+/// Walk cargo's `--message-format=json-render-diagnostics` stdout
+/// stream and return the path of the last `.wasm` artifact in any
+/// `compiler-artifact` message. cargo emits one artifact line per
+/// produced binary; for a typical wasm crate that's a single .wasm
+/// file under `target/<triple>/<profile>/`.
+fn find_wasm_artifact(stdout_bytes: &[u8]) -> Result<std::path::PathBuf> {
+    let mut last_wasm: Option<std::path::PathBuf> = None;
+    for line in stdout_bytes.split(|&b| b == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = match serde_json::from_slice(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if v.get("reason").and_then(|r| r.as_str()) != Some("compiler-artifact") {
+            continue;
+        }
+        let Some(filenames) = v.get("filenames").and_then(|f| f.as_array()) else {
+            continue;
+        };
+        for f in filenames {
+            if let Some(s) = f.as_str()
+                && s.ends_with(".wasm")
+            {
+                last_wasm = Some(std::path::PathBuf::from(s));
+            }
+        }
+    }
+    last_wasm.ok_or_else(|| {
+        anyhow::anyhow!(
+            "no .wasm artifact in cargo build output — the target may not produce wasm \
+             (check `crate-type = [\"cdylib\"]` or that the `[[bin]]` is configured for wasm)"
+        )
+    })
 }
