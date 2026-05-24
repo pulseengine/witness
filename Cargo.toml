@@ -89,6 +89,10 @@ wsc-attestation = { version = "0.8", features = ["signing"] }
 # verify envelopes alongside wsc-attestation's signing API.
 ed25519-compact = "2.1"
 base64 = "0.22"
+# V3 source-map reader, BSD-3-Clause. Used by witness-core as a
+# fallback source-line attribution backend when DWARF is absent
+# (e.g. Kotlin/Wasm, which emits .wasm.map sidecars).
+sourcemap = "9"
 
 [profile.release]
 strip = true

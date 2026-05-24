@@ -210,12 +210,15 @@ fn extract_dwarf_sections(wasm_bytes: &[u8]) -> Option<DwarfSections<'_>> {
 /// modules compiled by rustc + LLVM, DWARF addresses are byte offsets
 /// into the *Code section* of the Wasm module — not absolute file
 /// offsets, not offsets relative to a function body's start.
-type LineMap = BTreeMap<u64, LineLocation>;
+///
+/// `pub(crate)` so the `sourcemap` module can build one from a V3
+/// source map and feed it into the same clustering pass.
+pub(crate) type LineMap = BTreeMap<u64, LineLocation>;
 
 #[derive(Debug, Clone)]
-struct LineLocation {
-    file: String,
-    line: u32,
+pub(crate) struct LineLocation {
+    pub(crate) file: String,
+    pub(crate) line: u32,
 }
 
 fn build_line_map(sections: &DwarfSections<'_>) -> std::result::Result<LineMap, gimli::Error> {
