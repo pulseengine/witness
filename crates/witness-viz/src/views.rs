@@ -1,20 +1,24 @@
-use std::fmt::Write as _;
+//! Axum handlers — thin wrappers around the pure renderer in
+//! [`crate::render`]. Each handler loads / looks up the requested
+//! data, builds a [`crate::render::RenderContext`] for serve mode,
+//! calls the appropriate `render::render_*` function, and wraps the
+//! returned `body` in page chrome via [`crate::layout::page`].
+//!
+//! The shape of these handlers is intentionally uniform so the
+//! planned `witness viz export` driver can call the same renderer
+//! functions with `RenderContext` configured for static output. See
+//! [`crate::render`] for the design seam.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 
-use crate::data::{self, DecisionReport, TruthRow};
+use crate::data;
 use crate::layout::{escape, page};
 use crate::render::{self, RenderContext};
 use crate::state::AppState;
 
 /// GET / — dashboard with totals + verdict scoreboard.
-///
-/// Thin axum wrapper: loads verdicts, hands them to the pure
-/// renderer in `crate::render`, wraps the result in the page chrome.
-/// The same renderer will be used by the planned static-export
-/// driver — see [`crate::render`] for the design seam.
 pub async fn index(State(state): State<AppState>) -> Response {
     let verdicts = match data::load_verdicts(state.reports_dir()) {
         Ok(v) => v,
@@ -34,61 +38,12 @@ pub async fn verdict(Path(name): Path<String>, State(state): State<AppState>) ->
         Err(e) => return error_page("Failed to load verdict", &e.to_string()),
     };
 
-    let o = &bundle.report.overall;
-    let mut body = String::new();
-    let _ = write!(
-        body,
-        "<h1>Verdict <code>{}</code></h1>\n<p class=\"muted\">module: {} — schema: {}</p>\n",
-        escape(&bundle.name),
-        escape(&bundle.report.module),
-        escape(&bundle.report.schema),
-    );
-
-    body.push_str(&render_cards(&[
-        ("Decisions", u64::from(o.decisions_total)),
-        ("Full MC/DC", u64::from(o.decisions_full_mcdc)),
-        ("Conditions", u64::from(o.conditions_total)),
-        ("Proved", u64::from(o.conditions_proved)),
-        ("Gap", u64::from(o.conditions_gap)),
-        ("Dead", u64::from(o.conditions_dead)),
-    ]));
-
-    body.push_str("<h2>Decisions</h2>\n");
-    if bundle.report.decisions.is_empty() {
-        body.push_str(r#"<div class="empty">No decisions recorded.</div>"#);
-    } else {
-        body.push_str("<table>\n<thead><tr>");
-        for h in ["#", "source", "status", "conditions", "gap"] {
-            let _ = write!(body, "<th>{}</th>", escape(h));
-        }
-        body.push_str("</tr></thead>\n<tbody>\n");
-
-        for d in &bundle.report.decisions {
-            let gap_count = d.conditions.iter().filter(|c| c.status == "gap").count();
-            let _ = write!(
-                body,
-                r#"<tr><td><a href="/decision/{verdict}/{id}">#{id}</a></td><td><code>{src}:{line}</code></td><td><span class="status status-{status}">{status_disp}</span></td><td>{nc}</td><td>{gap}</td></tr>"#,
-                verdict = escape(&bundle.name),
-                id = d.id,
-                src = escape(&d.source_file),
-                line = d.source_line,
-                status = escape(&d.status),
-                status_disp = escape(&d.status),
-                nc = d.conditions.len(),
-                gap = gap_count,
-            );
-            body.push('\n');
-        }
-        body.push_str("</tbody></table>\n");
-    }
-
-    body.push_str(r#"<p class="back-link"><a href="/">← back to overview</a></p>"#);
-
-    let title = format!("Verdict {}", bundle.name);
-    Html(page(&title, &body)).into_response()
+    let ctx = RenderContext::for_serve(&[], state.reports_dir());
+    let out = render::render_verdict(&ctx, &bundle);
+    Html(page(&out.title, &out.body)).into_response()
 }
 
-/// GET /decision/{verdict}/{id} — the truth-table widget.
+/// GET /decision/{verdict}/{id} — truth table + per-condition pairs.
 pub async fn decision(
     Path((verdict_name, decision_id)): Path<(String, u32)>,
     State(state): State<AppState>,
@@ -101,44 +56,19 @@ pub async fn decision(
 
     let decision = match bundle.report.decisions.iter().find(|d| d.id == decision_id) {
         Some(d) => d,
-        None => {
-            return not_found("decision", &format!("#{decision_id} in {verdict_name}"));
-        }
+        None => return not_found("decision", &format!("#{decision_id} in {verdict_name}")),
     };
 
-    let mut body = String::new();
-    let _ = write!(
-        body,
-        "<h1>Decision #{id} — <code>{src}:{line}</code></h1>\n<p>Status: <span class=\"status status-{status}\">{status_disp}</span></p>\n",
-        id = decision.id,
-        src = escape(&decision.source_file),
-        line = decision.source_line,
-        status = escape(&decision.status),
-        status_disp = escape(&decision.status),
-    );
-
-    body.push_str("<h2>Truth table</h2>\n");
-    body.push_str(&render_truth_table(decision));
-
-    body.push_str("<h2>Independent-effect pairs</h2>\n");
-    body.push_str(&render_conditions(decision, &verdict_name));
-
-    let _ = write!(
-        body,
-        r#"<p class="back-link"><a href="/verdict/{href}">← back to {name}</a></p>"#,
-        href = escape(&verdict_name),
-        name = escape(&verdict_name),
-    );
-
-    let title = format!("Decision #{decision_id}");
-    Html(page(&title, &body)).into_response()
+    let ctx = RenderContext::for_serve(&[], state.reports_dir());
+    let out = render::render_decision(&ctx, &bundle, decision);
+    Html(page(&out.title, &out.body)).into_response()
 }
 
-/// GET /gap/{verdict}/{decision_id}/{condition_index} — the tutorial-
-/// style gap drill-down. Renders the missing-witness row, paired row,
-/// rationale prose, and a copy-paste Rust test stub. This is the
-/// reviewer-facing version of MCP's `find_missing_witness` — humans
-/// see exactly what an agent would see.
+/// GET /gap/{verdict}/{decision_id}/{condition_index} — gap drill-down.
+///
+/// Reviewer-facing version of MCP's `find_missing_witness`: humans
+/// see exactly what an agent would see (needed condition vector,
+/// pair rationale, copy-paste test stub).
 pub async fn gap(
     Path((verdict_name, decision_id, condition_index)): Path<(String, u32, u32)>,
     State(state): State<AppState>,
@@ -168,265 +98,12 @@ pub async fn gap(
         }
     };
 
-    let mut body = String::new();
-    let _ = write!(
-        body,
-        "<h1>Gap analysis — c{ci} in decision #{did}</h1>\n<p class=\"muted\"><code>{verd}</code> &middot; <code>{src}:{line}</code> &middot; branch <code>{br}</code></p>\n",
-        ci = condition_index,
-        did = decision_id,
-        verd = escape(&verdict_name),
-        src = escape(&decision.source_file),
-        line = decision.source_line,
-        br = condition.branch_id,
-    );
-
-    let _ = writeln!(
-        body,
-        "<p>Status: <span class=\"status status-{cls}\">{up}</span></p>",
-        cls = escape(&condition.status),
-        up = escape(&condition.status.to_ascii_uppercase()),
-    );
-
-    match condition.status.as_str() {
-        "proved" => {
-            body.push_str("<div class=\"box\">\n");
-            if let Some(pair) = condition.pair {
-                let interp = condition.interpretation.as_deref().unwrap_or("");
-                let _ = writeln!(
-                    body,
-                    "<p>Already proved by rows <code>{a}</code> and <code>{b}</code> ({interp}). No action needed.</p>",
-                    a = pair.first().copied().unwrap_or(0),
-                    b = pair.get(1).copied().unwrap_or(0),
-                    interp = escape(interp),
-                );
-            } else {
-                body.push_str("<p>Already proved. No action needed.</p>\n");
-            }
-            body.push_str("</div>\n");
-        }
-        "dead" => {
-            body.push_str("<div class=\"box\">\n");
-            body.push_str("<p>Condition is <strong>dead</strong>: the runtime never reached this branch under any test row. The compiler may have folded the predicate, or the call-path is unreachable from the harness.</p>\n");
-            body.push_str("<p>Action: confirm by reading the source. If the branch is genuinely unreachable, the dead status is the verdict. If reachable, expand the test corpus to drive code through this branch.</p>\n");
-            body.push_str("</div>\n");
-        }
-        _ => {
-            // gap (or unknown — treat as gap-like)
-            render_gap_tutorial(&mut body, &verdict_name, decision, condition);
-        }
-    }
-
-    let _ = write!(
-        body,
-        r#"<p class="back-link"><a href="/decision/{verdict}/{did}">← back to decision #{did}</a></p>"#,
-        verdict = escape(&verdict_name),
-        did = decision_id,
-    );
-
-    let title = format!("Gap c{condition_index} in decision #{decision_id}");
-    Html(page(&title, &body)).into_response()
+    let ctx = RenderContext::for_serve(&[], state.reports_dir());
+    let out = render::render_gap(&ctx, &bundle, decision, condition);
+    Html(page(&out.title, &out.body)).into_response()
 }
 
-fn render_gap_tutorial(
-    body: &mut String,
-    verdict_name: &str,
-    decision: &DecisionReport,
-    condition: &crate::data::ConditionReport,
-) {
-    // Find any existing row that has this condition evaluated — that
-    // gives us a starting point. The "needed row" is the same row with
-    // this condition's value flipped. The other conditions stay as the
-    // existing row had them; if a condition was unevaluated (short-
-    // circuited away) the agent / reviewer may need to massage inputs
-    // so it gets evaluated.
-    let key = condition.index.to_string();
-    let baseline = decision
-        .truth_table
-        .iter()
-        .find(|r| r.evaluated.contains_key(&key));
-
-    body.push_str("<h2>What you need</h2>\n");
-    body.push_str("<div class=\"box\">\n");
-
-    match baseline {
-        Some(row) => {
-            let current = row.evaluated.get(&key).copied().unwrap_or(false);
-            let needed = !current;
-            let _ = writeln!(
-                body,
-                "<p>To prove condition <code>c{ci}</code> independently affects the decision, you need a row where <code>c{ci} = {needed}</code> and the outcome differs from row <code>{rid}</code> (where <code>c{ci} = {current}</code>).</p>",
-                ci = condition.index,
-                needed = if needed { "T" } else { "F" },
-                current = if current { "T" } else { "F" },
-                rid = row.row_id,
-            );
-
-            body.push_str("<p>Required condition vector:</p>\n<pre>");
-            for c in &decision.conditions {
-                let k = c.index.to_string();
-                let val = if c.index == condition.index {
-                    if needed { "T" } else { "F" }
-                } else {
-                    match row.evaluated.get(&k) {
-                        Some(true) => "T",
-                        Some(false) => "F",
-                        None => "*",
-                    }
-                };
-                let _ = writeln!(body, "  c{idx} = {val}", idx = c.index, val = val);
-            }
-            body.push_str("</pre>\n");
-
-            body.push_str("<p class=\"muted\">Conditions marked <code>*</code> were short-circuited in the baseline row; the new test must drive inputs so they get evaluated to either T or F.</p>\n");
-        }
-        None => {
-            body.push_str("<p>No baseline row exists yet — every existing test row short-circuited before reaching this condition. To drive coverage to this condition, expand the test corpus so prior conditions evaluate in the direction that allows control to flow here.</p>\n");
-        }
-    }
-
-    body.push_str("</div>\n");
-
-    // Copy-paste test stub. We don't have the function signature handy
-    // (would require linking the manifest's function_name back to a
-    // Rust source declaration), so the stub is structural — the agent
-    // or reviewer fills in the call. Worth more than nothing.
-    body.push_str("<h2>Suggested test stub</h2>\n");
-    body.push_str("<pre class=\"stub\">");
-    let _ = write!(
-        body,
-        "#[test]\nfn closes_gap_d{did}_c{ci}() {{\n    // Verdict: {verd}\n    // Source: {src}:{line}\n    // Branch:  {br}\n    //\n    // TODO: drive the function so condition c{ci} evaluates to the\n    // value above and the resulting decision outcome differs from\n    // the existing pair row.\n    todo!(\"witness viz: gap drill-down for d#{did}/c{ci}\");\n}}",
-        did = decision.id,
-        ci = condition.index,
-        verd = escape(verdict_name),
-        src = escape(&decision.source_file),
-        line = decision.source_line,
-        br = condition.branch_id,
-    );
-    body.push_str("</pre>\n");
-
-    body.push_str("<p class=\"muted\">After adding the test, re-run: <code>witness instrument && witness run --invoke run_row_NEW && witness report</code>. The condition should flip from <code>gap</code> to <code>proved</code>.</p>\n");
-}
-
-// ─── helpers ──────────────────────────────────────────────────────────
-//
-// `render_coverage_bar` and `u32_or_max` moved to `crate::render` along
-// with the overview-page extraction. They live there as private helpers
-// for the migrated page; the un-migrated `verdict`/`decision`/`gap`
-// handlers below don't need them yet.
-
-fn render_cards(items: &[(&str, u64)]) -> String {
-    let mut out = String::from("<div class=\"cards\">\n");
-    for (label, n) in items {
-        let _ = write!(
-            out,
-            r#"<div class="card"><div class="num">{n}</div><div class="label">{label}</div></div>"#,
-            n = n,
-            label = escape(label),
-        );
-        out.push('\n');
-    }
-    out.push_str("</div>\n");
-    out
-}
-
-fn render_truth_table(decision: &DecisionReport) -> String {
-    let mut out = String::from("<table class=\"truth-table\">\n<thead><tr><th>row</th>");
-    for c in &decision.conditions {
-        let _ = write!(
-            out,
-            "<th>c{idx} <span class=\"br\">br {br}</span></th>",
-            idx = c.index,
-            br = c.branch_id,
-        );
-    }
-    out.push_str("<th>outcome</th></tr></thead>\n<tbody>\n");
-
-    let gap_indices: std::collections::BTreeSet<u32> = decision
-        .conditions
-        .iter()
-        .filter(|c| c.status == "gap")
-        .map(|c| c.index)
-        .collect();
-
-    for row in &decision.truth_table {
-        let row_class = row_class_for(row, &gap_indices);
-        out.push_str("<tr");
-        if !row_class.is_empty() {
-            let _ = write!(out, r#" class="{row_class}""#);
-        }
-        out.push('>');
-        let _ = write!(out, "<td>{}</td>", row.row_id);
-        for c in &decision.conditions {
-            let key = c.index.to_string();
-            match row.evaluated.get(&key) {
-                Some(true) => out.push_str("<td class=\"t\">T</td>"),
-                Some(false) => out.push_str("<td class=\"f\">F</td>"),
-                None => out.push_str("<td class=\"dontcare\">*</td>"),
-            }
-        }
-        let outcome = if row.outcome {
-            "<td class=\"t\">T</td>"
-        } else {
-            "<td class=\"f\">F</td>"
-        };
-        out.push_str(outcome);
-        out.push_str("</tr>\n");
-    }
-    out.push_str("</tbody></table>\n");
-    out
-}
-
-fn row_class_for(row: &TruthRow, gap_indices: &std::collections::BTreeSet<u32>) -> &'static str {
-    for idx in gap_indices {
-        let key = idx.to_string();
-        if !row.evaluated.contains_key(&key) {
-            return "row-gap";
-        }
-    }
-    ""
-}
-
-fn render_conditions(decision: &DecisionReport, verdict_name: &str) -> String {
-    let mut out = String::from("<ul class=\"conditions\">\n");
-    for c in &decision.conditions {
-        let _ = write!(
-            out,
-            "<li class=\"cond-{status}\">",
-            status = escape(&c.status)
-        );
-        let status_upper = c.status.to_ascii_uppercase();
-        let _ = write!(
-            out,
-            "<code>c{idx}</code> (branch <code>{br}</code>): <strong class=\"{cls}\">{up}</strong>",
-            idx = c.index,
-            br = c.branch_id,
-            cls = escape(&c.status),
-            up = escape(&status_upper),
-        );
-        if let Some(pair) = c.pair {
-            let interp = c.interpretation.as_deref().unwrap_or("");
-            let _ = write!(
-                out,
-                " — pair rows <code>{a}</code>, <code>{b}</code> <span class=\"muted\">({interp})</span>",
-                a = pair.first().copied().unwrap_or(0),
-                b = pair.get(1).copied().unwrap_or(0),
-                interp = escape(interp),
-            );
-        }
-        if c.status != "proved" {
-            let _ = write!(
-                out,
-                r#" <a class="gap-link" href="/gap/{verdict}/{did}/{ci}">view gap →</a>"#,
-                verdict = escape(verdict_name),
-                did = decision.id,
-                ci = c.index,
-            );
-        }
-        out.push_str("</li>\n");
-    }
-    out.push_str("</ul>\n");
-    out
-}
+// ─── error pages ──────────────────────────────────────────────────────
 
 fn not_found(kind: &str, name: &str) -> Response {
     let body = format!(
