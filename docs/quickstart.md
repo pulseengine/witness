@@ -6,17 +6,25 @@ with `wasm32-unknown-unknown` installed.
 
 ## Two things to get right before you start
 
-**1. Pick the right wasm target.** For Rust:
+**1. Pick the right wasm target.** The wasi target landscape moves
+fast and witness's "smoothest path today" is not its "best long-term
+choice." For Rust:
 
 | Target | When to use | Catches |
 |---|---|---|
-| `wasm32-wasip1` | **Anything that touches `std`** (any non-trivial crate using `Vec`, `String`, `HashMap`, `getrandom`, …) | Clean core module + WASI shim for syscalls; runs in witness's embedded wasmtime out of the box. **Recommended default.** |
-| `wasm32-unknown-unknown` | Pure `no_std` fixtures; minimal control-flow probes | Smaller binary, no syscall layer — but `std`-using deps will produce undefined `__wbindgen_*` symbols at link time |
-| `wasm32-wasip2` | You need the Component Model | Produces a *component*, not a core module — witness emits an explicit "unbundle this with `wasm-tools component unbundle`" message |
+| `wasm32-wasip1` | **Smoothest path today** — witness consumes the core module directly with no unbundle step. The legacy target everyone has installed; preview 1 is locked in |
+| `wasm32-wasip2` | Modern stable wasi (Component Model). **The direction.** Produces a *component*, not a core module — witness's current pipeline emits a "first unbundle with `wasm-tools component unbundle`" message; auto-unbundling is tracked work |
+| `wasm32-wasip3` | Preview 3 — futures, streams, the *eventual* default. Not yet in stable Rust. Same component-output issue as p2 |
+| `wasm32-unknown-unknown` | Pure `no_std` fixtures; minimal control-flow probes. `std`-using deps produce undefined `__wbindgen_*` symbols at link time |
+
+**Today**: build with `wasm32-wasip1` for the no-friction path through witness's instrument step.
+
+**Where this is going**: the wasi ecosystem is moving to `wasm32-wasip2` and `wasm32-wasip3` (Component Model + futures/streams). Witness will track that — auto-unbundling the component is the next step, and once it lands the default should follow the ecosystem.
 
 The scaffolded leap-year fixture uses `wasm32-unknown-unknown`
-because it's `no_std`-compatible. For anything realistic, default
-to `wasm32-wasip1`.
+because it's `no_std`-compatible. For realistic crates today,
+prefer `wasm32-wasip1`. Don't enshrine it — assume the default
+shifts toward p2/p3 in a future witness release.
 
 **2. Use the dev profile, not `--release`.** `cargo build
 --release` with the default `opt-level=z` (or `s`) dead-strips
