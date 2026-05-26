@@ -6,110 +6,24 @@ use axum::response::{Html, IntoResponse, Response};
 
 use crate::data::{self, DecisionReport, TruthRow};
 use crate::layout::{escape, page};
+use crate::render::{self, RenderContext};
 use crate::state::AppState;
 
 /// GET / — dashboard with totals + verdict scoreboard.
+///
+/// Thin axum wrapper: loads verdicts, hands them to the pure
+/// renderer in `crate::render`, wraps the result in the page chrome.
+/// The same renderer will be used by the planned static-export
+/// driver — see [`crate::render`] for the design seam.
 pub async fn index(State(state): State<AppState>) -> Response {
     let verdicts = match data::load_verdicts(state.reports_dir()) {
         Ok(v) => v,
         Err(e) => return error_page("Failed to load verdicts", &e.to_string()),
     };
 
-    if verdicts.is_empty() {
-        let body = format!(
-            r#"<h1>witness-viz</h1>
-<p class="muted">No verdict bundles found in <code>{}</code>.</p>
-<div class="empty">Point <code>--reports-dir</code> at a directory containing one or more verdict folders, each with a <code>report.json</code>.</div>"#,
-            escape(&state.reports_dir().display().to_string()),
-        );
-        return Html(page("Overview", &body)).into_response();
-    }
-
-    let mut decisions_total: u64 = 0;
-    let mut decisions_full: u64 = 0;
-    let mut conditions_total: u64 = 0;
-    let mut conditions_proved: u64 = 0;
-    let mut conditions_gap: u64 = 0;
-    let mut conditions_dead: u64 = 0;
-
-    for v in &verdicts {
-        let o = &v.report.overall;
-        decisions_total = decisions_total.saturating_add(u64::from(o.decisions_total));
-        decisions_full = decisions_full.saturating_add(u64::from(o.decisions_full_mcdc));
-        conditions_total = conditions_total.saturating_add(u64::from(o.conditions_total));
-        conditions_proved = conditions_proved.saturating_add(u64::from(o.conditions_proved));
-        conditions_gap = conditions_gap.saturating_add(u64::from(o.conditions_gap));
-        conditions_dead = conditions_dead.saturating_add(u64::from(o.conditions_dead));
-    }
-
-    let mut body = String::new();
-    body.push_str("<h1>Compliance overview</h1>\n");
-
-    body.push_str(&render_cards(&[
-        ("Decisions", decisions_total),
-        ("Full MC/DC", decisions_full),
-        ("Conditions proved", conditions_proved),
-        ("Gap", conditions_gap),
-        ("Dead", conditions_dead),
-    ]));
-
-    body.push_str("<h2>Verdicts</h2>\n");
-    body.push_str("<table>\n<thead><tr>");
-    for h in [
-        "verdict",
-        "branches",
-        "decisions",
-        "full MC/DC",
-        "coverage",
-        "proved",
-        "gap",
-        "dead",
-    ] {
-        let _ = write!(body, "<th>{}</th>", escape(h));
-    }
-    body.push_str("</tr></thead>\n<tbody>\n");
-
-    let mut total_branches: u64 = 0;
-    for v in &verdicts {
-        let o = &v.report.overall;
-        let branches = data::branch_count(state.reports_dir(), v);
-        total_branches = total_branches.saturating_add(u64::from(branches));
-        let bar = render_coverage_bar(o.conditions_proved, o.conditions_gap, o.conditions_dead);
-        let _ = write!(
-            body,
-            r#"<tr><td><a href="/verdict/{href}"><code>{name}</code></a></td><td>{branches}</td><td>{dt}</td><td>{df}/{dt}</td><td>{bar}</td><td class="proved">{cp}</td><td class="gap">{cg}</td><td class="dead">{cd}</td></tr>"#,
-            href = escape(&v.name),
-            name = escape(&v.name),
-            branches = branches,
-            dt = o.decisions_total,
-            df = o.decisions_full_mcdc,
-            bar = bar,
-            cp = o.conditions_proved,
-            cg = o.conditions_gap,
-            cd = o.conditions_dead,
-        );
-        body.push('\n');
-    }
-
-    let total_bar = render_coverage_bar(
-        u32_or_max(conditions_proved),
-        u32_or_max(conditions_gap),
-        u32_or_max(conditions_dead),
-    );
-    let _ = write!(
-        body,
-        r#"<tr class="total-row"><td>TOTAL</td><td>{tb}</td><td>{dt}</td><td>{df}/{dt}</td><td>{bar}</td><td>{cp}</td><td>{cg}</td><td>{cd}</td></tr>"#,
-        tb = total_branches,
-        dt = decisions_total,
-        df = decisions_full,
-        bar = total_bar,
-        cp = conditions_proved,
-        cg = conditions_gap,
-        cd = conditions_dead,
-    );
-    body.push_str("\n</tbody>\n</table>\n");
-
-    Html(page("Overview", &body)).into_response()
+    let ctx = RenderContext::for_serve(&verdicts, state.reports_dir());
+    let out = render::render_overview(&ctx);
+    Html(page(&out.title, &out.body)).into_response()
 }
 
 /// GET /verdict/{name} — single-verdict drill-down.
@@ -394,41 +308,11 @@ fn render_gap_tutorial(
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────
-
-/// Render a stacked horizontal bar showing the proved / gap / dead
-/// split of conditions for a verdict (or total). Pure inline-styled
-/// HTML — no extra CSS dependency, embeds in any table cell.
-fn render_coverage_bar(proved: u32, gap: u32, dead: u32) -> String {
-    let total = proved.saturating_add(gap).saturating_add(dead);
-    if total == 0 {
-        return String::from(r#"<div class="cov-bar empty"></div>"#);
-    }
-    let p_pct = (u64::from(proved).saturating_mul(100)) / u64::from(total);
-    let g_pct = (u64::from(gap).saturating_mul(100)) / u64::from(total);
-    let d_pct = 100u64.saturating_sub(p_pct).saturating_sub(g_pct);
-    format!(
-        r#"<div class="cov-bar" title="proved {proved} / gap {gap} / dead {dead}">
-<span class="seg-proved" style="width:{pp}%"></span><span class="seg-gap" style="width:{gp}%"></span><span class="seg-dead" style="width:{dp}%"></span>
-</div>"#,
-        proved = proved,
-        gap = gap,
-        dead = dead,
-        pp = p_pct,
-        gp = g_pct,
-        dp = d_pct,
-    )
-}
-
-fn u32_or_max(v: u64) -> u32 {
-    if v > u64::from(u32::MAX) {
-        u32::MAX
-    } else {
-        // SAFETY: bounds-checked above.
-        #[allow(clippy::cast_possible_truncation)]
-        let r = v as u32;
-        r
-    }
-}
+//
+// `render_coverage_bar` and `u32_or_max` moved to `crate::render` along
+// with the overview-page extraction. They live there as private helpers
+// for the migrated page; the un-migrated `verdict`/`decision`/`gap`
+// handlers below don't need them yet.
 
 fn render_cards(items: &[(&str, u64)]) -> String {
     let mut out = String::from("<div class=\"cards\">\n");

@@ -9,6 +9,7 @@ pub mod data;
 pub mod js;
 pub mod layout;
 pub mod mcp;
+pub mod render;
 pub mod state;
 pub mod styles;
 pub mod views;
