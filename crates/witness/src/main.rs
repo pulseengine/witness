@@ -362,6 +362,24 @@ enum Command {
         bind: String,
     },
 
+    /// Walk every page of the viz dashboard and write static HTML to a
+    /// directory. Output is browseable from `file://` and deployable
+    /// to GitHub Pages or any static host (no HTMX, no API endpoints
+    /// in the dump). Companion to `witness viz` — same data, no server.
+    ///
+    /// Spawns the `witness-viz` binary. v0.23.0+.
+    VizExport {
+        /// Path to the verdict-evidence directory.
+        #[arg(long = "reports-dir")]
+        reports_dir: PathBuf,
+        /// Output directory; created if missing, files overwritten.
+        #[arg(long)]
+        out: PathBuf,
+        /// Optional site-title prefix (e.g. "witness v0.23.0").
+        #[arg(long = "site-title")]
+        site_title: Option<String>,
+    },
+
     /// Emit rivet-shape coverage evidence YAML, partitioned by a
     /// branch→artefact mapping. Output is consumable by rivet's
     /// `CoverageStore` (landing in the rivet upstream PR coordinated
@@ -851,6 +869,11 @@ fn main() -> Result<()> {
             let parent = dir.unwrap_or_else(|| std::path::PathBuf::from("."));
             scaffold_fixture(&parent, &name, force, all_exports)?;
         }
+        Command::VizExport {
+            reports_dir,
+            out,
+            site_title,
+        } => run_viz_export(&reports_dir, &out, site_title.as_deref())?,
         Command::Viz {
             reports_dir,
             port,
@@ -1226,6 +1249,35 @@ echo
 echo "Bundle written under verdict-evidence/. Browse with:"
 echo "  witness viz --reports-dir verdict-evidence"
 "#;
+
+fn run_viz_export(
+    reports_dir: &std::path::Path,
+    out: &std::path::Path,
+    site_title: Option<&str>,
+) -> Result<()> {
+    let bin = std::env::var_os("WITNESS_VIZ_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("witness-viz"));
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.arg("--reports-dir")
+        .arg(reports_dir)
+        .arg("export")
+        .arg("--out")
+        .arg(out);
+    if let Some(s) = site_title {
+        cmd.arg("--site-title").arg(s);
+    }
+    let status = cmd.status().map_err(|e| {
+        anyhow::anyhow!(
+            "failed to spawn witness-viz at '{}': {e}\n  hint: install with `cd crates/witness-viz && cargo install --path .`, or set WITNESS_VIZ_BIN to the binary path.",
+            bin.display()
+        )
+    })?;
+    if !status.success() {
+        anyhow::bail!("witness-viz export exited with {status}");
+    }
+    Ok(())
+}
 
 fn run_viz(reports_dir: &std::path::Path, port: u16, bind: &str) -> Result<()> {
     let bin = std::env::var_os("WITNESS_VIZ_BIN")
