@@ -378,6 +378,11 @@ enum Command {
         /// Optional site-title prefix (e.g. "witness v0.23.0").
         #[arg(long = "site-title")]
         site_title: Option<String>,
+        /// v0.24+ — Repository root for source-file lookup. When set,
+        /// Decision and Gap pages render an inline `±5 lines` snippet
+        /// around `source_file:source_line`.
+        #[arg(long = "source-root")]
+        source_root: Option<PathBuf>,
     },
 
     /// Emit rivet-shape coverage evidence YAML, partitioned by a
@@ -873,7 +878,13 @@ fn main() -> Result<()> {
             reports_dir,
             out,
             site_title,
-        } => run_viz_export(&reports_dir, &out, site_title.as_deref())?,
+            source_root,
+        } => run_viz_export(
+            &reports_dir,
+            &out,
+            site_title.as_deref(),
+            source_root.as_deref(),
+        )?,
         Command::Viz {
             reports_dir,
             port,
@@ -1254,6 +1265,7 @@ fn run_viz_export(
     reports_dir: &std::path::Path,
     out: &std::path::Path,
     site_title: Option<&str>,
+    source_root: Option<&std::path::Path>,
 ) -> Result<()> {
     let bin = std::env::var_os("WITNESS_VIZ_BIN")
         .map(PathBuf::from)
@@ -1266,6 +1278,9 @@ fn run_viz_export(
         .arg(out);
     if let Some(s) = site_title {
         cmd.arg("--site-title").arg(s);
+    }
+    if let Some(sr) = source_root {
+        cmd.arg("--source-root").arg(sr);
     }
     let status = cmd.status().map_err(|e| {
         anyhow::anyhow!(
