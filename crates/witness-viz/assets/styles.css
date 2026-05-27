@@ -339,3 +339,91 @@ table td:nth-child(4) {
   font-variant-numeric: tabular-nums;
   font-weight: 500;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   v0.24 — inline source snippet on Decision / Gap pages.
+   Plain pre/span layout (no syntax highlighting — that's the
+   full-file view's job). Target line gets a left border, a tinted
+   background, and a `>` gutter marker.
+   ────────────────────────────────────────────────────────────── */
+pre.src-snippet {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6em 0.8em;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.5;
+  margin: 0.6em 0 1.2em 0;
+}
+pre.src-snippet > span {
+  display: block;
+  padding: 0 0.3em;
+  border-left: 3px solid transparent;
+  white-space: pre;
+}
+pre.src-snippet .src-snippet-target {
+  background: rgba(208, 161, 6, 0.10);
+  border-left-color: var(--accent, #d2a106);
+  font-weight: 500;
+}
+@media (prefers-color-scheme: dark) {
+  pre.src-snippet .src-snippet-target {
+    background: rgba(240, 180, 0, 0.15);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   v0.24 — full-file source pages (DEC-031, Option B). One page per
+   unique source_file across all Decisions. Lines that carry a
+   Decision get `.marked`; the `#L<n>` anchor on each line wrapper
+   makes deep links from snippet pages land correctly.
+   ────────────────────────────────────────────────────────────── */
+pre.source-full {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6em 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.5;
+  margin: 0.6em 0;
+}
+pre.source-full .src-line {
+  display: block;
+  padding: 0 0.6em;
+  white-space: pre;
+  border-left: 3px solid transparent;
+}
+pre.source-full .src-line.marked {
+  background: rgba(208, 161, 6, 0.08);
+  border-left-color: var(--accent, #d2a106);
+}
+pre.source-full .src-line:target {
+  background: rgba(208, 161, 6, 0.20);
+  outline: 2px solid var(--accent, #d2a106);
+}
+pre.source-full .src-line .ln {
+  display: inline-block;
+  width: 4ch;
+  margin-right: 0.8em;
+  color: var(--muted, #6e7681);
+  text-align: right;
+  user-select: none;
+}
+@media (prefers-color-scheme: dark) {
+  pre.source-full .src-line.marked {
+    background: rgba(240, 180, 0, 0.10);
+  }
+  pre.source-full .src-line:target {
+    background: rgba(240, 180, 0, 0.25);
+  }
+}
+
+/* "view full file →" link below the snippet on Decision / Gap pages */
+p.src-link {
+  margin: -0.4em 0 1em 0;
+  font-size: 0.85em;
+}

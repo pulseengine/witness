@@ -31,6 +31,13 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
+# v0.24 — syntax highlighting for the full-file source pages emitted
+# by `witness-viz export`. We disable the `regex-fancy` features and
+# rely on `regex-onig` (the default) since the bundled syntaxes are
+# already onig-based. Adds ~5 MB embedded syntax/theme assets to the
+# binary but enables Rust, C, C++, Swift, Kotlin, Zig, Go, etc. with
+# zero runtime config. See DEC-031.
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

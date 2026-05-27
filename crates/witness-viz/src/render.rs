@@ -45,18 +45,28 @@ pub struct RenderContext<'a> {
     /// (axum routes `/verdict/foo`); `".html"` in export mode (file
     /// `verdict/foo.html` on disk).
     pub link_ext: &'a str,
+    /// Repository root for source-file lookup. When set, Decision
+    /// and Gap pages emit an inline `±5 lines` snippet around the
+    /// recorded `source_file:source_line`. When `None`, snippet is
+    /// suppressed (serve mode default; export mode honours
+    /// `--source-root`).
+    pub source_root: Option<&'a Path>,
 }
 
 impl<'a> RenderContext<'a> {
     /// Convenience constructor for serve mode: `href_prefix = "/"`
     /// so internal links are root-relative (`/verdict/foo`) and
     /// `link_ext = ""` so axum's routes resolve them directly.
+    /// `source_root` defaults to `None` — serve-mode parity with the
+    /// pre-v0.24 dashboard. The Axum handlers may pass a
+    /// command-line-supplied source root in the future.
     pub fn for_serve(verdicts: &'a [VerdictBundle], reports_dir: &'a Path) -> Self {
         Self {
             verdicts,
             reports_dir,
             href_prefix: "/",
             link_ext: "",
+            source_root: None,
         }
     }
 
@@ -89,6 +99,23 @@ impl<'a> RenderContext<'a> {
             "{}gap/{}/{}/{}{}",
             self.href_prefix, verdict, decision_id, condition_index, self.link_ext
         )
+    }
+
+    /// Href to the full source page for `source_file` at `line`. The
+    /// export driver writes one HTML page per unique source file at
+    /// `out/source/<path>.html`; this method computes the
+    /// depth-aware relative URL with a `#L<line>` anchor. Empty in
+    /// serve mode (the live dashboard doesn't render full files, by
+    /// design — DEC-031 — so the renderer just elides the link).
+    pub fn link_to_source(&self, source_file: &str, line: u32) -> Option<String> {
+        if self.link_ext.is_empty() {
+            // Serve mode: no full-file page exists.
+            return None;
+        }
+        Some(format!(
+            "{}source/{}{}#L{}",
+            self.href_prefix, source_file, self.link_ext, line
+        ))
     }
 }
 
@@ -290,6 +317,11 @@ pub fn render_decision(
         status_disp = escape(&decision.status),
     );
 
+    if let Some(snippet) = render_source_snippet_for(ctx, decision) {
+        body.push_str("<h2>Source</h2>\n");
+        body.push_str(&snippet);
+    }
+
     body.push_str("<h2>Truth table</h2>\n");
     body.push_str(&render_truth_table(decision));
 
@@ -337,6 +369,11 @@ pub fn render_gap(
         up = escape(&condition.status.to_ascii_uppercase()),
     );
 
+    if let Some(snippet) = render_source_snippet_for(ctx, decision) {
+        body.push_str("<h2>Source</h2>\n");
+        body.push_str(&snippet);
+    }
+
     match condition.status.as_str() {
         "proved" => {
             body.push_str("<div class=\"box\">\n");
@@ -379,6 +416,164 @@ pub fn render_gap(
 }
 
 // ─── private helpers ──────────────────────────────────────────────────
+
+/// How many lines of surrounding context the inline source snippet
+/// shows on each side of the recorded `source_line`. Five is the
+/// Codecov default; small enough to fit on a Decision page above the
+/// truth table without dominating it.
+const SNIPPET_CONTEXT_LINES: u32 = 5;
+
+/// Read `source_file` from `ctx.source_root`, extract ±N context
+/// lines around `decision.source_line` (1-indexed, clamped to file
+/// bounds), and return an HTML `<pre>` block with the target line
+/// highlighted. Returns `None` when:
+///   - `ctx.source_root` is `None` (serve mode default; no flag passed)
+///   - the file can't be read (graceful degrade — reviewer still sees
+///     the rest of the Decision page)
+///   - `source_line` is 0 (unattributed; nothing meaningful to point at)
+///
+/// The snippet is plain `<pre>` with line numbers; no syntax
+/// highlighting (that's the full-file view's job — DEC-031). Keeps
+/// each snippet at ~300-500 bytes.
+fn render_source_snippet_for(
+    ctx: &RenderContext<'_>,
+    decision: &DecisionReport,
+) -> Option<String> {
+    let root = ctx.source_root?;
+    if decision.source_line == 0 {
+        return None;
+    }
+    let target_line = decision.source_line;
+    let path = root.join(&decision.source_file);
+    let text = std::fs::read_to_string(&path).ok()?;
+    let lines: Vec<&str> = text.lines().collect();
+    let total = u32::try_from(lines.len()).unwrap_or(u32::MAX);
+    if total == 0 || target_line > total {
+        return None;
+    }
+
+    let start = target_line.saturating_sub(SNIPPET_CONTEXT_LINES).max(1);
+    let end = target_line
+        .saturating_add(SNIPPET_CONTEXT_LINES)
+        .min(total);
+
+    let mut out = String::from("<pre class=\"src-snippet\">");
+    // Width for the line-number column — pad to the max line number
+    // shown, so the gutter aligns.
+    let gutter_width = end.to_string().len();
+    for n in start..=end {
+        let idx = usize::try_from(n - 1).unwrap_or(0);
+        let line = lines.get(idx).copied().unwrap_or("");
+        let marker = if n == target_line { '>' } else { ' ' };
+        let class = if n == target_line {
+            " class=\"src-snippet-target\""
+        } else {
+            ""
+        };
+        let _ = write!(
+            out,
+            "<span{class}>{marker} {n:>w$} | {line}</span>\n",
+            class = class,
+            marker = marker,
+            n = n,
+            w = gutter_width,
+            line = escape(line),
+        );
+    }
+    out.push_str("</pre>\n");
+
+    // Hybrid mode (DEC-031): when running under the export driver
+    // (link_ext = ".html"), also emit a "view full file" link to the
+    // syntax-highlighted full-source page. Suppressed in serve mode
+    // where no such page exists.
+    if let Some(href) = ctx.link_to_source(&decision.source_file, target_line) {
+        let _ = write!(
+            out,
+            r#"<p class="src-link"><a href="{href}">view full file →</a></p>"#,
+            href = escape(&href),
+        );
+    }
+
+    Some(out)
+}
+
+/// v0.24 — render a syntax-highlighted full source file as a page
+/// body, with one `<span id="L<n>">` per line so deep links
+/// (`#L42`) jump to the right place. `marked_lines` is the set of
+/// line numbers that carry a Decision in the verdict bundle; those
+/// lines get a `.marked` class so the CSS can foreground them.
+///
+/// Used by the export driver only (DEC-031). The serve-mode
+/// dashboard doesn't ship full files — the cost-benefit doesn't
+/// land when the live server is just a click away from the
+/// reviewer's editor.
+pub fn render_source_page(
+    source_text: &str,
+    source_path: &str,
+    marked_lines: &[u32],
+) -> RenderResult {
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::ThemeSet;
+    use syntect::html::{IncludeBackground, styled_line_to_highlighted_html};
+    use syntect::parsing::SyntaxSet;
+
+    let ss = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+    // InspiredGitHub is the lightest builtin theme that still has
+    // distinct colours for Rust's syntax categories; sourced from
+    // syntect's default theme set so no external asset needed.
+    let theme = ts
+        .themes
+        .get("InspiredGitHub")
+        .unwrap_or_else(|| &ts.themes["base16-ocean.light"]);
+
+    let ext = std::path::Path::new(source_path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let syntax = ss
+        .find_syntax_by_extension(ext)
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+
+    let mut highlighter = HighlightLines::new(syntax, theme);
+    let marked: std::collections::HashSet<u32> = marked_lines.iter().copied().collect();
+    let total_lines = u32::try_from(source_text.lines().count()).unwrap_or(u32::MAX);
+    let gutter = total_lines.to_string().len();
+
+    let mut body = String::new();
+    let _ = write!(
+        body,
+        "<h1>Source <code>{path}</code></h1>\n",
+        path = escape(source_path),
+    );
+    body.push_str("<pre class=\"source-full\">");
+
+    for (idx, line) in source_text.lines().enumerate() {
+        let lineno = u32::try_from(idx + 1).unwrap_or(u32::MAX);
+        let ranges = highlighter.highlight_line(line, &ss).unwrap_or_default();
+        let highlighted =
+            styled_line_to_highlighted_html(&ranges, IncludeBackground::No).unwrap_or_default();
+        let cls = if marked.contains(&lineno) {
+            "src-line marked"
+        } else {
+            "src-line"
+        };
+        let _ = write!(
+            body,
+            "<span id=\"L{n}\" class=\"{cls}\"><span class=\"ln\">{n:>w$}</span> {h}</span>\n",
+            n = lineno,
+            cls = cls,
+            w = gutter,
+            h = highlighted,
+        );
+    }
+    body.push_str("</pre>\n");
+
+    RenderResult {
+        title: format!("Source: {source_path}"),
+        body,
+    }
+}
 
 fn render_coverage_bar(proved: u32, gap: u32, dead: u32) -> String {
     let total = proved.saturating_add(gap).saturating_add(dead);

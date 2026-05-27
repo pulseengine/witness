@@ -53,6 +53,14 @@ enum Command {
         /// future header use.
         #[arg(long)]
         site_title: Option<String>,
+
+        /// Repository root for source-file lookup (v0.24+). When set,
+        /// Decision and Gap pages render an inline `±5 lines` snippet
+        /// around `source_file:source_line`. Missing files degrade
+        /// gracefully (snippet suppressed; rest of the page renders
+        /// unchanged).
+        #[arg(long = "source-root")]
+        source_root: Option<PathBuf>,
     },
 }
 
@@ -65,7 +73,11 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.cmd {
-        Some(Command::Export { out, site_title }) => {
+        Some(Command::Export {
+            out,
+            site_title,
+            source_root,
+        }) => {
             let reports = args
                 .reports_dir
                 .as_ref()
@@ -73,10 +85,16 @@ async fn main() -> Result<()> {
             if !reports.is_dir() {
                 anyhow::bail!("--reports-dir {} is not a directory", reports.display());
             }
+            if let Some(ref sr) = source_root {
+                if !sr.is_dir() {
+                    anyhow::bail!("--source-root {} is not a directory", sr.display());
+                }
+            }
             let opts = ExportOpts {
                 reports_dir: reports.clone(),
                 out_dir: out.clone(),
                 site_title,
+                source_root,
             };
             let summary = run_export(&opts).context("static HTML export")?;
             tracing::info!(

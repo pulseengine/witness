@@ -46,6 +46,11 @@ pub struct ExportOpts {
     /// `None` → no prefix; pass e.g. `Some("witness · v0.23.0".into())`
     /// to brand the published site.
     pub site_title: Option<String>,
+    /// Optional repository root for source-file lookup. When set,
+    /// Decision and Gap pages render a ±5-line inline snippet around
+    /// the recorded `source_file:source_line`. v0.24+. Missing
+    /// files degrade gracefully (snippet suppressed).
+    pub source_root: Option<PathBuf>,
 }
 
 /// Result of a successful export — useful for logging and CI assertions.
@@ -56,6 +61,10 @@ pub struct ExportSummary {
     pub verdicts: usize,
     pub decisions: usize,
     pub conditions: usize,
+    /// v0.24 — number of unique source files for which a full-file
+    /// page was emitted. Zero when `--source-root` is unset or no
+    /// referenced file is readable.
+    pub source_files: usize,
 }
 
 /// Walk the verdict tree and write static HTML.
@@ -78,7 +87,7 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
 
     // depth 0 — index.html
     {
-        let ctx = ctx_for_depth(&verdicts, &opts.reports_dir, 0);
+        let ctx = ctx_for_depth(&verdicts, &opts.reports_dir, opts.source_root.as_deref(), 0);
         let rendered = render::render_overview(&ctx);
         let html = wrap_static(&rendered, 0, opts.site_title.as_deref());
         let path = opts.out_dir.join("index.html");
@@ -90,7 +99,7 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
         // depth 1 — verdict/<name>.html
         let verdict_dir = opts.out_dir.join("verdict");
         fs::create_dir_all(&verdict_dir)?;
-        let ctx = ctx_for_depth(&[], &opts.reports_dir, 1);
+        let ctx = ctx_for_depth(&[], &opts.reports_dir, opts.source_root.as_deref(), 1);
         let rendered = render::render_verdict(&ctx, v);
         let html = wrap_static(&rendered, 1, opts.site_title.as_deref());
         let path = verdict_dir.join(format!("{}.html", v.name));
@@ -101,7 +110,7 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
             // depth 2 — decision/<verdict>/<id>.html
             let dec_dir = opts.out_dir.join("decision").join(&v.name);
             fs::create_dir_all(&dec_dir)?;
-            let ctx = ctx_for_depth(&[], &opts.reports_dir, 2);
+            let ctx = ctx_for_depth(&[], &opts.reports_dir, opts.source_root.as_deref(), 2);
             let rendered = render::render_decision(&ctx, v, d);
             let html = wrap_static(&rendered, 2, opts.site_title.as_deref());
             let path = dec_dir.join(format!("{}.html", d.id));
@@ -110,6 +119,20 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
             summary.decisions += 1;
 
             for c in &d.conditions {
+                summary.conditions += 1;
+                // v0.24 — skip gap pages for `proved` conditions.
+                // Their drill-down would render "already proved, no
+                // action needed" — accurate, but not actionable, and
+                // they dominate the bundle (~80% of conditions
+                // typically). Dead conditions KEEP their drill-down
+                // because it explains the "compiler folded the
+                // branch / harness can't reach it" investigation
+                // that the reviewer still has to do. The link in
+                // `render_conditions` is gated identically — see
+                // render.rs.
+                if c.status == "proved" {
+                    continue;
+                }
                 // depth 3 — gap/<verdict>/<id>/<cond>.html
                 let gap_dir = opts
                     .out_dir
@@ -117,14 +140,60 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
                     .join(&v.name)
                     .join(d.id.to_string());
                 fs::create_dir_all(&gap_dir)?;
-                let ctx = ctx_for_depth(&[], &opts.reports_dir, 3);
+                let ctx = ctx_for_depth(&[], &opts.reports_dir, opts.source_root.as_deref(), 3);
                 let rendered = render::render_gap(&ctx, v, d, c);
                 let html = wrap_static(&rendered, 3, opts.site_title.as_deref());
                 let path = gap_dir.join(format!("{}.html", c.index));
                 summary.bytes_written += write_page(&path, &html)?;
                 summary.pages_written += 1;
-                summary.conditions += 1;
             }
+        }
+    }
+
+    // v0.24 — full-file source pages (DEC-031). When --source-root is
+    // set, walk every Decision across every Verdict, group by
+    // source_file → set of source_lines, read each source from disk,
+    // render syntax-highlighted to `out/source/<path>.html`. Missing
+    // or path-unsafe entries are skipped (the snippet on the Decision
+    // page also degrades gracefully — see render_source_snippet_for).
+    if let Some(source_root) = opts.source_root.as_deref() {
+        let mut by_file: std::collections::BTreeMap<String, std::collections::BTreeSet<u32>> =
+            std::collections::BTreeMap::new();
+        for v in &verdicts {
+            for d in &v.report.decisions {
+                if d.source_file.is_empty() || d.source_line == 0 {
+                    continue;
+                }
+                by_file
+                    .entry(d.source_file.clone())
+                    .or_default()
+                    .insert(d.source_line);
+            }
+        }
+        for (rel, lines) in &by_file {
+            // Sanitise: refuse absolute paths and any `..` traversal.
+            if rel.starts_with('/') || rel.split('/').any(|p| p == "..") {
+                tracing::warn!("skipping source path with unsafe traversal: {rel}");
+                continue;
+            }
+            let abs = source_root.join(rel);
+            let Ok(text) = fs::read_to_string(&abs) else {
+                continue;
+            };
+            let marked: Vec<u32> = lines.iter().copied().collect();
+            let rendered = render::render_source_page(&text, rel, &marked);
+            // Depth-aware: number of path components in `rel` plus 1
+            // for the leading `source/`. Used to compute the asset
+            // prefix in wrap_static.
+            let depth = rel.split('/').count() + 1;
+            let html = wrap_static(&rendered, depth, opts.site_title.as_deref());
+            let out_path = opts.out_dir.join("source").join(format!("{rel}.html"));
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            summary.bytes_written += write_page(&out_path, &html)?;
+            summary.pages_written += 1;
+            summary.source_files += 1;
         }
     }
 
@@ -137,7 +206,8 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
   "bytes_written": {bytes},
   "verdicts": {v},
   "decisions": {d},
-  "conditions": {c}
+  "conditions": {c},
+  "source_files": {sf}
 }}
 "#,
         ver = env!("CARGO_PKG_VERSION"),
@@ -146,6 +216,7 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
         v = summary.verdicts,
         d = summary.decisions,
         c = summary.conditions,
+        sf = summary.source_files,
     );
     fs::write(opts.out_dir.join("summary.json"), manifest)?;
 
@@ -155,6 +226,7 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
 fn ctx_for_depth<'a>(
     verdicts: &'a [VerdictBundle],
     reports_dir: &'a Path,
+    source_root: Option<&'a Path>,
     depth: usize,
 ) -> RenderContext<'a> {
     // SAFETY: depth ≤ 3 in our tree → leak is bounded. We use a static
@@ -171,6 +243,7 @@ fn ctx_for_depth<'a>(
         reports_dir,
         href_prefix,
         link_ext: ".html",
+        source_root,
     }
 }
 
