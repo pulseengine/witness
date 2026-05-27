@@ -15,7 +15,7 @@ members = [
 # or the release.yml `wasm-component` job, which does exactly that.
 
 [workspace.package]
-version = "0.22.0"
+version = "0.23.0"
 edition = "2024"
 rust-version = "1.92"
 license = "Apache-2.0 OR MIT"
@@ -65,14 +65,11 @@ thiserror = "2"
 sha2 = "0.10"
 gimli = { version = "0.31", default-features = false, features = ["read", "std"] }
 wasmparser = "0.240"
-# TEMPORARY — pinned to the pulseengine/walrus fork carrying the legacy
-# try/catch multi-value-handler panic fix. Upstream PR:
-#   https://github.com/wasm-bindgen/walrus/pull/316  (issue #315)
-# Without it, `witness instrument` panics on any module with a legacy
-# `try`/`catch` whose handler signature is multi-value — e.g. every
-# Kotlin/Wasm output. Revert to a crates.io `walrus = "0.26.x"` once
-# the fix ships in a release.
-walrus = { git = "https://github.com/pulseengine/walrus", rev = "ae623af0591d39a6ff8bd84fc6eca1ff3e533689" }
+# v0.23.0 unpin: walrus 0.26.3 (released 2026-05-26) ships the
+# upstream legacy try/catch multi-value-handler panic fix
+# (wasm-bindgen/walrus PR #316 / issue #315) we'd been carrying as a
+# fork pin since v0.21. crates.io publish is now unblocked.
+walrus = "0.26.3"
 wasmtime = "44"
 wasmtime-wasi = "44"
 clap = { version = "4", features = ["derive"] }

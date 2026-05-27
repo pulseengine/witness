@@ -2252,8 +2252,9 @@ dependencies = [
 
 [[package]]
 name = "walrus"
-version = "0.26.2"
-source = "git+https://github.com/pulseengine/walrus?rev=ae623af0591d39a6ff8bd84fc6eca1ff3e533689#ae623af0591d39a6ff8bd84fc6eca1ff3e533689"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8463cef34c08631de7553f43033e8a328283425e07dbfb65dbc17323535798f2"
 dependencies = [
  "anyhow",
  "gimli 0.32.3",
@@ -2268,7 +2269,8 @@ dependencies = [
 [[package]]
 name = "walrus-macro"
 version = "0.26.0"
-source = "git+https://github.com/pulseengine/walrus?rev=ae623af0591d39a6ff8bd84fc6eca1ff3e533689#ae623af0591d39a6ff8bd84fc6eca1ff3e533689"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a9b0525d7ea6e5f906aca581a172e5c91b4c595290dfa8ad4a2bc9ffef33b44"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -3186,7 +3188,7 @@ dependencies = [
 
 [[package]]
 name = "witness"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3209,7 +3211,7 @@ dependencies = [
 
 [[package]]
 name = "witness-core"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3232,7 +3234,7 @@ dependencies = [
 
 [[package]]
 name = "witness-mcdc-checker"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "proptest",
 ]

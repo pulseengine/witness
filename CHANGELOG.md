@@ -7,6 +7,111 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-05-26
+
+Headline: **PR-time MC/DC visualisation lands**. `witness
+viz-export` produces a self-contained static HTML dashboard from a
+verdict bundle, and every tagged release now auto-publishes the
+canonical-fixture dashboard to GitHub Pages
+(https://pulseengine.github.io/witness/). Plus end-to-end
+ergonomics — `cargo witness all`, V3 source-map ingestion,
+release-artifact standardization (SBOM + SLSA + cosign bundle),
+and a docs reframe on the wasi target story.
+
+### Added — `witness viz-export` static dashboard (PR #50)
+
+`witness viz-export --reports-dir <…> --out <…>` walks every page
+of the dashboard through the same renderer the live HTMX server
+uses and writes self-contained HTML browseable from `file://`,
+deployable to any static host. Output tree:
+
+```
+out/index.html
+out/verdict/<name>.html
+out/decision/<verdict>/<id>.html
+out/gap/<verdict>/<id>/<cond>.html
+out/_assets/styles.css
+out/summary.json
+```
+
+No HTMX, no API endpoints in the dump. Links are depth-aware
+relative (e.g. `../../verdict/foo.html` from a decision page) so
+the output works from any URL prefix.
+
+The release workflow now includes a `publish-pages` job: every
+`v*` tag generates the canonical verdict-evidence dashboard and
+deploys it to GitHub Pages via the official `actions/deploy-pages`
+action. Site URL: https://pulseengine.github.io/witness/.
+
+Requires Pages repo setting "Source → GitHub Actions" (already
+configured for this repo).
+
+### Changed — viz internals: pure-render seam (PRs #48, #49)
+
+The four-page axum dashboard (overview / verdict / decision / gap)
+was refactored into a pure `crate::render::render_*` core plus
+thin axum handlers. The renderer takes a borrow-only
+`RenderContext` whose `href_prefix` + `link_ext` knobs choose
+between serve mode (`"/"`, `""` — byte-identical output with v0.22)
+and export mode (depth-counted `"../"`, `".html"`). `views.rs`
+shrank from ~565 lines to ~125 lines of axum plumbing only.
+
+This is the design seam that made `witness viz-export` cheap to
+build (~170 lines on top of the renderer; the renderer itself does
+the heavy lifting).
+
+### Changed — wasi target docs (PR #47)
+
+`docs/quickstart.md` reframes the wasi target guidance: `p1` is
+**today's smoothest path**, not "the recommended default", because
+the ecosystem direction is `p2`/`p3`. Adjusts the tone of every
+"recommended" claim without changing the practical advice for
+v0.23.0 users (still use `p1` if you want a clean run today).
+
+### Earlier in this window (commits since v0.22.0, pre-PR-stack)
+
+These landed individually since the v0.22 tag and roll up here:
+
+- **`witness all` / `cargo witness all`** (PR #44) — end-to-end
+  pipeline subcommand. Instrument → run → report → predicate →
+  attest → verify in one call, with sensible defaults the
+  scaffolded fixtures use.
+- **V3 source-map ingestion** (PR #41) — `witness-core` reads V3
+  source maps as a fallback when DWARF is missing or incomplete;
+  Kotlin/Wasm reconstruction now works for the leap-year fixture's
+  Decisions even though kotlinc-wasm emits no DWARF.
+- **walrus fork pin** (PR #37) — pinned to
+  `pulseengine/walrus@ae623af` for the legacy try/catch panic fix
+  (upstream PR #316 at wasm-bindgen/walrus, still in maintainer
+  review). Unblocks Kotlin Tier B (PR #39). **In v0.23.0:
+  unpinned** — upstream PR #316 merged 2026-05-26 and walrus 0.26.3
+  shipped to crates.io the same day; witness now depends on the
+  released `walrus = "0.26.3"`. crates.io publish unblocked.
+- **Release-artifact standardization** (PR #46) — per the org-wide
+  brief: CycloneDX 1.5 SBOM (`witness-X.Y.Z.cdx.json`), SLSA v1
+  build provenance via `actions/attest-build-provenance`, sums-file
+  cosign bundle (`SHA256SUMS.txt.cosign.bundle` + `.sig` + `.pem`
+  triple), and `build-env.txt` forensics. Per-asset
+  `.sig`/`.cert` carved out as a witness-specific certification
+  evidence requirement.
+- **Friction reductions from sigil adoption review** (PR #42) —
+  five small ergonomic fixes from outside-the-team review.
+- **cargo-witness subcommand alias** (PR #43) — Level-A integration
+  so `cargo witness <subcmd>` resolves to `witness <subcmd>`.
+- **Docs polish** — README MC/DC TL;DR (PR #36), Kotlin Tier
+  D→Tier B update (PR #39).
+- **wasmtime 44.0.1 → 44.0.2** (PR #38) — RUSTSEC-2026-0149.
+- **walrus 0.24 → 0.26.1** (PR #34) — dependency keepup.
+
+### Known limitations
+
+- **Kotlin/Wasm** produces 0 decisions on the leap-year fixture
+  because kotlinc-wasm emits `if`/`else` only (not `br_if`); the
+  orthogonal clustering issue is a separate track from source-map
+  ingestion.
+- **First-release publish-pages** requires Pages source = "GitHub
+  Actions" (handled via API for this repo).
+
 ## [0.22.0] — 2026-05-17
 
 Three landed since v0.21: deeper C++ probes, Swift promoted to
