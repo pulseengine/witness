@@ -487,3 +487,118 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-011
+
+  # -------------------------------------------------------------------------
+  # v0.23 (shipped) + v0.24 (in flight) — viz extension features
+  # -------------------------------------------------------------------------
+  - id: FEAT-024
+    type: feature
+    title: v0.23 — static MC/DC dashboard export
+    status: approved
+    description: >
+      `witness viz-export --reports-dir <…> --out <…>` walks every
+      page of the witness-viz dashboard through the pure renderer
+      (DEC-028) and writes self-contained static HTML browseable
+      from `file://`, deployable to GitHub Pages or any static host.
+      Output tree: `out/index.html`,
+      `out/verdict/<name>.html`, `out/decision/<verdict>/<id>.html`,
+      `out/gap/<verdict>/<id>/<cond>.html`, `out/_assets/styles.css`,
+      `out/summary.json`. Depth-aware relative links; no HTMX, no
+      API endpoints in the dump. Release workflow auto-publishes
+      the canonical verdict-evidence dashboard to
+      https://pulseengine.github.io/witness/ on every `v*` tag
+      (DEC-029).
+    tags: [v0.23, viz, export]
+    fields:
+      phase: shipped
+    links:
+      - type: satisfies
+        target: REQ-044
+      - type: refines
+        target: FEAT-019
+
+  - id: FEAT-025
+    type: feature
+    title: v0.24 — source visibility in viz dashboard
+    status: proposed
+    description: >
+      Decision and Gap pages of the static dashboard render the
+      underlying source code inline (±5 lines around the recorded
+      source_line, source_line highlighted, plain `<pre>`) plus a
+      "view full file" link to a syntax-highlighted full source
+      file at `out/source/<encoded-path>.html` with `#L<line>` deep
+      anchors. New CLI flag `witness viz-export --source-root
+      <repo-root>` for the export driver to locate the source files.
+      Closes REQ-045 — the "what code am I looking at?" gap that
+      v0.23 left open.
+    tags: [v0.24, viz, source, pr-review]
+    fields:
+      phase: in-progress
+    links:
+      - type: satisfies
+        target: REQ-045
+      - type: refines
+        target: FEAT-024
+
+  - id: FEAT-026
+    type: feature
+    title: v0.22 — release-artefact standardisation per org-wide brief
+    status: approved
+    description: >
+      Every tagged release ships the asset set the org-wide
+      release-artefact brief mandates: per-platform binary archives
+      with cosign `.cert` + `.sig` (certification evidence kept from
+      witness's prior practice), a CycloneDX 1.5 SBOM
+      (witness-X.Y.Z.cdx.json), a SHA256SUMS.txt with the cosign
+      bundle triple (.sig + .pem + .cosign.bundle), build-env.txt
+      forensics, and SLSA v1 build provenance via
+      actions/attest-build-provenance. Per-asset cosign carved out as
+      a witness-specific certification-evidence requirement on top of
+      the brief; the brief otherwise specifies only sums-file
+      signing.
+    tags: [v0.22, release, supply-chain]
+    fields:
+      phase: shipped
+    links:
+      - type: satisfies
+        target: REQ-046
+
+  - id: FEAT-027
+    type: feature
+    title: v0.23 — `cargo witness all` end-to-end pipeline subcommand
+    status: approved
+    description: >
+      Single `witness all` / `cargo witness all` invocation runs the
+      entire pipeline — instrument → run → report → predicate →
+      attest → verify — with sensible defaults the scaffolded
+      fixtures use. New user goes from `cargo witness new` to a
+      verified compliance bundle without learning the per-stage flag
+      surface. Level-B integration; Level A (the `cargo witness`
+      alias shim) shipped earlier in the same window.
+    tags: [v0.23, cli, ergonomics]
+    fields:
+      phase: shipped
+    links:
+      - type: satisfies
+        target: REQ-047
+
+  - id: FEAT-028
+    type: feature
+    title: v0.23 — V3 source-map fallback for DWARF-less languages
+    status: approved
+    description: >
+      witness-core now reads V3 source maps (.wasm.map sidecars,
+      TC39-compatible) as a fallback source-line attribution backend
+      when DWARF is absent or incomplete. Per-row chain: DWARF first,
+      then V3 source map; missing-both rows still emit truth tables
+      with `unattributed:<branch_id>` source markers. Kotlin/Wasm
+      attribution (kotlinc-wasm emits .wasm.map but no DWARF) now
+      works on the leap-year fixture's Decisions — orthogonal to
+      Kotlin's clustering issue (kotlinc emits if/else not br_if,
+      tracked separately as known-limitation).
+    tags: [v0.23, source-attribution]
+    fields:
+      phase: shipped
+    links:
+      - type: satisfies
+        target: REQ-048

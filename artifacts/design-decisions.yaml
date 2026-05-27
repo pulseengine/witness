@@ -905,3 +905,153 @@ artifacts:
         target: REQ-005
       - type: refines
         target: DEC-001
+
+  # -------------------------------------------------------------------------
+  # v0.23 + v0.24 — viz + release infrastructure decisions, backfilled
+  # -------------------------------------------------------------------------
+  - id: DEC-028
+    type: design-decision
+    title: Pure-render seam — single core for serve + export
+    status: approved
+    description: >
+      Dashboard rendering is split into `crate::render` (pure,
+      borrow-only `RenderContext`, returns
+      `RenderResult { title, body }`) and thin transport wrappers.
+      The Axum handlers (live HTMX dashboard) and the static-export
+      driver call the same `render_overview` / `render_verdict` /
+      `render_decision` / `render_gap` functions; the only
+      difference is `RenderContext::href_prefix` + `link_ext` (set
+      to `/` + `""` for serve, depth-counted `../` + `".html"` for
+      export). views.rs shrank from ~565 lines of axum-inline
+      formatting to ~125 lines of plumbing.
+    rationale: >
+      Rivet uses this exact pattern (rivet-cli's `render::render_page`
+      called by both serve and export drivers, see
+      rivet-cli/src/render/mod.rs:33-305 and main.rs:7972-8327).
+      The serve/export divergence is captured in two strings, not
+      two implementations, so the static dump's link shape is a
+      pure function of page depth — REQ-088-style asset-inlining
+      blowups (the rivet failure mode the seam was designed to
+      avoid) cannot happen because the renderer never touches I/O.
+    alternatives: >
+      Scrape the live Axum server via in-process HTTP requests and
+      rewrite paths — rejected because absolute /verdict/foo links
+      bake in the HTMX runtime and don't relativise. Maintain two
+      separate render implementations for serve vs static — rejected
+      because every page divergence becomes a divergence to police.
+      Re-implement everything via tera/askama — rejected because the
+      format!() helpers already worked and the seam value isn't in
+      the template engine, it's in factoring transport out.
+    tags: [v0.23, viz, render-seam]
+    links:
+      - type: satisfies
+        target: REQ-044
+      - type: refines
+        target: DEC-024
+
+  - id: DEC-029
+    type: design-decision
+    title: GitHub Pages publish via actions/deploy-pages + v* tag policy
+    status: approved
+    description: >
+      On every `v*` tag push, release.yml runs a `publish-pages` job
+      that downloads the compliance-evidence archive, builds
+      witness-viz fresh on the runner, runs `witness-viz export`
+      against the unpacked verdict-evidence, and uploads to GitHub
+      Pages via the official `actions/upload-pages-artifact` +
+      `actions/deploy-pages` pair. The `github-pages` environment
+      receives a `v*` tag policy (manually added once via gh api;
+      release.yml carries the gh-api command in a comment for any
+      fresh fork / mirror).
+    rationale: >
+      The native deploy-pages action gives immutable per-run
+      deployments with no `gh-pages` branch to maintain. Pages
+      source = "GitHub Actions" mode bypasses branch protection
+      entirely. The first v0.23.0 cut hit a one-shot 403 because
+      the auto-created environment ships with a default
+      deployment-branch policy allowing only `main` — fixed by
+      adding a `v*` tag policy via gh api; the fix is documented in
+      release.yml so future repo splits don't repeat the gotcha.
+    alternatives: >
+      peaceiris/actions-gh-pages (third-party, pushes to gh-pages
+      branch) — rejected because every deploy mutates a tracked
+      branch and the source-of-truth becomes git-mutable. Self-host
+      via S3 + CloudFront — rejected because the entire point is
+      zero-infrastructure. Skip the publish job and document the
+      manual `witness viz-export` step — rejected because nobody
+      runs the manual step.
+    tags: [v0.23, release, pages]
+    links:
+      - type: satisfies
+        target: REQ-044
+      - type: refines
+        target: DEC-001
+
+  - id: DEC-030
+    type: design-decision
+    title: Walrus 0.26.3 unpin — upstream PR #316 merged
+    status: approved
+    description: >
+      The pulseengine/walrus@ae623af git pin carried since v0.21 is
+      reverted; witness now depends on crates.io `walrus = "0.26.3"`
+      (released 2026-05-26, contains the legacy `try`/`catch`
+      multi-value-handler panic fix from wasm-bindgen/walrus#316).
+      crates.io publishing is unblocked.
+    rationale: >
+      Fork pins are tech debt: they prevent crates.io publish, slow
+      `cargo update`, fail dependabot, and quietly diverge from
+      upstream. The fix landed in walrus 0.26.3 on the same day
+      #316 merged. No reason to keep carrying the fork.
+    alternatives: >
+      Stay on the fork pin and continue carrying the patch — rejected
+      because the upstream fix is byte-equivalent and shipping. Vendor
+      walrus into the witness tree — rejected because vendoring a
+      30 KLOC dep over a one-function patch is disproportionate.
+    tags: [v0.23, dependencies]
+    links:
+      - type: satisfies
+        target: REQ-046
+      - type: refines
+        target: DEC-001
+
+  - id: DEC-031
+    type: design-decision
+    title: Hybrid source rendering — inline snippet + full-file page
+    status: proposed
+    description: >
+      Source visibility in the v0.24 viz dashboard is two-tier:
+      (1) inline snippet on each Decision and Gap page, showing ±5
+      lines around the recorded source_line with the source_line
+      highlighted, no syntax highlighting (plain `<pre>` keeps the
+      snippet at ~300 bytes and removes a dep); (2) a separate
+      syntax-highlighted full-file page at
+      `out/source/<encoded-path>.html` reachable via a "view full
+      file" link from the snippet, supporting `#L<line>` deep
+      anchors. Syntect provides language detection + highlighting
+      for Rust, C, C++, Swift, Kotlin, Zig, Go. Source files are
+      bundled by the export driver from a new `--source-root <path>`
+      flag; missing files degrade gracefully ("source unavailable;
+      pass --source-root").
+    rationale: >
+      Inline-only (Option A) leaves the reviewer guessing about the
+      surrounding function body; full-file-only (Option B) forces a
+      click to see context. Hybrid gives free immediate context plus
+      one-click full view. Bundle-size impact: ~300 B per decision
+      page inline + ~5-20 KB per unique source file × ~50 files =
+      ~500 KB-1 MB extra at the canonical 13-verdict scale. Tractable
+      given GitHub Pages limits (1 GB total, 100 GB/month bandwidth).
+    alternatives: >
+      Inline snippet only (Option A) — rejected because the next
+      ask is always "show me more context". Full-file pages only
+      (Option B) — rejected because the click-cost defeats Codecov-
+      parity ergonomics. Link out to a GitHub blob URL — rejected
+      because the static dump must work from `file://` and any
+      repo-mirror host without network. Render syntax highlighting
+      with Prism.js client-side — rejected because the static
+      dashboard contract is "no JS".
+    tags: [v0.24, viz, source]
+    links:
+      - type: satisfies
+        target: REQ-045
+      - type: refines
+        target: DEC-028
