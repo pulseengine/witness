@@ -538,11 +538,18 @@ jobs:
             exit 1
           fi
           mkdir -p dist
+          # v0.24+ — `--source-root .` pulls the repo's own source
+          # files into the dashboard so Decision and Gap pages can
+          # render `±5 lines` snippets and link to syntax-highlighted
+          # full files at out/source/<path>.html. The compliance
+          # action runs with `ref: ${{ github.ref }}`, so $PWD already
+          # has the v0.24+ source tree checked out.
           ./crates/witness-viz/target/release/witness-viz \
             --reports-dir "$REPORTS" \
             export \
             --out dist \
-            --site-title "witness ${VERSION}"
+            --site-title "witness ${VERSION}" \
+            --source-root .
           # Sanity: every page parses (`xmllint --html` would be too
           # strict for our `<meta>` shorthand; grep for the doctype is
           # enough for "page wasn't truncated").

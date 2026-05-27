@@ -7,6 +7,95 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-05-27
+
+Headline: **source visibility lands in the static MC/DC
+dashboard**. Each Decision and Gap page now shows a `±5 lines`
+inline snippet around the recorded `source_file:source_line` plus
+a "view full file →" link to a syntect-highlighted full source
+page with `#L<n>` anchors. Closes the "what code am I looking
+at?" gap v0.23.0's first cut left open. Plus a ~35% page-count
+reduction on the canonical fixture set, retrospective rivet
+artifact backfill, and the two follow-up chores from v0.23.0.
+
+### Added — source visibility in MC/DC reports (PR #55)
+
+New `witness viz-export --source-root <repo-root>` flag (and on
+`witness-viz` directly). When set:
+
+- **Inline snippet** on Decision and Gap pages: ±5 lines around
+  `source_file:source_line`, target line highlighted with a left
+  border, gutter, and `>` marker. Plain `<pre>` — ~300-500 bytes
+  per page added.
+- **Full-file pages** at `out/source/<path>.html` — one page per
+  unique source file across all Decisions, syntax-highlighted via
+  `syntect` (Rust, C, C++, Swift, Kotlin, Zig, Go), `#L<n>`
+  anchors for deep links from snippets, `.marked` class on lines
+  that carry a Decision so they stand out.
+- **"view full file →"** link below each snippet, depth-aware so
+  the relative URL is correct from any page level.
+- Path safety: refuses `/...` absolute or `..` traversal in
+  `source_file` paths; missing files degrade gracefully (snippet
+  suppressed, rest of page renders unchanged).
+- Manifest gains `source_files` counter.
+
+Release workflow's `publish-pages` job now passes `--source-root .`
+so the auto-published dashboard at
+https://pulseengine.github.io/witness/ shows source for every
+canonical-fixture Decision.
+
+### Changed — skip proved-condition gap pages (PR #55)
+
+The gap drill-down for `proved` conditions rendered "already
+proved, no action needed" — accurate but not actionable. They
+typically dominate (~80% of conditions) the canonical fixtures.
+Skipping them in export mode cuts the canonical 13-verdict dist
+from ~875 → ~290 pages (~35% reduction). Dead conditions KEEP
+their drill-down because the "compiler folded / unreachable from
+harness" investigation is still actionable for the reviewer. The
+Decision page still surfaces `proved` status via the badge.
+
+### Added — rivet artifact backfill for v0.23 + v0.24 (PR #54)
+
+The forward-looking artifact set had stopped at FEAT-023 (v0.9
+agent-gap loop), leaving v0.23.0's five shipped items with zero
+typed traceability. This release closes that retrospective gap:
+
+- v0.23 (approved): REQ-044 + FEAT-024 (viz-export), REQ-046 +
+  FEAT-026 (release-artefact standardisation), REQ-047 + FEAT-027
+  (cargo-witness all), REQ-048 + FEAT-028 (V3 source-map
+  fallback), DEC-028 (pure-render seam), DEC-029 (Pages publish),
+  DEC-030 (walrus 0.26.3 unpin).
+- v0.24 (proposed → approved on landing this release): REQ-045 +
+  FEAT-025 + DEC-031 (source visibility).
+
+`rivet validate` passes; no orphans, no broken cross-refs.
+
+### Housekeeping
+
+- PR #52 — release.yml carries a comment on the github-pages
+  tag-policy gotcha (one-shot `gh api` for `v*` tag policy).
+- PR #53 — intra-workspace path-deps now carry version specs
+  (`version = "0.24.0"`) so `cargo publish --dry-run` passes
+  without `--allow-dirty` fixup.
+
+### New dependency
+
+`syntect = "5"` with `default-fancy` features. ~5 MB embedded
+syntax/theme assets in the binary; enables Rust, C, C++, Swift,
+Kotlin, Zig, Go highlighting with zero runtime config.
+
+### Known limitations (unchanged from v0.23)
+
+- **crates.io publish** for `witness-core` and `witness` is
+  blocked by a name conflict with `flammafex/Sibyl` (legitimate
+  prior registration, not squatting). `witness-mcdc-checker
+  0.23.0` is on crates.io; `witness-viz 0.24.0` may follow.
+  Namespace decision (rename vs skip permanently) deferred.
+- **Kotlin/Wasm** still produces 0 decisions on the leap-year
+  fixture due to kotlinc-wasm's `if`/`else` shape (orthogonal
+  to source-map ingestion).
+
 ## [0.23.0] — 2026-05-26
 
 Headline: **PR-time MC/DC visualisation lands**. `witness

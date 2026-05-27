@@ -21,7 +21,7 @@ workspace = true
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-witness-mcdc-checker = { path = "../witness-mcdc-checker", version = "0.23.0" }
+witness-mcdc-checker = { path = "../witness-mcdc-checker", version = "0.24.0" }
 walrus = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

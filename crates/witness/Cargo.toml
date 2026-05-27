@@ -27,7 +27,7 @@ name = "cargo-witness"
 path = "src/bin/cargo-witness.rs"
 
 [dependencies]
-witness-core = { path = "../witness-core", version = "0.23.0" }
+witness-core = { path = "../witness-core", version = "0.24.0" }
 walrus = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
