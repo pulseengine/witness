@@ -468,6 +468,17 @@ jobs:
   # One-time manual setup; if it's still "Branch" + "(none)" the
   # deploy-pages step below fails with a clear error pointing at the
   # setting.
+  #
+  # Second one-time gotcha — caught on v0.23.0 first cut: the
+  # `github-pages` environment is auto-created with a default
+  # deployment-branch policy that only allows `main`. Tag-triggered
+  # deploys are rejected with "Tag X is not allowed to deploy to
+  # github-pages due to environment protection rules". Fix: add a
+  # `v*` tag policy via
+  #   gh api -X POST repos/<owner>/<repo>/environments/github-pages/deployment-branch-policies \
+  #     -f name='v*' -f type=tag
+  # already applied to this repo; mention here so a fresh fork or
+  # repo split doesn't re-hit it.
   publish-pages:
     name: Publish MC/DC viz dashboard to GitHub Pages
     needs: [compliance]
