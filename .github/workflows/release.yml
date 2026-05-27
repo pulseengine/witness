@@ -25,6 +25,12 @@ permissions:
   # provenance) in the create-github-release job. Per the org-wide
   # release-artifact standardization brief.
   attestations: write
+  # v0.23.0 — needed by the `publish-pages` job below to push the
+  # static MC/DC viz dashboard for the release's canonical verdict
+  # set to GitHub Pages via actions/deploy-pages. Repo setting
+  # "Pages → Source" must be "GitHub Actions" (not "Branch") for
+  # this to take effect; manual one-time setup on the repo.
+  pages: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -453,3 +459,92 @@ jobs:
             --title "witness $VERSION" \
             --notes-file release-notes.md \
             release-assets/*
+
+  # v0.23.0 — Publish the static MC/DC viz dashboard for this release's
+  # canonical verdict set to GitHub Pages. The dashboard is generated
+  # by `witness-viz export` (depth-counted relative links, no HTMX, no
+  # API endpoints) so it works from any URL prefix the Pages host
+  # serves it at. Repo setting must be: Pages → Source → GitHub Actions.
+  # One-time manual setup; if it's still "Branch" + "(none)" the
+  # deploy-pages step below fails with a clear error pointing at the
+  # setting.
+  publish-pages:
+    name: Publish MC/DC viz dashboard to GitHub Pages
+    needs: [compliance]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: compliance-evidence
+          path: compliance-dl
+
+      - name: Unpack compliance-evidence archive
+        run: |
+          set -euo pipefail
+          ARCHIVE=$(find compliance-dl -name '*.tar.gz' -type f | head -1)
+          if [ -z "$ARCHIVE" ]; then
+            echo "::error::no compliance-evidence archive found"
+            exit 1
+          fi
+          mkdir -p evidence
+          tar -xzf "$ARCHIVE" -C evidence
+          echo "::notice::extracted compliance evidence from $ARCHIVE"
+          ls evidence/verdict-evidence/ || ls evidence/
+
+      # Build witness-viz fresh on this runner. Smaller than reusing
+      # the build-binaries artifacts (different triples, different
+      # archive shapes) and keeps this job self-contained.
+      - name: Build witness-viz binary
+        run: cargo build --release --bin witness-viz --manifest-path crates/witness-viz/Cargo.toml
+
+      - name: Generate static MC/DC dashboard
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/}"
+          # Find the verdict-evidence directory inside the unpacked
+          # archive — the compliance Action's layout has shifted across
+          # versions (sometimes nested under `compliance/`).
+          if [ -d evidence/verdict-evidence ]; then
+            REPORTS=evidence/verdict-evidence
+          elif [ -d evidence/compliance/verdict-evidence ]; then
+            REPORTS=evidence/compliance/verdict-evidence
+          else
+            echo "::error::can't locate verdict-evidence/ inside the compliance archive"
+            find evidence -maxdepth 3 -type d
+            exit 1
+          fi
+          mkdir -p dist
+          ./crates/witness-viz/target/release/witness-viz \
+            --reports-dir "$REPORTS" \
+            export \
+            --out dist \
+            --site-title "witness ${VERSION}"
+          # Sanity: every page parses (`xmllint --html` would be too
+          # strict for our `<meta>` shorthand; grep for the doctype is
+          # enough for "page wasn't truncated").
+          find dist -name '*.html' -print0 \
+            | xargs -0 -I{} sh -c 'head -1 "{}" | grep -qi doctype || (echo "::error::{} missing doctype" && exit 1)'
+          ls dist
+          cat dist/summary.json
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
