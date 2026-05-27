@@ -655,3 +655,97 @@ artifacts:
     fields:
       priority: must
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.23 — PR-time MC/DC visualisation + release-artifact standardisation
+  # (backfilled retrospectively after shipping; the artifact set existed
+  # forward-looking only through v0.9 / v1.0 horizons. See PRs #48-#50
+  # which closed REQ-044, #41 which closed REQ-048, #44 which closed
+  # REQ-047, #46 which closed REQ-046.)
+  # -------------------------------------------------------------------------
+  - id: REQ-044
+    type: requirement
+    title: Zero-infrastructure PR-time MC/DC viewing
+    status: approved
+    description: >
+      The system shall produce a browseable MC/DC dashboard that can
+      be served from a static host (GitHub Pages, an S3 bucket,
+      `python -m http.server`) and viewed directly from `file://`
+      with no Axum / HTMX / JS runtime. Output shall use depth-aware
+      relative links so the same bundle works from any URL prefix.
+      Codecov-style PR-time visualisation without operating a hosted
+      service.
+    tags: [v0.23, viz, pr-review]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-045
+    type: requirement
+    title: Source visibility in MC/DC reports
+    status: approved
+    description: >
+      Each Decision and Gap page in the dashboard shall make the
+      underlying source line(s) directly visible to the reviewer
+      without leaving the dashboard. Two-tier presentation: (1) an
+      inline snippet ±5 lines around the recorded source_line on the
+      Decision and Gap pages, with the source_line highlighted;
+      (2) a syntax-highlighted full-file page reachable from the
+      snippet via "view full file" link, supporting line-anchor deep
+      links. Closes the "what code am I looking at?" gap that the
+      v0.23 first cut left open — `src/foo.rs:12` as plain text
+      forced reviewers to grep the source.
+    tags: [v0.24, viz, pr-review]
+    fields:
+      priority: must
+      category: functional
+
+  - id: REQ-046
+    type: requirement
+    title: Release-artefact standardisation (org-wide brief)
+    status: approved
+    description: >
+      Every tagged release shall ship the asset set the org-wide
+      release-artefact brief mandates: per-platform binary archives
+      with `.cert` + `.sig` cosign pair (certification evidence kept
+      from witness's prior practice), a CycloneDX 1.5 SBOM
+      (`witness-X.Y.Z.cdx.json`), a SHA256SUMS.txt with the cosign
+      bundle triple (`.sig` + `.pem` + `.cosign.bundle`),
+      `build-env.txt` forensics, and SLSA v1 build provenance for
+      every binary archive via actions/attest-build-provenance.
+    tags: [v0.23, release, supply-chain]
+    fields:
+      priority: must
+      category: non-functional
+
+  - id: REQ-047
+    type: requirement
+    title: End-to-end pipeline via single subcommand
+    status: approved
+    description: >
+      The system shall provide a single `witness all` / `cargo
+      witness all` invocation that runs the entire pipeline —
+      instrument → run → report → predicate → attest → verify — with
+      sensible defaults the scaffolded fixtures use, so a new user
+      goes from `cargo witness new` to a verified compliance bundle
+      without learning the per-stage flag surface.
+    tags: [v0.23, cli, ergonomics]
+    fields:
+      priority: should
+      category: functional
+
+  - id: REQ-048
+    type: requirement
+    title: Source attribution for DWARF-less languages
+    status: approved
+    description: >
+      The system shall reconstruct Decision source attribution from
+      V3 source maps (`.wasm.map` sidecars) when DWARF is absent or
+      incomplete. Kotlin/Wasm, Dart-wasm, and any TC39 source-map
+      emitter is then attributable. Per-row fallback chain: DWARF
+      first, then V3 source map; missing-both rows still emit truth
+      tables with `unattributed:<branch_id>` source markers.
+    tags: [v0.23, source-attribution]
+    fields:
+      priority: must
+      category: functional
