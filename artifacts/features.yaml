@@ -602,3 +602,28 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-048
+
+  - id: FEAT-029
+    type: feature
+    title: v0.25 — viz pr-comment Markdown delta
+    status: approved
+    description: >
+      `witness viz-pr-comment --base <dir-or-report> --head
+      <dir-or-report>` loads two report sets (a verdict-evidence
+      directory or a single report.json, auto-detected) and emits a
+      Markdown MC/DC delta: a per-verdict + TOTAL table of
+      decisions / full-MC/DC / proved / gap / dead with before→after
+      (±N) cells, plus "Regressions" and "Improvements" sections
+      naming each per-condition status transition by
+      verdict/decision/condition coordinate. Output to stdout (pipe
+      into `gh pr comment`) or `--out FILE`. Closes REQ-049 — the
+      PR-comment leg of Codecov-parity, complementing the static
+      dashboard (FEAT-024 / FEAT-025).
+    tags: [v0.25, viz, pr-review]
+    fields:
+      phase: in-progress
+    links:
+      - type: satisfies
+        target: REQ-049
+      - type: refines
+        target: FEAT-024

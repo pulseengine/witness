@@ -385,6 +385,22 @@ enum Command {
         source_root: Option<PathBuf>,
     },
 
+    /// Emit a Markdown MC/DC coverage delta between two report sets
+    /// (base vs head) for posting as a PR comment. Each path may be a
+    /// verdict-evidence directory or a single report.json. Writes to
+    /// stdout, or --out FILE. Spawns witness-viz. v0.25+.
+    VizPrComment {
+        /// Base (e.g. main) report set.
+        #[arg(long)]
+        base: PathBuf,
+        /// Head (e.g. PR branch) report set.
+        #[arg(long)]
+        head: PathBuf,
+        /// Write Markdown here instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
     /// Emit rivet-shape coverage evidence YAML, partitioned by a
     /// branch→artefact mapping. Output is consumable by rivet's
     /// `CoverageStore` (landing in the rivet upstream PR coordinated
@@ -885,6 +901,9 @@ fn main() -> Result<()> {
             site_title.as_deref(),
             source_root.as_deref(),
         )?,
+        Command::VizPrComment { base, head, out } => {
+            run_viz_pr_comment(&base, &head, out.as_deref())?
+        }
         Command::Viz {
             reports_dir,
             port,
@@ -1290,6 +1309,35 @@ fn run_viz_export(
     })?;
     if !status.success() {
         anyhow::bail!("witness-viz export exited with {status}");
+    }
+    Ok(())
+}
+
+fn run_viz_pr_comment(
+    base: &std::path::Path,
+    head: &std::path::Path,
+    out: Option<&std::path::Path>,
+) -> Result<()> {
+    let bin = std::env::var_os("WITNESS_VIZ_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("witness-viz"));
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.arg("pr-comment")
+        .arg("--base")
+        .arg(base)
+        .arg("--head")
+        .arg(head);
+    if let Some(o) = out {
+        cmd.arg("--out").arg(o);
+    }
+    let status = cmd.status().map_err(|e| {
+        anyhow::anyhow!(
+            "failed to spawn witness-viz at '{}': {e}\n  hint: install with `cd crates/witness-viz && cargo install --path .`, or set WITNESS_VIZ_BIN to the binary path.",
+            bin.display()
+        )
+    })?;
+    if !status.success() {
+        anyhow::bail!("witness-viz pr-comment exited with {status}");
     }
     Ok(())
 }

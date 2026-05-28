@@ -62,6 +62,24 @@ enum Command {
         #[arg(long = "source-root")]
         source_root: Option<PathBuf>,
     },
+
+    /// Emit a Markdown MC/DC coverage delta between two report sets
+    /// (base vs head) for posting as a PR comment. Each of --base /
+    /// --head may be a verdict-evidence directory or a single
+    /// report.json (auto-detected). Writes to stdout, or --out FILE.
+    /// v0.25+.
+    PrComment {
+        /// Base (e.g. main) report set: a verdict-evidence dir or a
+        /// single report.json.
+        #[arg(long)]
+        base: PathBuf,
+        /// Head (e.g. PR branch) report set.
+        #[arg(long)]
+        head: PathBuf,
+        /// Write the Markdown here instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -115,6 +133,29 @@ async fn main() -> Result<()> {
                     summary.pages_written,
                     out.display()
                 );
+            }
+            Ok(())
+        }
+        Some(Command::PrComment { base, head, out }) => {
+            let base_set = witness_viz::data::load_report_set(&base)
+                .with_context(|| format!("loading base report set from {}", base.display()))?;
+            let head_set = witness_viz::data::load_report_set(&head)
+                .with_context(|| format!("loading head report set from {}", head.display()))?;
+            let md = witness_viz::prcomment::render_pr_comment(&base_set, &head_set);
+            match out {
+                Some(path) => {
+                    std::fs::write(&path, md.as_bytes())
+                        .with_context(|| format!("writing {}", path.display()))?;
+                    tracing::info!("wrote PR-comment Markdown → {}", path.display());
+                }
+                None => {
+                    // The Markdown IS the output — stdout is the contract
+                    // (`witness viz-pr-comment ... | gh pr comment --body-file -`).
+                    #[allow(clippy::print_stdout)]
+                    {
+                        print!("{md}");
+                    }
+                }
             }
             Ok(())
         }

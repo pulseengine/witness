@@ -1069,3 +1069,43 @@ artifacts:
         target: REQ-045
       - type: refines
         target: DEC-028
+
+  - id: DEC-032
+    type: design-decision
+    title: pr-comment delta — match by name / id / index, no fuzzy diff
+    status: approved
+    description: >
+      The pr-comment delta matches base↔head verdicts by name,
+      decisions within a verdict by `id`, and conditions within a
+      decision by `index`. A verdict/decision/condition present on
+      only one side is reported as added/removed, not diffed. Status
+      transitions are computed from the `status` string field
+      ("proved" / "gap" / "dead"); a transition toward "proved" is an
+      improvement, away from "proved" is a regression. Counts come
+      from the report's `overall` block directly.
+    rationale: >
+      The witness report carries stable identity keys (verdict dir
+      name, decision id, condition index) that survive a code change
+      as long as the decision structure is stable — exactly the
+      common-case PR. Matching on those keys is O(n), deterministic,
+      and needs no heuristic alignment. Fuzzy matching (e.g. by
+      source_line or truth-table shape) would mis-pair decisions
+      across a refactor and produce noisy false regressions; the
+      honest answer when identity keys don't line up is
+      "added/removed", which a reviewer can interpret correctly. This
+      mirrors `witness diff` (DEC for the branch-set delta) one level
+      up at the MC/DC-condition granularity.
+    alternatives: >
+      Fuzzy/positional decision matching — rejected for false
+      regressions across refactors. Diff the raw truth tables —
+      rejected because row ids are not stable across re-runs and the
+      condition-status transition is the reviewer-relevant signal,
+      not row churn. Reuse `witness diff` directly — rejected because
+      it operates on branch-set / coverage manifests, not MC/DC
+      condition status; the two deltas answer different questions.
+    tags: [v0.25, viz, pr-review]
+    links:
+      - type: satisfies
+        target: REQ-049
+      - type: refines
+        target: DEC-028

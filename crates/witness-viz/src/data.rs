@@ -94,6 +94,34 @@ pub fn load_verdicts(reports_dir: &std::path::Path) -> anyhow::Result<Vec<Verdic
     Ok(out)
 }
 
+/// Load a report set from a path that is *either* a verdict-evidence
+/// directory (one subdir per verdict, each with `report.json`) *or* a
+/// single `report.json` file. Used by `witness viz-pr-comment` where
+/// `--base` / `--head` may point at either shape. A single file
+/// becomes a one-element `Vec` whose verdict name is the file's parent
+/// directory name (or the file stem if there's no meaningful parent).
+pub fn load_report_set(path: &std::path::Path) -> anyhow::Result<Vec<VerdictBundle>> {
+    if path.is_dir() {
+        return load_verdicts(path);
+    }
+    if path.is_file() {
+        let bytes = std::fs::read(path)?;
+        let report: McdcReport = serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+        // Name: prefer the parent dir name (verdict-evidence layout puts
+        // report.json under <verdict>/), else the file stem.
+        let name = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .filter(|n| *n != "." && !n.is_empty())
+            .or_else(|| path.file_stem())
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "report".to_string());
+        return Ok(vec![VerdictBundle { name, report }]);
+    }
+    anyhow::bail!("{} is neither a directory nor a file", path.display())
+}
+
 pub fn find_verdict(
     reports_dir: &std::path::Path,
     name: &str,
