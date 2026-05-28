@@ -7,6 +7,57 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-05-28
+
+Headline: **`witness viz-pr-comment`** — the PR-comment leg of the
+Codecov-parity story. The trio is now complete: live HTMX
+dashboard (`witness viz`), static source-visible export (`witness
+viz-export`), and an inline MC/DC delta comment for pull requests
+(`witness viz-pr-comment`).
+
+### Added — PR-time MC/DC delta comment (PR #58)
+
+`witness viz-pr-comment --base <dir-or-report> --head <dir-or-report>`
+emits Markdown to stdout (pipe into `gh pr comment --body-file -`)
+or `--out FILE`:
+
+```
+## MC/DC coverage delta
+| verdict | decisions | full MC/DC | proved | gap | dead |
+| `v` | 1 | 1 → 0 (-1) | 2 → 1 (-1) | 0 → 1 (+1) | 0 |
+| **TOTAL** | … |
+### ⚠️ Regressions (proved → gap/dead)
+- `v` decision #0 c1 (`lib.rs:10`): proved → gap
+```
+
+- A per-verdict + TOTAL table with `before → after (±N)` cells for
+  decisions / full-MC/DC / proved / gap / dead.
+- "Regressions" (proved → gap/dead), "Improvements" (gap/dead →
+  proved), and "Other transitions" (gap ↔ dead) sections naming
+  each per-condition change by verdict / decision / condition
+  coordinate.
+- Either `--base` / `--head` may be a verdict-evidence directory or
+  a single `report.json` (auto-detected via `data::load_report_set`).
+
+Design (DEC-032): match base↔head **verdicts by name, decisions by
+`id`, conditions by `index`** — stable identity keys, O(n),
+deterministic, no fuzzy alignment (which would mis-pair decisions
+across a refactor and emit false regressions). A
+verdict/decision/condition on only one side is reported
+added/removed (🆕 / ❌removed table markers), never diffed.
+
+New rivet artifacts: REQ-049, FEAT-029, DEC-032 (all `approved`).
+
+### Known limitations (carried)
+
+- crates.io publish for `witness-core` / `witness` still blocked by
+  the `flammafex/Sibyl` name conflict.
+- 4 of 13 canonical verdicts show no source on the dashboard
+  (decisions attribute to `~/.cargo` dependency files, not vendored
+  under `verdicts/`) — vendoring measured deps is deferred.
+- Kotlin/Wasm still produces 0 decisions (kotlinc `if`/`else`, not
+  `br_if`).
+
 ## [0.24.1] — 2026-05-28
 
 Fix: **source visibility now actually populates the published
