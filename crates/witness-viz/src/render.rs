@@ -101,22 +101,52 @@ impl<'a> RenderContext<'a> {
         )
     }
 
-    /// Href to the full source page for `source_file` at `line`. The
-    /// export driver writes one HTML page per unique source file at
-    /// `out/source/<path>.html`; this method computes the
-    /// depth-aware relative URL with a `#L<line>` anchor. Empty in
-    /// serve mode (the live dashboard doesn't render full files, by
-    /// design — DEC-031 — so the renderer just elides the link).
-    pub fn link_to_source(&self, source_file: &str, line: u32) -> Option<String> {
+    /// Href to the full source page for `verdict`'s `source_file` at
+    /// `line`. The export driver writes one HTML page per unique
+    /// (verdict, source_file) pair at
+    /// `out/source/<verdict>/<path>.html` — verdict-scoped to avoid
+    /// basename collisions (two verdicts each with a `lib.rs` would
+    /// otherwise clobber one another). Depth-aware relative URL with a
+    /// `#L<line>` anchor. None in serve mode (the live dashboard
+    /// doesn't render full files, by design — DEC-031).
+    pub fn link_to_source(&self, verdict: &str, source_file: &str, line: u32) -> Option<String> {
         if self.link_ext.is_empty() {
             // Serve mode: no full-file page exists.
             return None;
         }
         Some(format!(
-            "{}source/{}{}#L{}",
-            self.href_prefix, source_file, self.link_ext, line
+            "{}source/{}/{}{}#L{}",
+            self.href_prefix, verdict, source_file, self.link_ext, line
         ))
     }
+}
+
+/// Resolve a `(verdict, source_file)` pair to an on-disk path under
+/// `source_root`. Witness reports carry basename-only `source_file`
+/// values (DWARF `DW_AT_name`), so a direct join against the repo root
+/// usually misses — the witness `verdicts/<name>/src/<basename>`
+/// layout needs verdict-scoped resolution. Tries, in order:
+///   1. `<root>/<verdict>/<source_file>`
+///   2. `<root>/<verdict>/src/<basename>`  (canonical fixture layout)
+///   3. `<root>/<source_file>`             (full-path attribution)
+///   4. `<root>/<basename>`
+///
+/// Returns the first that is a readable file. `None` when the source
+/// is a dependency file not vendored under the verdict (e.g. a crate
+/// pulled from `~/.cargo`) — the caller degrades gracefully.
+pub(crate) fn resolve_source_path(
+    source_root: &Path,
+    verdict: &str,
+    source_file: &str,
+) -> Option<std::path::PathBuf> {
+    let basename = Path::new(source_file).file_name()?.to_str()?;
+    let candidates = [
+        source_root.join(verdict).join(source_file),
+        source_root.join(verdict).join("src").join(basename),
+        source_root.join(source_file),
+        source_root.join(basename),
+    ];
+    candidates.into_iter().find(|p| p.is_file())
 }
 
 /// A rendered page — body HTML plus the `<title>` text. Callers
@@ -317,7 +347,7 @@ pub fn render_decision(
         status_disp = escape(&decision.status),
     );
 
-    if let Some(snippet) = render_source_snippet_for(ctx, decision) {
+    if let Some(snippet) = render_source_snippet_for(ctx, &bundle.name, decision) {
         body.push_str("<h2>Source</h2>\n");
         body.push_str(&snippet);
     }
@@ -369,7 +399,7 @@ pub fn render_gap(
         up = escape(&condition.status.to_ascii_uppercase()),
     );
 
-    if let Some(snippet) = render_source_snippet_for(ctx, decision) {
+    if let Some(snippet) = render_source_snippet_for(ctx, &bundle.name, decision) {
         body.push_str("<h2>Source</h2>\n");
         body.push_str(&snippet);
     }
@@ -437,6 +467,7 @@ const SNIPPET_CONTEXT_LINES: u32 = 5;
 /// each snippet at ~300-500 bytes.
 fn render_source_snippet_for(
     ctx: &RenderContext<'_>,
+    verdict_name: &str,
     decision: &DecisionReport,
 ) -> Option<String> {
     let root = ctx.source_root?;
@@ -444,7 +475,7 @@ fn render_source_snippet_for(
         return None;
     }
     let target_line = decision.source_line;
-    let path = root.join(&decision.source_file);
+    let path = resolve_source_path(root, verdict_name, &decision.source_file)?;
     let text = std::fs::read_to_string(&path).ok()?;
     let lines: Vec<&str> = text.lines().collect();
     let total = u32::try_from(lines.len()).unwrap_or(u32::MAX);
@@ -470,9 +501,9 @@ fn render_source_snippet_for(
         } else {
             ""
         };
-        let _ = write!(
+        let _ = writeln!(
             out,
-            "<span{class}>{marker} {n:>w$} | {line}</span>\n",
+            "<span{class}>{marker} {n:>w$} | {line}</span>",
             class = class,
             marker = marker,
             n = n,
@@ -486,7 +517,7 @@ fn render_source_snippet_for(
     // (link_ext = ".html"), also emit a "view full file" link to the
     // syntax-highlighted full-source page. Suppressed in serve mode
     // where no such page exists.
-    if let Some(href) = ctx.link_to_source(&decision.source_file, target_line) {
+    if let Some(href) = ctx.link_to_source(verdict_name, &decision.source_file, target_line) {
         let _ = write!(
             out,
             r#"<p class="src-link"><a href="{href}">view full file →</a></p>"#,
@@ -541,9 +572,9 @@ pub fn render_source_page(
     let gutter = total_lines.to_string().len();
 
     let mut body = String::new();
-    let _ = write!(
+    let _ = writeln!(
         body,
-        "<h1>Source <code>{path}</code></h1>\n",
+        "<h1>Source <code>{path}</code></h1>",
         path = escape(source_path),
     );
     body.push_str("<pre class=\"source-full\">");
@@ -558,9 +589,9 @@ pub fn render_source_page(
         } else {
             "src-line"
         };
-        let _ = write!(
+        let _ = writeln!(
             body,
-            "<span id=\"L{n}\" class=\"{cls}\"><span class=\"ln\">{n:>w$}</span> {h}</span>\n",
+            "<span id=\"L{n}\" class=\"{cls}\"><span class=\"ln\">{n:>w$}</span> {h}</span>",
             n = lineno,
             cls = cls,
             w = gutter,

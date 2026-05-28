@@ -1017,21 +1017,35 @@ artifacts:
   - id: DEC-031
     type: design-decision
     title: Hybrid source rendering — inline snippet + full-file page
-    status: proposed
+    status: approved
     description: >
       Source visibility in the v0.24 viz dashboard is two-tier:
       (1) inline snippet on each Decision and Gap page, showing ±5
       lines around the recorded source_line with the source_line
       highlighted, no syntax highlighting (plain `<pre>` keeps the
       snippet at ~300 bytes and removes a dep); (2) a separate
-      syntax-highlighted full-file page at
-      `out/source/<encoded-path>.html` reachable via a "view full
+      syntax-highlighted full-file page reachable via a "view full
       file" link from the snippet, supporting `#L<line>` deep
       anchors. Syntect provides language detection + highlighting
       for Rust, C, C++, Swift, Kotlin, Zig, Go. Source files are
-      bundled by the export driver from a new `--source-root <path>`
-      flag; missing files degrade gracefully ("source unavailable;
-      pass --source-root").
+      bundled by the export driver from a `--source-root <path>`
+      flag; missing files degrade gracefully ("source unavailable").
+
+      v0.24.1 resolution refinement: witness reports carry
+      basename-only `source_file` (DWARF DW_AT_name, e.g. `lib.rs`),
+      so resolution is verdict-scoped via
+      `resolve_source_path(source_root, verdict, source_file)` which
+      tries `<root>/<verdict>/<source_file>`,
+      `<root>/<verdict>/src/<basename>` (the witness
+      `verdicts/<name>/src/` fixture layout),
+      `<root>/<source_file>`, `<root>/<basename>` in order.
+      Full-file pages are verdict-scoped at
+      `out/source/<verdict>/<source_file>.html` to avoid basename
+      collisions across verdicts. The published dashboard passes
+      `--source-root verdicts`. Dependency-crate files (e.g. files
+      pulled from ~/.cargo, not vendored under verdicts/) remain
+      unresolved — deferred future work to vendor measured sources
+      into the evidence bundle.
     rationale: >
       Inline-only (Option A) leaves the reviewer guessing about the
       surrounding function body; full-file-only (Option B) forces a
