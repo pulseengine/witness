@@ -10,6 +10,7 @@ pub mod export;
 pub mod js;
 pub mod layout;
 pub mod mcp;
+pub mod prcomment;
 pub mod render;
 pub mod state;
 pub mod styles;

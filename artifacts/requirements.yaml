@@ -749,3 +749,27 @@ artifacts:
     fields:
       priority: must
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.25 — PR-time MC/DC delta comment
+  # -------------------------------------------------------------------------
+  - id: REQ-049
+    type: requirement
+    title: PR-time MC/DC coverage delta comment
+    status: approved
+    description: >
+      The system shall emit a Markdown summary of the MC/DC coverage
+      delta between two report sets (base vs head) suitable for
+      posting as a pull-request comment. The summary shall show, per
+      verdict and in total, the change in decisions / full-MC/DC /
+      proved / gap / dead counts, and shall name per-condition status
+      regressions (proved → gap, proved → dead) and improvements
+      (gap → proved, dead → proved) with their verdict / decision /
+      condition coordinates. This is the PR-comment leg of the
+      Codecov-parity story whose dashboard leg is REQ-044 / REQ-045 —
+      a reviewer sees the structural-coverage consequence of a diff
+      inline in the PR, not just a percentage.
+    tags: [v0.25, viz, pr-review]
+    fields:
+      priority: must
+      category: functional
