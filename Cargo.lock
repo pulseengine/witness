@@ -3188,7 +3188,7 @@ dependencies = [
 
 [[package]]
 name = "witness"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3211,7 +3211,7 @@ dependencies = [
 
 [[package]]
 name = "witness-core"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3234,7 +3234,7 @@ dependencies = [
 
 [[package]]
 name = "witness-mcdc-checker"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "proptest",
 ]
