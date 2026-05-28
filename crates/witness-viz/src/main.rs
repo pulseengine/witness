@@ -85,10 +85,10 @@ async fn main() -> Result<()> {
             if !reports.is_dir() {
                 anyhow::bail!("--reports-dir {} is not a directory", reports.display());
             }
-            if let Some(ref sr) = source_root {
-                if !sr.is_dir() {
-                    anyhow::bail!("--source-root {} is not a directory", sr.display());
-                }
+            if let Some(ref sr) = source_root
+                && !sr.is_dir()
+            {
+                anyhow::bail!("--source-root {} is not a directory", sr.display());
             }
             let opts = ExportOpts {
                 reports_dir: reports.clone(),

@@ -152,42 +152,59 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
 
     // v0.24 — full-file source pages (DEC-031). When --source-root is
     // set, walk every Decision across every Verdict, group by
-    // source_file → set of source_lines, read each source from disk,
-    // render syntax-highlighted to `out/source/<path>.html`. Missing
-    // or path-unsafe entries are skipped (the snippet on the Decision
-    // page also degrades gracefully — see render_source_snippet_for).
+    // (verdict, source_file) → set of source_lines, resolve each via
+    // the verdict-scoped resolver (reports carry basename-only
+    // source_file from DWARF DW_AT_name), and render
+    // syntax-highlighted to `out/source/<verdict>/<source_file>.html`.
+    // Verdict-scoping the output path avoids basename collisions (two
+    // verdicts each with a `lib.rs`). Unresolvable entries — typically
+    // dependency files under ~/.cargo, not vendored under the verdict
+    // — are skipped; the snippet on the Decision page degrades
+    // identically (render_source_snippet_for shares the resolver).
     if let Some(source_root) = opts.source_root.as_deref() {
-        let mut by_file: std::collections::BTreeMap<String, std::collections::BTreeSet<u32>> =
-            std::collections::BTreeMap::new();
+        let mut by_file: std::collections::BTreeMap<
+            (String, String),
+            std::collections::BTreeSet<u32>,
+        > = std::collections::BTreeMap::new();
         for v in &verdicts {
             for d in &v.report.decisions {
                 if d.source_file.is_empty() || d.source_line == 0 {
                     continue;
                 }
                 by_file
-                    .entry(d.source_file.clone())
+                    .entry((v.name.clone(), d.source_file.clone()))
                     .or_default()
                     .insert(d.source_line);
             }
         }
-        for (rel, lines) in &by_file {
-            // Sanitise: refuse absolute paths and any `..` traversal.
-            if rel.starts_with('/') || rel.split('/').any(|p| p == "..") {
-                tracing::warn!("skipping source path with unsafe traversal: {rel}");
+        for ((verdict, rel), lines) in &by_file {
+            // Sanitise: refuse absolute paths and any `..` traversal in
+            // either the verdict name or the source path.
+            if rel.starts_with('/')
+                || rel.split('/').any(|p| p == "..")
+                || verdict.contains('/')
+                || verdict == ".."
+            {
+                tracing::warn!("skipping unsafe source path: {verdict}/{rel}");
                 continue;
             }
-            let abs = source_root.join(rel);
+            let Some(abs) = render::resolve_source_path(source_root, verdict, rel) else {
+                continue;
+            };
             let Ok(text) = fs::read_to_string(&abs) else {
                 continue;
             };
             let marked: Vec<u32> = lines.iter().copied().collect();
             let rendered = render::render_source_page(&text, rel, &marked);
-            // Depth-aware: number of path components in `rel` plus 1
-            // for the leading `source/`. Used to compute the asset
-            // prefix in wrap_static.
-            let depth = rel.split('/').count() + 1;
+            // Depth-aware: `source/<verdict>/<rel>` — 1 (source) + 1
+            // (verdict) + path components of rel.
+            let depth = 2 + rel.split('/').count();
             let html = wrap_static(&rendered, depth, opts.site_title.as_deref());
-            let out_path = opts.out_dir.join("source").join(format!("{rel}.html"));
+            let out_path = opts
+                .out_dir
+                .join("source")
+                .join(verdict)
+                .join(format!("{rel}.html"));
             if let Some(parent) = out_path.parent() {
                 fs::create_dir_all(parent)?;
             }

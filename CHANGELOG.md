@@ -7,6 +7,46 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.1] — 2026-05-28
+
+Fix: **source visibility now actually populates the published
+dashboard**. v0.24.0 shipped the feature but the auto-published
+dashboard showed `source_files: 0` because the canonical reports
+carry basename-only `source_file` values (DWARF `DW_AT_name`,
+e.g. `lib.rs`) and `--source-root .` resolved them against the
+repo root — which has no `lib.rs`. The witness fixtures live at
+`verdicts/<name>/src/<basename>`, so resolution must be
+verdict-scoped.
+
+### Fixed
+
+- New `resolve_source_path(source_root, verdict, source_file)` tries,
+  in order: `<root>/<verdict>/<source_file>`,
+  `<root>/<verdict>/src/<basename>` (the canonical fixture layout),
+  `<root>/<source_file>`, `<root>/<basename>`. Both the inline
+  snippet (`render_source_snippet_for`) and the full-file page
+  emission share it.
+- Full-file source pages are now **verdict-scoped**:
+  `out/source/<verdict>/<source_file>.html`. v0.24.0 wrote
+  `out/source/<source_file>.html`, which would have **collided**
+  across verdicts (two verdicts each with a `lib.rs` clobbered one
+  another). `link_to_source` and the "view full file →" link match
+  the new path.
+- release.yml `publish-pages` now passes `--source-root verdicts`
+  (was `--source-root .`).
+
+After this fix, the canonical dashboard resolves **9 of 13**
+verdicts' own `lib.rs` (the 4 misses are verdicts whose decisions
+attribute only to dependency files under `~/.cargo`, not vendored
+under `verdicts/`). `source_files: 0 → 9`.
+
+### Known limitation
+
+Decisions attributed to dependency-crate files (e.g. json_lite's
+`accum.rs` from the measured JSON crate) still show no source —
+those files aren't under `verdicts/<name>/`. Vendoring measured
+dependency sources into the evidence bundle is deferred future work.
+
 ## [0.24.0] — 2026-05-27
 
 Headline: **source visibility lands in the static MC/DC

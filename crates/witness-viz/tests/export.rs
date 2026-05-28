@@ -191,14 +191,17 @@ fn export_with_source_root_emits_inline_snippets() {
     std::fs::create_dir_all(&reports).expect("mk reports");
     write_fake_bundle(&reports, "foo");
 
-    // Mirror the fake bundle's source_file path: "src/foo.rs", line 12.
-    let src_dir = source_root.join("src");
-    std::fs::create_dir_all(&src_dir).expect("mk src dir");
+    // Verdict-scoped layout — mirrors the witness `verdicts/<name>/src/`
+    // canonical fixture tree. The report's source_file is "src/foo.rs"
+    // and the verdict is "foo", so resolve_source_path finds it at
+    // <source_root>/foo/src/foo.rs (candidate 1).
+    let src_dir = source_root.join("foo").join("src");
+    std::fs::create_dir_all(&src_dir).expect("mk verdict src dir");
     // 16 lines so the ±5 window around line 12 stays inside the file.
     let src = (1..=16)
         .map(|n| format!("// line {n}: predicate fragment {n}\n"))
         .collect::<String>();
-    std::fs::write(src_dir.join("foo.rs"), src).expect("write src/foo.rs");
+    std::fs::write(src_dir.join("foo.rs"), src).expect("write foo/src/foo.rs");
 
     let summary = run_export(&ExportOpts {
         reports_dir: reports.clone(),
@@ -250,11 +253,12 @@ fn export_with_source_root_emits_inline_snippets() {
         "no unescaped HTML in snippet"
     );
 
-    // v0.24 — full-file source page exists and is syntax-highlighted.
-    let src_page_path = out.join("source/src/foo.rs.html");
+    // v0.24 — full-file source page exists, verdict-scoped, and is
+    // syntax-highlighted. Path is `source/<verdict>/<source_file>.html`.
+    let src_page_path = out.join("source/foo/src/foo.rs.html");
     assert!(
         src_page_path.is_file(),
-        "full-file source page must be emitted at out/source/src/foo.rs.html"
+        "full-file source page must be emitted at out/source/foo/src/foo.rs.html"
     );
     let src_page = std::fs::read_to_string(&src_page_path).expect("read source page");
     assert!(
@@ -269,19 +273,19 @@ fn export_with_source_root_emits_inline_snippets() {
         src_page.contains("class=\"src-line marked\""),
         "the Decision line must be marked"
     );
-    // Asset prefix at depth 3 (`source/src/foo.rs.html` → 3 segments
-    // deep — `source/` + `src/` + `foo.rs.html`).
+    // Asset prefix at depth 4 (`source/foo/src/foo.rs.html` → 4
+    // segments deep — `source/` + `foo/` + `src/` + `foo.rs.html`).
     assert!(
-        src_page.contains("href=\"../../../_assets/styles.css\""),
-        "source page (depth 3) must reference ../../../_assets/styles.css; saw chrome head: {}",
+        src_page.contains("href=\"../../../../_assets/styles.css\""),
+        "source page (depth 4) must reference ../../../../_assets/styles.css; saw chrome head: {}",
         &src_page[..src_page.len().min(400)]
     );
 
     // "view full file" link from the snippet section points at the
-    // correct relative path with `#L12` anchor.
+    // verdict-scoped relative path with `#L12` anchor.
     assert!(
-        decision.contains("source/src/foo.rs.html#L12"),
-        "decision snippet must link to the full file at the right anchor"
+        decision.contains("source/foo/src/foo.rs.html#L12"),
+        "decision snippet must link to the verdict-scoped full file at the right anchor"
     );
 
     // Manifest carries the source_files count.
