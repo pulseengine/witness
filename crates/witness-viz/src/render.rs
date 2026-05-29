@@ -465,6 +465,44 @@ const SNIPPET_CONTEXT_LINES: u32 = 5;
 /// The snippet is plain `<pre>` with line numbers; no syntax
 /// highlighting (that's the full-file view's job — DEC-031). Keeps
 /// each snippet at ~300-500 bytes.
+/// Syntax-highlight every line of `source_text`, returning per-line
+/// HTML (no wrapper). Highlighting runs over the *whole* file so
+/// multi-line constructs (block comments, raw strings) carry state
+/// correctly — callers that only want a window must highlight the
+/// whole file and slice, never highlight the window in isolation.
+/// Language is detected from `source_path`'s extension; unknown
+/// extensions fall back to plain text. Shared by the inline snippet
+/// and the full-file page (DEC-031).
+fn highlight_source_lines(source_text: &str, source_path: &str) -> Vec<String> {
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::ThemeSet;
+    use syntect::html::{IncludeBackground, styled_line_to_highlighted_html};
+    use syntect::parsing::SyntaxSet;
+
+    let ss = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+    let theme = ts
+        .themes
+        .get("InspiredGitHub")
+        .unwrap_or_else(|| &ts.themes["base16-ocean.light"]);
+    let ext = Path::new(source_path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let syntax = ss
+        .find_syntax_by_extension(ext)
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+
+    let mut h = HighlightLines::new(syntax, theme);
+    source_text
+        .lines()
+        .map(|line| {
+            let ranges = h.highlight_line(line, &ss).unwrap_or_default();
+            styled_line_to_highlighted_html(&ranges, IncludeBackground::No).unwrap_or_default()
+        })
+        .collect()
+}
+
 fn render_source_snippet_for(
     ctx: &RenderContext<'_>,
     verdict_name: &str,
@@ -477,8 +515,10 @@ fn render_source_snippet_for(
     let target_line = decision.source_line;
     let path = resolve_source_path(root, verdict_name, &decision.source_file)?;
     let text = std::fs::read_to_string(&path).ok()?;
-    let lines: Vec<&str> = text.lines().collect();
-    let total = u32::try_from(lines.len()).unwrap_or(u32::MAX);
+    // Highlight the whole file (stateful), then take the window — a
+    // snippet starting mid-block-comment must inherit that state.
+    let highlighted = highlight_source_lines(&text, &decision.source_file);
+    let total = u32::try_from(highlighted.len()).unwrap_or(u32::MAX);
     if total == 0 || target_line > total {
         return None;
     }
@@ -494,21 +534,24 @@ fn render_source_snippet_for(
     let gutter_width = end.to_string().len();
     for n in start..=end {
         let idx = usize::try_from(n - 1).unwrap_or(0);
-        let line = lines.get(idx).copied().unwrap_or("");
+        let line = highlighted.get(idx).map_or("", String::as_str);
         let marker = if n == target_line { '>' } else { ' ' };
         let class = if n == target_line {
             " class=\"src-snippet-target\""
         } else {
             ""
         };
-        let _ = writeln!(
+        // No trailing newline: `.src-snippet > span` is display:block,
+        // so the block itself is the line break. A `\n` here too would
+        // double-space the snippet.
+        let _ = write!(
             out,
-            "<span{class}>{marker} {n:>w$} | {line}</span>",
+            "<span{class}><span class=\"ln\">{marker} {n:>w$}</span> {line}</span>",
             class = class,
             marker = marker,
             n = n,
             w = gutter_width,
-            line = escape(line),
+            line = line,
         );
     }
     out.push_str("</pre>\n");
@@ -543,32 +586,9 @@ pub fn render_source_page(
     source_path: &str,
     marked_lines: &[u32],
 ) -> RenderResult {
-    use syntect::easy::HighlightLines;
-    use syntect::highlighting::ThemeSet;
-    use syntect::html::{IncludeBackground, styled_line_to_highlighted_html};
-    use syntect::parsing::SyntaxSet;
-
-    let ss = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
-    // InspiredGitHub is the lightest builtin theme that still has
-    // distinct colours for Rust's syntax categories; sourced from
-    // syntect's default theme set so no external asset needed.
-    let theme = ts
-        .themes
-        .get("InspiredGitHub")
-        .unwrap_or_else(|| &ts.themes["base16-ocean.light"]);
-
-    let ext = std::path::Path::new(source_path)
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-    let syntax = ss
-        .find_syntax_by_extension(ext)
-        .unwrap_or_else(|| ss.find_syntax_plain_text());
-
-    let mut highlighter = HighlightLines::new(syntax, theme);
+    let highlighted = highlight_source_lines(source_text, source_path);
     let marked: std::collections::HashSet<u32> = marked_lines.iter().copied().collect();
-    let total_lines = u32::try_from(source_text.lines().count()).unwrap_or(u32::MAX);
+    let total_lines = u32::try_from(highlighted.len()).unwrap_or(u32::MAX);
     let gutter = total_lines.to_string().len();
 
     let mut body = String::new();
@@ -579,23 +599,22 @@ pub fn render_source_page(
     );
     body.push_str("<pre class=\"source-full\">");
 
-    for (idx, line) in source_text.lines().enumerate() {
+    for (idx, h) in highlighted.iter().enumerate() {
         let lineno = u32::try_from(idx + 1).unwrap_or(u32::MAX);
-        let ranges = highlighter.highlight_line(line, &ss).unwrap_or_default();
-        let highlighted =
-            styled_line_to_highlighted_html(&ranges, IncludeBackground::No).unwrap_or_default();
         let cls = if marked.contains(&lineno) {
             "src-line marked"
         } else {
             "src-line"
         };
-        let _ = writeln!(
+        // No trailing newline: `.src-line` is display:block, so the
+        // block is the line break; a `\n` too would double-space.
+        let _ = write!(
             body,
             "<span id=\"L{n}\" class=\"{cls}\"><span class=\"ln\">{n:>w$}</span> {h}</span>",
             n = lineno,
             cls = cls,
             w = gutter,
-            h = highlighted,
+            h = h,
         );
     }
     body.push_str("</pre>\n");

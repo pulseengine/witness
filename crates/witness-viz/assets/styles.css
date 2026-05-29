@@ -363,6 +363,14 @@ pre.src-snippet > span {
   border-left: 3px solid transparent;
   white-space: pre;
 }
+pre.src-snippet .ln {
+  display: inline-block;
+  min-width: 4ch;
+  margin-right: 0.6em;
+  color: var(--muted, #6e7681);
+  text-align: right;
+  user-select: none;
+}
 pre.src-snippet .src-snippet-target {
   background: rgba(208, 161, 6, 0.10);
   border-left-color: var(--accent, #d2a106);
