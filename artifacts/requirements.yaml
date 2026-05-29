@@ -773,3 +773,24 @@ artifacts:
     fields:
       priority: must
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.26 — multi-version dashboard hosting
+  # -------------------------------------------------------------------------
+  - id: REQ-050
+    type: requirement
+    title: Multi-version dashboard hosting with cross-version summary
+    status: approved
+    description: >
+      The published dashboard shall host the most recent N releases
+      (N=3) side by side rather than only the latest, each at a
+      versioned path (`/vX.Y.Z/`), with a root landing page carrying
+      a cross-version MC/DC summary table — per release: decisions,
+      full-MC/DC, proved, gap, dead, source files — and the delta
+      between consecutive releases, plus links into each versioned
+      dashboard. A reviewer or auditor can see how structural
+      coverage evolved across releases without checking out old tags.
+    tags: [v0.26, viz, pages]
+    fields:
+      priority: should
+      category: functional

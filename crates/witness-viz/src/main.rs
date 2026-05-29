@@ -63,6 +63,16 @@ enum Command {
         source_root: Option<PathBuf>,
     },
 
+    /// Scan a site directory for `vX.Y.Z/` subdirs (each with a
+    /// `summary.json` from `export`) and write `<site-dir>/index.html`
+    /// — a cross-version MC/DC summary table (newest first, Δ vs
+    /// next-older) linking into each versioned dashboard. v0.26+.
+    PagesIndex {
+        /// The multi-version site root containing `vX.Y.Z/` dirs.
+        #[arg(long = "site-dir")]
+        site_dir: PathBuf,
+    },
+
     /// Emit a Markdown MC/DC coverage delta between two report sets
     /// (base vs head) for posting as a PR comment. Each of --base /
     /// --head may be a verdict-evidence directory or a single
@@ -134,6 +144,36 @@ async fn main() -> Result<()> {
                     out.display()
                 );
             }
+            Ok(())
+        }
+        Some(Command::PagesIndex { site_dir }) => {
+            if !site_dir.is_dir() {
+                anyhow::bail!("--site-dir {} is not a directory", site_dir.display());
+            }
+            let rows = witness_viz::pages_index::load_site_versions(&site_dir)
+                .with_context(|| format!("scanning {}", site_dir.display()))?;
+            let out = witness_viz::pages_index::render_pages_index(&rows);
+            // Landing page sits at the site root → depth 0 asset prefix,
+            // no API link, no HTMX.
+            let opts = witness_viz::layout::PageOpts {
+                asset_prefix: "_assets/",
+                overview_href: "index.html",
+                include_htmx: false,
+                include_api_link: false,
+            };
+            // The cross-version index needs its own _assets/ (each
+            // versioned dashboard has its own; the root has none yet).
+            let assets = site_dir.join("_assets");
+            std::fs::create_dir_all(&assets).context("create root _assets")?;
+            std::fs::write(assets.join("styles.css"), witness_viz::styles::CSS)
+                .context("write root styles.css")?;
+            let html = witness_viz::layout::page_with(&out.title, &out.body, &opts);
+            std::fs::write(site_dir.join("index.html"), html).context("write index.html")?;
+            tracing::info!(
+                "wrote cross-version index for {} release(s) → {}/index.html",
+                rows.len(),
+                site_dir.display()
+            );
             Ok(())
         }
         Some(Command::PrComment { base, head, out }) => {

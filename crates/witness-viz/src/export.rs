@@ -65,6 +65,14 @@ pub struct ExportSummary {
     /// page was emitted. Zero when `--source-root` is unset or no
     /// referenced file is readable.
     pub source_files: usize,
+    /// v0.26 — MC/DC aggregates summed over every verdict's `overall`
+    /// block, so the multi-version `pages-index` landing page can
+    /// build a cross-version table from each version's summary.json
+    /// alone (no need to re-load the evidence).
+    pub decisions_full_mcdc: usize,
+    pub conditions_proved: usize,
+    pub conditions_gap: usize,
+    pub conditions_dead: usize,
 }
 
 /// Walk the verdict tree and write static HTML.
@@ -84,6 +92,14 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
         verdicts: verdicts.len(),
         ..Default::default()
     };
+    // v0.26 — aggregate MC/DC totals across verdicts for summary.json.
+    for v in &verdicts {
+        let o = &v.report.overall;
+        summary.decisions_full_mcdc += o.decisions_full_mcdc as usize;
+        summary.conditions_proved += o.conditions_proved as usize;
+        summary.conditions_gap += o.conditions_gap as usize;
+        summary.conditions_dead += o.conditions_dead as usize;
+    }
 
     // depth 0 — index.html
     {
@@ -215,6 +231,8 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
     }
 
     // Manifest — tiny JSON so CI can assert non-empty / parse / etc.
+    // The MC/DC aggregates (v0.26) let `pages-index` build the
+    // cross-version table from each version's summary.json alone.
     let manifest = format!(
         r#"{{
   "tool": "witness-viz",
@@ -223,7 +241,11 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
   "bytes_written": {bytes},
   "verdicts": {v},
   "decisions": {d},
+  "decisions_full_mcdc": {dfm},
   "conditions": {c},
+  "conditions_proved": {cp},
+  "conditions_gap": {cg},
+  "conditions_dead": {cd},
   "source_files": {sf}
 }}
 "#,
@@ -232,7 +254,11 @@ pub fn run_export(opts: &ExportOpts) -> io::Result<ExportSummary> {
         bytes = summary.bytes_written,
         v = summary.verdicts,
         d = summary.decisions,
+        dfm = summary.decisions_full_mcdc,
         c = summary.conditions,
+        cp = summary.conditions_proved,
+        cg = summary.conditions_gap,
+        cd = summary.conditions_dead,
         sf = summary.source_files,
     );
     fs::write(opts.out_dir.join("summary.json"), manifest)?;

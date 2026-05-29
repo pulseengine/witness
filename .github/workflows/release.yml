@@ -519,45 +519,75 @@ jobs:
       - name: Build witness-viz binary
         run: cargo build --release --bin witness-viz --manifest-path crates/witness-viz/Cargo.toml
 
-      - name: Generate static MC/DC dashboard
+      # v0.26 — multi-version site (DEC-033). The current tag renders
+      # under dist/<VERSION>/ from the just-built compliance evidence
+      # WITH --source-root (its verdicts/ tree is the checkout). The
+      # two most-recent prior published releases are downloaded and
+      # rendered under dist/<tag>/ WITHOUT source (their decisions
+      # would mis-point against the moved-on verdicts/ tree). A
+      # cross-version landing page (witness-viz pages-index) ties them
+      # together at dist/index.html. `actions/deploy-pages` replaces
+      # the whole site each run, so the full tree is rebuilt here.
+      - name: Generate multi-version MC/DC dashboard
         env:
           GITHUB_REF: ${{ github.ref }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF#refs/tags/}"
-          # Find the verdict-evidence directory inside the unpacked
-          # archive — the compliance Action's layout has shifted across
-          # versions (sometimes nested under `compliance/`).
-          if [ -d evidence/verdict-evidence ]; then
-            REPORTS=evidence/verdict-evidence
-          elif [ -d evidence/compliance/verdict-evidence ]; then
-            REPORTS=evidence/compliance/verdict-evidence
-          else
-            echo "::error::can't locate verdict-evidence/ inside the compliance archive"
+          VIZ=./crates/witness-viz/target/release/witness-viz
+          mkdir -p dist
+
+          # Locate verdict-evidence inside an unpacked archive dir.
+          find_reports() {
+            if [ -d "$1/verdict-evidence" ]; then echo "$1/verdict-evidence";
+            elif [ -d "$1/compliance/verdict-evidence" ]; then echo "$1/compliance/verdict-evidence";
+            else return 1; fi
+          }
+
+          # --- current tag: render WITH source from the built evidence ---
+          REPORTS=$(find_reports evidence) || {
+            echo "::error::can't locate verdict-evidence/ for ${VERSION}"
             find evidence -maxdepth 3 -type d
             exit 1
-          fi
-          mkdir -p dist
-          # v0.24.1+ — `--source-root verdicts` resolves each verdict's
-          # source under verdicts/<verdict_name>/src/<basename>. Reports
-          # carry basename-only source_file (DWARF DW_AT_name), so the
-          # resolver is verdict-scoped (see DEC-031 / resolve_source_path).
-          # `--source-root .` (v0.24.0) found nothing because basenames
-          # don't resolve against the repo root. The compliance action
-          # checks out `ref: ${{ github.ref }}`, so verdicts/ is present.
-          ./crates/witness-viz/target/release/witness-viz \
-            --reports-dir "$REPORTS" \
-            export \
-            --out dist \
+          }
+          "$VIZ" --reports-dir "$REPORTS" export \
+            --out "dist/${VERSION}" \
             --site-title "witness ${VERSION}" \
             --source-root verdicts
-          # Sanity: every page parses (`xmllint --html` would be too
-          # strict for our `<meta>` shorthand; grep for the doctype is
-          # enough for "page wasn't truncated").
+          echo "::notice::rendered ${VERSION} (with source)"
+
+          # --- two most-recent PRIOR published releases, no source ---
+          # gh lists newest-first; the current tag's release may not be
+          # published yet (publish-pages races create-github-release),
+          # so it's handled above and excluded here.
+          PRIORS=$(gh release list --limit 30 --json tagName --jq '.[].tagName' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | grep -v "^${VERSION}$" | head -2 || true)
+          for tag in $PRIORS; do
+            rm -rf dl ev2
+            if ! gh release download "$tag" --pattern '*compliance-evidence*' --dir dl 2>/dev/null; then
+              echo "::warning::no compliance-evidence asset for $tag; skipping"
+              continue
+            fi
+            arc=$(find dl -name '*.tar.gz' -type f | head -1)
+            [ -n "$arc" ] || { echo "::warning::empty download for $tag"; continue; }
+            mkdir -p ev2 && tar -xzf "$arc" -C ev2
+            r=$(find_reports ev2) || { echo "::warning::no verdict-evidence in $tag"; continue; }
+            "$VIZ" --reports-dir "$r" export \
+              --out "dist/${tag}" \
+              --site-title "witness ${tag}"
+            echo "::notice::rendered ${tag} (no source)"
+          done
+
+          # --- cross-version landing page at dist/index.html ---
+          "$VIZ" pages-index --site-dir dist
+
+          # Sanity: every page starts with a doctype (not truncated).
           find dist -name '*.html' -print0 \
             | xargs -0 -I{} sh -c 'head -1 "{}" | grep -qi doctype || (echo "::error::{} missing doctype" && exit 1)'
-          ls dist
-          cat dist/summary.json
+          echo "=== site tree ===" && find dist -maxdepth 1
+          echo "=== landing index (head) ===" && head -40 dist/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
