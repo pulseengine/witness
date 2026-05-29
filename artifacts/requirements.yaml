@@ -820,21 +820,33 @@ artifacts:
 
   - id: REQ-052
     type: requirement
-    title: Inline call-chain visibility for inlined decisions
+    title: Per-condition provenance visibility
     status: approved
     description: >
-      When a decision's conditions are branches inlined from a
-      called function (rustc inlines `f()` into the call site, so
-      witness attributes f's branches to the call-site line), the
-      dashboard shall show, per condition, the inline call chain —
-      the `call_file:call_line` frames from the call site down to
-      where the branch actually lives. A reviewer seeing N
-      conditions on a line that contains a single function call can
-      then tell how deep the inlining went and which callee each
-      condition belongs to. The chain data already exists in
-      `manifest.json` (`branch_inline_chains`, built from DWARF
-      `DW_TAG_inlined_subroutine`); this requirement is about
-      surfacing it.
+      When a decision carries many conditions attributed to one
+      source line, the dashboard shall show, per condition, the
+      provenance that explains why: the (demangled) function the
+      branch lives in, the branch kind (`br_if` /
+      `br_table_target` / `br_table_default`), and — when the branch
+      was inlined — its DWARF inline call chain
+      (`call_file:call_line` frames). A reviewer seeing N conditions
+      on a line can then distinguish the common cases: a `br_table`
+      (a `match` compiled to one jump table — N arms at one byte
+      offset, no call, no depth) vs branches genuinely inlined from
+      a callee (which carry a non-empty chain).
+
+      Rationale-of-record: the motivating example (json_lite
+      decision #29, 29 conditions on one line) turned out to be a
+      `br_table` in `parse_primitive`, NOT an inlined `parse_string`
+      — all 29 share `byte_offset 1148` with `kind:
+      br_table_target/default` and have no inline chain. The earlier
+      framing ("inline call-chain visibility") was too narrow:
+      `branch_inline_chains` covers only the handful of genuinely
+      inlined branches (2 of 165 in json_lite), so chain-only
+      rendering would explain almost nothing. `function_name` +
+      `kind` from the manifest `branches[]` array is the signal that
+      actually answers "what am I looking at"; the inline chain is an
+      additional layer for the branches that have one.
     tags: [v0.27, viz, mcdc]
     fields:
       priority: should

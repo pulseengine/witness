@@ -356,7 +356,11 @@ pub fn render_decision(
     body.push_str(&render_truth_table(decision));
 
     body.push_str("<h2>Independent-effect pairs</h2>\n");
-    body.push_str(&render_conditions(ctx, decision, &bundle.name));
+    // v0.27 — provenance loaded once per decision page from the
+    // verdict's manifest.json (same I/O-via-ctx.reports_dir pattern
+    // as branch_count). Empty map ⇒ pages render exactly as pre-v0.27.
+    let provenance = data::load_branch_provenance(ctx.reports_dir, &bundle.name);
+    body.push_str(&render_conditions(ctx, decision, &bundle.name, &provenance));
 
     let _ = write!(
         body,
@@ -733,6 +737,7 @@ fn render_conditions(
     ctx: &RenderContext<'_>,
     decision: &DecisionReport,
     verdict_name: &str,
+    provenance: &std::collections::BTreeMap<u32, data::BranchProvenance>,
 ) -> String {
     let mut out = String::from("<ul class=\"conditions\">\n");
     for c in &decision.conditions {
@@ -767,9 +772,41 @@ fn render_conditions(
                 href = escape(&ctx.link_to_gap(verdict_name, decision.id, c.index)),
             );
         }
+        // v0.27 — per-condition provenance (DEC-035): which function
+        // the branch lives in, its kind (br_if vs br_table arm), and
+        // the inline call chain when one exists.
+        if let Some(prov) = provenance.get(&c.branch_id) {
+            out.push_str(&render_condition_provenance(prov));
+        }
         out.push_str("</li>\n");
     }
     out.push_str("</ul>\n");
+    out
+}
+
+/// Render the provenance line for one condition: function · kind,
+/// plus the inline call chain when present. Plain text — the value
+/// is the *fact* (this is a br_table arm in parse_primitive), not
+/// decoration.
+fn render_condition_provenance(prov: &data::BranchProvenance) -> String {
+    let mut out = String::from(r#"<div class="prov muted">"#);
+    if !prov.function.is_empty() {
+        let _ = write!(out, "<code>{}</code>", escape(&prov.function));
+    }
+    if !prov.kind.is_empty() {
+        let _ = write!(out, r#" · <span class="kind">{}</span>"#, escape(&prov.kind));
+    }
+    if !prov.inline_chain.is_empty() {
+        // Outermost (call site) first → leaf last, joined with ←.
+        let chain = prov
+            .inline_chain
+            .iter()
+            .map(|f| format!("{}:{}", escape(&f.call_file), f.call_line))
+            .collect::<Vec<_>>()
+            .join(" ← ");
+        let _ = write!(out, r#"<br><span class="inline-chain">inlined: {chain}</span>"#);
+    }
+    out.push_str("</div>");
     out
 }
 

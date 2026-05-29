@@ -41,6 +41,9 @@ clap = { version = "4", features = ["derive"] }
 # binary but enables Rust, C, C++, Swift, Kotlin, Zig, Go, etc. with
 # zero runtime config. See DEC-031.
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+# v0.27 — demangle Rust symbol names (legacy `_ZN…` + v0 `_R…`) for
+# the per-condition provenance display. Tiny, zero transitive deps.
+rustc-demangle = "0.1"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
