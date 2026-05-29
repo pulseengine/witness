@@ -7,6 +7,67 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-05-29
+
+Headline: **the published dashboard now hosts the last 3 releases
+side by side** with a cross-version MC/DC summary, instead of only
+the latest. Plus the inline source snippet is now
+syntax-highlighted and correctly single-spaced.
+
+### Added — multi-version Pages + `pages-index` (PR #61)
+
+The release `publish-pages` job auto-detects the last 3 release
+tags and builds a multi-version site:
+
+- Current tag renders under `/<VERSION>/` with `--source-root
+  verdicts` (source snippets + full files).
+- The 2 most-recent prior published releases are downloaded
+  (their `compliance-evidence` asset) and rendered under
+  `/<tag>/` without source (their decisions would mis-point
+  against the moved-on `verdicts/` tree).
+- A new `witness-viz pages-index --site-dir <dir>` (and `witness
+  viz-pages-index` passthrough) scans the `vX.Y.Z/` subdirs, reads
+  each `summary.json`, semver-sorts newest-first, and writes
+  `<dir>/index.html` — a cross-version table (verdicts /
+  decisions / full-MC/DC / proved / gap / dead / source files)
+  with Δ-vs-next-older annotations and links into each versioned
+  dashboard.
+
+`summary.json` gains the MC/DC aggregates
+(`decisions_full_mcdc`, `conditions_proved/gap/dead`) so the index
+builds from summary.json alone; `#[serde(default)]` keeps
+pre-v0.26 summaries loading.
+
+**Live-URL change:** `https://pulseengine.github.io/witness/` now
+shows the cross-version landing page; the latest dashboard moves
+to `/<VERSION>/`.
+
+New rivet artifacts: REQ-050, FEAT-030, DEC-033 (approved).
+
+### Fixed — inline snippet rendering (PR #60)
+
+The Decision/Gap inline source snippet was (1) double-spaced (a
+`writeln!` trailing `\n` *and* `display:block` both broke the
+line) and (2) plain text while the full-file page was
+syntax-highlighted. Extracted `highlight_source_lines` shared by
+both (highlights the whole file so multi-line constructs carry
+state, then the snippet slices its window); the snippet is now
+syntect-highlighted, single-spaced, with a `.ln` gutter matching
+the full-file page.
+
+### Known limitations (carried)
+
+- The inline **call chain** for inlined decisions (e.g. json_lite
+  decision #29's 29 conditions, all branches of an inlined
+  `parse_string`) is computed and present in `manifest.json`
+  (`branch_inline_chains`) but not yet rendered in the dashboard —
+  a reviewer sees *that* a line has N conditions but not *where*
+  each lives. Queued as a viz-only follow-up.
+- crates.io publish for `witness-core` / `witness` still blocked
+  by the `flammafex/Sibyl` name conflict.
+- 4 of 13 verdicts show no source (decisions attribute to
+  `~/.cargo` dependency files, not vendored under `verdicts/`).
+
 ## [0.25.0] — 2026-05-28
 
 Headline: **`witness viz-pr-comment`** — the PR-comment leg of the
