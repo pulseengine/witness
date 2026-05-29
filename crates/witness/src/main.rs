@@ -385,6 +385,15 @@ enum Command {
         source_root: Option<PathBuf>,
     },
 
+    /// Build the cross-version landing page for a multi-version Pages
+    /// site: scan <site-dir> for vX.Y.Z/ dirs (each with summary.json)
+    /// and write <site-dir>/index.html. Spawns witness-viz. v0.26+.
+    VizPagesIndex {
+        /// Multi-version site root containing vX.Y.Z/ dirs.
+        #[arg(long = "site-dir")]
+        site_dir: PathBuf,
+    },
+
     /// Emit a Markdown MC/DC coverage delta between two report sets
     /// (base vs head) for posting as a PR comment. Each path may be a
     /// verdict-evidence directory or a single report.json. Writes to
@@ -904,6 +913,7 @@ fn main() -> Result<()> {
         Command::VizPrComment { base, head, out } => {
             run_viz_pr_comment(&base, &head, out.as_deref())?
         }
+        Command::VizPagesIndex { site_dir } => run_viz_pages_index(&site_dir)?,
         Command::Viz {
             reports_dir,
             port,
@@ -1338,6 +1348,27 @@ fn run_viz_pr_comment(
     })?;
     if !status.success() {
         anyhow::bail!("witness-viz pr-comment exited with {status}");
+    }
+    Ok(())
+}
+
+fn run_viz_pages_index(site_dir: &std::path::Path) -> Result<()> {
+    let bin = std::env::var_os("WITNESS_VIZ_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("witness-viz"));
+    let status = std::process::Command::new(&bin)
+        .arg("pages-index")
+        .arg("--site-dir")
+        .arg(site_dir)
+        .status()
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to spawn witness-viz at '{}': {e}\n  hint: install with `cd crates/witness-viz && cargo install --path .`, or set WITNESS_VIZ_BIN to the binary path.",
+                bin.display()
+            )
+        })?;
+    if !status.success() {
+        anyhow::bail!("witness-viz pages-index exited with {status}");
     }
     Ok(())
 }

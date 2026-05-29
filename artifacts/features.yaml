@@ -627,3 +627,27 @@ artifacts:
         target: REQ-049
       - type: refines
         target: FEAT-024
+
+  - id: FEAT-030
+    type: feature
+    title: v0.26 — multi-version Pages + pages-index
+    status: approved
+    description: >
+      The release `publish-pages` job auto-detects the last 3 release
+      tags, downloads each release's compliance-evidence asset,
+      renders each with the *current* witness-viz to `dist/<vX.Y.Z>/`,
+      and runs a new `witness-viz pages-index --site-dir dist`
+      subcommand that scans the versioned subdirs, reads each
+      `summary.json`, semver-sorts, and emits `dist/index.html` — a
+      cross-version MC/DC summary table with Δ-vs-previous
+      annotations and links into each versioned dashboard. `summary.json`
+      is enriched with the MC/DC aggregates (full-MC/DC, proved, gap,
+      dead) the index table needs. Closes REQ-050.
+    tags: [v0.26, viz, pages]
+    fields:
+      phase: in-progress
+    links:
+      - type: satisfies
+        target: REQ-050
+      - type: refines
+        target: FEAT-024
