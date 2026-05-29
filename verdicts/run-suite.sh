@@ -41,7 +41,7 @@ SIGN="${SIGN:-1}"
 
 if [ ! -x "$WITNESS" ]; then
     echo "error: witness binary not found at '$WITNESS'." >&2
-    echo "  hint: cargo build --release -p witness" >&2
+    echo "  hint: cargo build --release -p witness-mcdc" >&2
     exit 1
 fi
 

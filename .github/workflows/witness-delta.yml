@@ -114,11 +114,11 @@ jobs:
 
       - name: Build witness (head)
         working-directory: head
-        run: cargo build --release -p witness
+        run: cargo build --release -p witness-mcdc
 
       - name: Build witness (base)
         working-directory: base
-        run: cargo build --release -p witness 2>/dev/null || echo "base build failed; treating as no-base"
+        run: cargo build --release -p witness-mcdc 2>/dev/null || echo "base build failed; treating as no-base"
 
       - name: Run verdict suite (head)
         run: |

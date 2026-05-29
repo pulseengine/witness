@@ -651,3 +651,49 @@ artifacts:
         target: REQ-050
       - type: refines
         target: FEAT-024
+
+  - id: FEAT-031
+    type: feature
+    title: v0.27 — rename crates to witness-mcdc-* + crates.io publish
+    status: approved
+    description: >
+      Rename the crates.io package names to the `witness-mcdc-*`
+      namespace (`witness` → `witness-mcdc`, `witness-core` →
+      `witness-mcdc-core`, `witness-viz` → `witness-mcdc-viz`;
+      `witness-mcdc-checker` already uses it), keeping every `[lib]`
+      name unchanged so no `use` statement changes, and keeping the
+      `[[bin]]` names (`witness`, `witness-viz`) so the installed
+      commands are unchanged. Publish the set to crates.io in
+      dependency order — the conflict that blocked publishing since
+      v0.23 (`flammafex/Sibyl` owns `witness` / `witness-core`) is
+      sidestepped. Closes REQ-051.
+    tags: [v0.27, packaging, crates-io]
+    fields:
+      phase: in-progress
+    links:
+      - type: satisfies
+        target: REQ-051
+
+  - id: FEAT-032
+    type: feature
+    title: v0.27 — inline call-chain rendering in viz
+    status: approved
+    description: >
+      The viz data model gains the per-branch inline call chain
+      parsed from `manifest.json` (`branch_inline_chains`:
+      `branch_id → [{call_file, call_line}, …]`). The Decision page
+      renders each condition's inline stack — from the call-site
+      frame down to the leaf where the branch lives — so 29
+      conditions attributed to one `parse_string(...)?` call line
+      become legible as the flattened call tree witness measured.
+      Frames whose file resolves under `--source-root` link to the
+      full-file source page at `#L<line>`; dependency-crate frames
+      (e.g. `~/.cargo` files) render as plain text. Closes REQ-052.
+    tags: [v0.27, viz, mcdc]
+    fields:
+      phase: in-progress
+    links:
+      - type: satisfies
+        target: REQ-052
+      - type: refines
+        target: FEAT-025

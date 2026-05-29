@@ -1154,3 +1154,72 @@ artifacts:
         target: REQ-050
       - type: refines
         target: DEC-029
+
+  - id: DEC-034
+    type: design-decision
+    title: Rename package names only — keep lib names, keep bin names
+    status: approved
+    description: >
+      The crate rename touches only `[package] name` and the
+      path-dependency keys that reference it. Every `[lib] name`
+      stays (`witness_core`, `witness_viz`, …) so no `use` statement
+      in the tree changes, and the `[[bin]]` names stay (`witness`,
+      `witness-viz`) so installed commands are unchanged. Cargo
+      decouples the three: crates.io identity (package name), the
+      `use` path (lib name), and the installed command (bin name).
+    rationale: >
+      The naive reading of "rename the crates" is a tree-wide churn
+      of every `use witness_core::…`. Cargo's three-way decoupling
+      means the rename is ~5 Cargo.toml edits with zero source
+      changes — the package name is only seen by crates.io and by
+      the `version = "…", package = "…"` form of a dependency.
+      Keeping `[[bin]] name = "witness"` means `cargo install
+      witness-mcdc` still yields a `witness` command, so the
+      namespace move is invisible to users. Minimal blast radius for
+      a packaging-only concern.
+    alternatives: >
+      Rename lib names too (witness_core → witness_mcdc_core) —
+      rejected as gratuitous source churn for no benefit; the lib
+      name is internal. Rename the bin to `witness-mcdc` — rejected
+      because it breaks every user's muscle memory and every doc's
+      `witness …` invocation for a crates.io-only problem. Negotiate
+      the `witness` crates.io name from flammafex — rejected as slow
+      and uncertain for a legitimate prior registration.
+    tags: [v0.27, packaging]
+    links:
+      - type: satisfies
+        target: REQ-051
+
+  - id: DEC-035
+    type: design-decision
+    title: Render inline chains from manifest.json, not a new pipeline
+    status: approved
+    description: >
+      Inline call-chain rendering reads `branch_inline_chains` out
+      of the existing `manifest.json` (which the viz already loads
+      for branch counts) and joins it to conditions by `branch_id`.
+      No witness-core change, no new evidence file, no report-schema
+      bump — witness-core already computes the chain from DWARF
+      `DW_TAG_inlined_subroutine` and writes it to the manifest. The
+      feature is purely the viz parsing a field that was already on
+      disk.
+    rationale: >
+      The data is already produced and already shipped in every
+      bundle; the only gap was presentational. Reading it where it
+      already lives avoids a schema change, keeps the report.json
+      contract stable for other consumers, and makes the feature a
+      viz-only PR. Joining by branch_id is the same stable-identity
+      discipline used elsewhere (DEC-032).
+    alternatives: >
+      Add the chain to report.json's condition records — rejected as
+      a schema change for data obtainable from the sibling manifest.
+      Recompute the chain in the viz from the Wasm + DWARF — rejected
+      as a gross duplication of witness-core's reconstruction. Emit a
+      new sidecar file — rejected; manifest.json is the established
+      home for per-branch metadata.
+    tags: [v0.27, viz, mcdc]
+    links:
+      - type: satisfies
+        target: REQ-052
+      - type: refines
+        target: DEC-031

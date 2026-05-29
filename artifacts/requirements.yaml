@@ -794,3 +794,48 @@ artifacts:
     fields:
       priority: should
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.27 — publishable crate names + inline call-chain visibility
+  # -------------------------------------------------------------------------
+  - id: REQ-051
+    type: requirement
+    title: Crates published under a conflict-free namespace
+    status: approved
+    description: >
+      The published crates shall use a namespace that does not
+      collide with an unrelated prior registration on crates.io, so
+      the whole set (`witness-mcdc`, `witness-mcdc-core`,
+      `witness-mcdc-viz`, `witness-mcdc-checker`) can be published.
+      The `witness` and `witness-core` names are taken by an
+      unrelated crate (`flammafex/Sibyl`); the `witness-mcdc-*`
+      namespace is free and already partly ours
+      (`witness-mcdc-checker`). The installed CLI binary name shall
+      remain `witness` — the namespace change is a crates.io
+      identity concern, not a user-facing command change.
+    tags: [v0.27, packaging, crates-io]
+    fields:
+      priority: should
+      category: non-functional
+
+  - id: REQ-052
+    type: requirement
+    title: Inline call-chain visibility for inlined decisions
+    status: approved
+    description: >
+      When a decision's conditions are branches inlined from a
+      called function (rustc inlines `f()` into the call site, so
+      witness attributes f's branches to the call-site line), the
+      dashboard shall show, per condition, the inline call chain —
+      the `call_file:call_line` frames from the call site down to
+      where the branch actually lives. A reviewer seeing N
+      conditions on a line that contains a single function call can
+      then tell how deep the inlining went and which callee each
+      condition belongs to. The chain data already exists in
+      `manifest.json` (`branch_inline_chains`, built from DWARF
+      `DW_TAG_inlined_subroutine`); this requirement is about
+      surfacing it.
+    tags: [v0.27, viz, mcdc]
+    fields:
+      priority: should
+      category: functional
