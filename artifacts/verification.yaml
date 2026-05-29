@@ -31,7 +31,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo test --release -p witness-core
+        - run: cargo test --release -p witness-mcdc-core
     links:
       - type: satisfies
         target: REQ-001
@@ -52,7 +52,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo test --release -p witness
+        - run: cargo test --release -p witness-mcdc
     links:
       - type: satisfies
         target: REQ-001
@@ -150,7 +150,7 @@ artifacts:
       method: automated-test
       steps:
         - run: verdicts/build-all.sh
-        - run: cargo build --release -p witness
+        - run: cargo build --release -p witness-mcdc
         - run: WITNESS=target/release/witness verdicts/run-suite.sh
     links:
       - type: satisfies
@@ -169,7 +169,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo build --release -p witness
+        - run: cargo build --release -p witness-mcdc
         - run: |
             for v in leap_year range_overlap triangle state_guard mixed_or_and safety_envelope parser_dispatch; do
               target/release/witness instrument "verdicts/$v/verdict_$v.wasm" -o "/tmp/witness_${v}.wasm" >/dev/null
