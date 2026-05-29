@@ -1,5 +1,7 @@
 [package]
-name = "witness-core"
+# v0.27.0 — renamed from `witness-core` (DEC-034). `[lib] name`
+# stays `witness_core` so `use witness_core` is unaffected.
+name = "witness-mcdc-core"
 description = "Pure-data algorithms for witness — instrument schema, decisions, diff, predicate, report, rivet evidence, LCOV emission. No wasmtime/walrus dependency; targets wasm32-wasip2."
 version.workspace = true
 edition.workspace = true
@@ -18,6 +20,7 @@ workspace = true
 # and cdylib (so `cargo build --target wasm32-wasip2` produces a
 # witness_core.wasm release asset).
 [lib]
+name = "witness_core"
 crate-type = ["lib", "cdylib"]
 
 [dependencies]

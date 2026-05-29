@@ -794,3 +794,60 @@ artifacts:
     fields:
       priority: should
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.27 — publishable crate names + inline call-chain visibility
+  # -------------------------------------------------------------------------
+  - id: REQ-051
+    type: requirement
+    title: Crates published under a conflict-free namespace
+    status: approved
+    description: >
+      The published crates shall use a namespace that does not
+      collide with an unrelated prior registration on crates.io, so
+      the whole set (`witness-mcdc`, `witness-mcdc-core`,
+      `witness-mcdc-viz`, `witness-mcdc-checker`) can be published.
+      The `witness` and `witness-core` names are taken by an
+      unrelated crate (`flammafex/Sibyl`); the `witness-mcdc-*`
+      namespace is free and already partly ours
+      (`witness-mcdc-checker`). The installed CLI binary name shall
+      remain `witness` — the namespace change is a crates.io
+      identity concern, not a user-facing command change.
+    tags: [v0.27, packaging, crates-io]
+    fields:
+      priority: should
+      category: non-functional
+
+  - id: REQ-052
+    type: requirement
+    title: Per-condition provenance visibility
+    status: approved
+    description: >
+      When a decision carries many conditions attributed to one
+      source line, the dashboard shall show, per condition, the
+      provenance that explains why: the (demangled) function the
+      branch lives in, the branch kind (`br_if` /
+      `br_table_target` / `br_table_default`), and — when the branch
+      was inlined — its DWARF inline call chain
+      (`call_file:call_line` frames). A reviewer seeing N conditions
+      on a line can then distinguish the common cases: a `br_table`
+      (a `match` compiled to one jump table — N arms at one byte
+      offset, no call, no depth) vs branches genuinely inlined from
+      a callee (which carry a non-empty chain).
+
+      Rationale-of-record: the motivating example (json_lite
+      decision #29, 29 conditions on one line) turned out to be a
+      `br_table` in `parse_primitive`, NOT an inlined `parse_string`
+      — all 29 share `byte_offset 1148` with `kind:
+      br_table_target/default` and have no inline chain. The earlier
+      framing ("inline call-chain visibility") was too narrow:
+      `branch_inline_chains` covers only the handful of genuinely
+      inlined branches (2 of 165 in json_lite), so chain-only
+      rendering would explain almost nothing. `function_name` +
+      `kind` from the manifest `branches[]` array is the signal that
+      actually answers "what am I looking at"; the inline chain is an
+      additional layer for the branches that have one.
+    tags: [v0.27, viz, mcdc]
+    fields:
+      priority: should
+      category: functional

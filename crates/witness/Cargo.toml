@@ -1,5 +1,12 @@
 [package]
-name = "witness"
+# v0.27.0 — renamed from `witness` to sidestep the crates.io conflict
+# with an unrelated prior registration (flammafex/Sibyl owns `witness`
+# / `witness-core`). The `witness-mcdc-*` namespace is free and partly
+# ours already (witness-mcdc-checker). The `[lib] name` and `[[bin]]
+# name` below are pinned to their old values, so neither `use witness`
+# nor the installed `witness` command changes — only the crates.io
+# package identity. See DEC-034.
+name = "witness-mcdc"
 description = "MC/DC-style branch coverage CLI for WebAssembly components."
 version.workspace = true
 edition.workspace = true
@@ -15,6 +22,13 @@ readme = "../../README.md"
 [lints]
 workspace = true
 
+# Pin the lib name to the old package name so `use witness::run`
+# (main.rs) and `use witness_core` consumers are unaffected by the
+# package rename (DEC-034).
+[lib]
+name = "witness"
+path = "src/lib.rs"
+
 [[bin]]
 name = "witness"
 path = "src/main.rs"
@@ -27,7 +41,7 @@ name = "cargo-witness"
 path = "src/bin/cargo-witness.rs"
 
 [dependencies]
-witness-core = { path = "../witness-core", version = "0.26.0" }
+witness-mcdc-core = { path = "../witness-core", version = "0.26.0" }
 walrus = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }

@@ -1154,3 +1154,82 @@ artifacts:
         target: REQ-050
       - type: refines
         target: DEC-029
+
+  - id: DEC-034
+    type: design-decision
+    title: Rename package names only — keep lib names, keep bin names
+    status: approved
+    description: >
+      The crate rename touches only `[package] name` and the
+      path-dependency keys that reference it. Every `[lib] name`
+      stays (`witness_core`, `witness_viz`, …) so no `use` statement
+      in the tree changes, and the `[[bin]]` names stay (`witness`,
+      `witness-viz`) so installed commands are unchanged. Cargo
+      decouples the three: crates.io identity (package name), the
+      `use` path (lib name), and the installed command (bin name).
+    rationale: >
+      The naive reading of "rename the crates" is a tree-wide churn
+      of every `use witness_core::…`. Cargo's three-way decoupling
+      means the rename is ~5 Cargo.toml edits with zero source
+      changes — the package name is only seen by crates.io and by
+      the `version = "…", package = "…"` form of a dependency.
+      Keeping `[[bin]] name = "witness"` means `cargo install
+      witness-mcdc` still yields a `witness` command, so the
+      namespace move is invisible to users. Minimal blast radius for
+      a packaging-only concern.
+    alternatives: >
+      Rename lib names too (witness_core → witness_mcdc_core) —
+      rejected as gratuitous source churn for no benefit; the lib
+      name is internal. Rename the bin to `witness-mcdc` — rejected
+      because it breaks every user's muscle memory and every doc's
+      `witness …` invocation for a crates.io-only problem. Negotiate
+      the `witness` crates.io name from flammafex — rejected as slow
+      and uncertain for a legitimate prior registration.
+    tags: [v0.27, packaging]
+    links:
+      - type: satisfies
+        target: REQ-051
+
+  - id: DEC-035
+    type: design-decision
+    title: Render provenance from manifest.json, not a new pipeline
+    status: approved
+    description: >
+      Per-condition provenance reads two maps out of the existing
+      `manifest.json` (which the viz already loads for branch
+      counts) and joins both to conditions by branch_id:
+      `branches[]` (`id → {function_name, kind, byte_offset}`) and
+      `branch_inline_chains` (`id → [{call_file, call_line}]`). No
+      witness-core change, no new evidence file, no report-schema
+      bump. The join key is the manifest branch `id`, which equals
+      the report condition's `branch_id` (verified against the
+      json_lite bundle: condition branch_ids and manifest branch ids
+      share one 0..N space). Function names are Rust-mangled (legacy
+      `_ZN…` and v0 `_R…`); rustc-demangle renders them readable.
+    rationale: >
+      The data is already produced and shipped in every bundle; the
+      only gap was presentational. The investigation that motivated
+      this (json_lite decision #29) showed the *useful* signal is
+      `function_name` + `kind` — a br_table's 29 arms all share one
+      byte_offset and have NO inline chain, so chain-only rendering
+      would have explained nothing. `branch_inline_chains` is sparse
+      (2 of 165 branches in json_lite); it's an additional layer for
+      the few genuinely-inlined branches, not the primary signal.
+      Reading from the sibling manifest keeps report.json's contract
+      stable and makes this a viz-only PR. rustc-demangle is the
+      standard, tiny, no-transitive-deps crate for the name rendering.
+    alternatives: >
+      Render only the inline chain (the original v0.27 plan) —
+      rejected after the data showed it covers ~1% of branches and
+      misses the br_table case entirely. Add provenance to
+      report.json's condition records — rejected as a schema change
+      for data obtainable from the sibling manifest. Recompute from
+      Wasm + DWARF in the viz — rejected as duplicating witness-core.
+      Hand-roll a demangler — rejected; rustc-demangle exists and is
+      correct for both mangling schemes.
+    tags: [v0.27, viz, mcdc]
+    links:
+      - type: satisfies
+        target: REQ-052
+      - type: refines
+        target: DEC-031

@@ -3187,7 +3187,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "witness"
+name = "witness-mcdc"
 version = "0.26.0"
 dependencies = [
  "anyhow",
@@ -3206,11 +3206,18 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wat",
- "witness-core",
+ "witness-mcdc-core",
 ]
 
 [[package]]
-name = "witness-core"
+name = "witness-mcdc-checker"
+version = "0.26.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
+name = "witness-mcdc-core"
 version = "0.26.0"
 dependencies = [
  "anyhow",
@@ -3230,13 +3237,6 @@ dependencies = [
  "wat",
  "witness-mcdc-checker",
  "wsc-attestation",
-]
-
-[[package]]
-name = "witness-mcdc-checker"
-version = "0.26.0"
-dependencies = [
- "proptest",
 ]
 
 [[package]]

@@ -174,3 +174,105 @@ fn manifest_branch_count(reports_dir: &std::path::Path, name: &str) -> Option<u3
     let branches = value.get("branches")?.as_array()?;
     u32::try_from(branches.len()).ok()
 }
+
+/// One frame of a DWARF inline call chain: where the inlined branch
+/// was called from. v0.27.
+#[derive(Debug, Clone)]
+pub struct InlineFrame {
+    pub call_file: String,
+    pub call_line: u32,
+}
+
+/// Per-branch provenance, joined from `manifest.json` by branch id
+/// (== the report condition's `branch_id`). v0.27 — explains *why* a
+/// condition exists: which function it lives in, whether it's a
+/// `br_if` or a `br_table` arm, and (rarely) its inline call chain.
+#[derive(Debug, Clone, Default)]
+pub struct BranchProvenance {
+    /// Demangled function name the branch lives in (e.g.
+    /// `verdict_json_lite::parse_primitive`).
+    pub function: String,
+    /// Branch kind from the manifest: `br_if`, `br_table_target`,
+    /// `br_table_default`, …
+    pub kind: String,
+    /// DWARF inline call chain, outermost (call site) first. Empty
+    /// for the common non-inlined case.
+    pub inline_chain: Vec<InlineFrame>,
+}
+
+/// Load per-branch provenance for a verdict from its `manifest.json`.
+/// Returns `branch_id → BranchProvenance`. Empty map when the
+/// manifest is absent or unparseable (the Decision page degrades to
+/// no provenance, same as pre-v0.27). v0.27.
+pub fn load_branch_provenance(
+    reports_dir: &std::path::Path,
+    name: &str,
+) -> BTreeMap<u32, BranchProvenance> {
+    let mut out = BTreeMap::new();
+    let manifest = reports_dir.join(name).join("manifest.json");
+    let Ok(bytes) = std::fs::read(&manifest) else {
+        return out;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return out;
+    };
+
+    // branches[] → function_name + kind, keyed by `id`.
+    if let Some(branches) = value.get("branches").and_then(|b| b.as_array()) {
+        for b in branches {
+            let Some(id) = b.get("id").and_then(serde_json::Value::as_u64) else {
+                continue;
+            };
+            let id = u32::try_from(id).unwrap_or(u32::MAX);
+            let raw_fn = b
+                .get("function_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            // `{:#}` drops the trailing `::h<hash>` disambiguator.
+            let function = format!("{:#}", rustc_demangle::demangle(raw_fn));
+            let kind = b
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            out.insert(
+                id,
+                BranchProvenance {
+                    function,
+                    kind,
+                    inline_chain: Vec::new(),
+                },
+            );
+        }
+    }
+
+    // branch_inline_chains: { "<id>": [{call_file, call_line}, …] }.
+    // Merge onto the entries already built from branches[].
+    if let Some(chains) = value
+        .get("branch_inline_chains")
+        .and_then(|c| c.as_object())
+    {
+        for (k, frames_v) in chains {
+            let Ok(id) = k.parse::<u32>() else { continue };
+            let frames: Vec<InlineFrame> = frames_v
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|f| {
+                            Some(InlineFrame {
+                                call_file: f.get("call_file")?.as_str()?.to_string(),
+                                call_line: u32::try_from(
+                                    f.get("call_line")?.as_u64().unwrap_or(0),
+                                )
+                                .unwrap_or(0),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.entry(id).or_default().inline_chain = frames;
+        }
+    }
+
+    out
+}

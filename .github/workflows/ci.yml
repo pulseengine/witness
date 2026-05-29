@@ -173,7 +173,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Build witness binary
-        run: cargo build --release -p witness
+        run: cargo build --release -p witness-mcdc
       - name: Build fixture wasm
         run: |
           chmod +x crates/witness/tests/fixtures/sample-rust-crate/build.sh
@@ -296,7 +296,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Build witness binary
-        run: cargo build --release -p witness
+        run: cargo build --release -p witness-mcdc
       - name: Run verdict suite
         run: |
           chmod +x verdicts/run-suite.sh

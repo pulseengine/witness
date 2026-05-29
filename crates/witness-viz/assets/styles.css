@@ -435,3 +435,24 @@ p.src-link {
   margin: -0.4em 0 1em 0;
   font-size: 0.85em;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   v0.27 — per-condition provenance (DEC-035). Shows which function a
+   branch lives in, its kind (br_if / br_table arm), and the inline
+   call chain when one exists. Muted so it sits under the condition
+   verdict without competing with it.
+   ────────────────────────────────────────────────────────────── */
+.conditions .prov {
+  font-size: 0.82em;
+  margin-top: 0.2rem;
+  line-height: 1.4;
+}
+.conditions .prov .kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+}
+.conditions .prov .inline-chain {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

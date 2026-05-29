@@ -651,3 +651,53 @@ artifacts:
         target: REQ-050
       - type: refines
         target: FEAT-024
+
+  - id: FEAT-031
+    type: feature
+    title: v0.27 — rename crates to witness-mcdc-* + crates.io publish
+    status: approved
+    description: >
+      Rename the crates.io package names to the `witness-mcdc-*`
+      namespace (`witness` → `witness-mcdc`, `witness-core` →
+      `witness-mcdc-core`, `witness-viz` → `witness-mcdc-viz`;
+      `witness-mcdc-checker` already uses it), keeping every `[lib]`
+      name unchanged so no `use` statement changes, and keeping the
+      `[[bin]]` names (`witness`, `witness-viz`) so the installed
+      commands are unchanged. Publish the set to crates.io in
+      dependency order — the conflict that blocked publishing since
+      v0.23 (`flammafex/Sibyl` owns `witness` / `witness-core`) is
+      sidestepped. Closes REQ-051.
+    tags: [v0.27, packaging, crates-io]
+    fields:
+      phase: in-progress
+    links:
+      - type: satisfies
+        target: REQ-051
+
+  - id: FEAT-032
+    type: feature
+    title: v0.27 — per-condition provenance rendering in viz
+    status: approved
+    description: >
+      The viz data model parses two per-branch maps from
+      `manifest.json` and joins them to conditions by branch_id:
+      (1) `branches[]` → `{function_name, kind}` (the function the
+      branch lives in + br_if / br_table_target / br_table_default),
+      and (2) `branch_inline_chains` → `[{call_file, call_line}, …]`
+      (the DWARF inline stack, present only for genuinely inlined
+      branches). The Decision page shows, per condition: the
+      demangled function name and kind, and — when present — the
+      inline chain. So json_lite decision #29 reads as "29 arms of a
+      br_table in parse_primitive" (the truth), and the 2 inlined
+      core:: branches additionally show their call stack. Inline-chain
+      frames whose file resolves under `--source-root` link to the
+      full-file source page at `#L<line>`. Demangling via
+      rustc-demangle. Closes REQ-052.
+    tags: [v0.27, viz, mcdc]
+    fields:
+      phase: in-progress
+    links:
+      - type: satisfies
+        target: REQ-052
+      - type: refines
+        target: FEAT-025
