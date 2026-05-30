@@ -1046,8 +1046,12 @@ fn scaffold_fixture(
 /// v0.9.12 — quickstart guide embedded at build time. Lets users on
 /// a fresh machine without the repo still run `witness quickstart`
 /// and get the full 10-minute walkthrough. Source of truth lives at
-/// `docs/quickstart.md`; the binary just bundles it.
-const QUICKSTART_TEXT: &str = include_str!("../../../docs/quickstart.md");
+/// `docs/quickstart.md`; `build.rs` stages it into OUT_DIR so this
+/// `include_str!` does not escape the crate directory (v0.27.1 —
+/// the old `../../../docs/...` path broke `cargo publish`, since the
+/// package tarball contains only the crate's own files). The
+/// crates.io build embeds a short online-pointer fallback instead.
+const QUICKSTART_TEXT: &str = include_str!(concat!(env!("OUT_DIR"), "/quickstart.md"));
 
 const SCAFFOLD_CARGO_TOML: &str = r#"[package]
 name = "verdict-{{NAME}}"

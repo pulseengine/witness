@@ -7,6 +7,31 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.27.1] — 2026-05-30
+
+Fix: the `witness` CLI crate (`witness-mcdc`) now publishes to
+crates.io. v0.27.0 published `witness-mcdc-checker`,
+`witness-mcdc-core`, and `witness-mcdc-viz`, but `witness-mcdc`
+itself failed the publish-verify step.
+
+### Fixed — quickstart embed escaped the crate directory
+
+`witness quickstart` embeds `docs/quickstart.md` via `include_str!`.
+The path (`../../../docs/quickstart.md`) reaches outside the crate,
+which is fine in-workspace but fatal for `cargo publish`: the
+package tarball contains only the crate's own files, so the include
+target is absent and verification fails. Fixed with a `build.rs`
+that stages the canonical doc into `OUT_DIR` (so the `include_str!`
+path stays inside the package) and falls back to a short
+online-pointer when `docs/` isn't present — the crates.io build
+embeds the pointer, while in-workspace and release-tarball builds
+embed the full walkthrough. Single source of truth preserved
+(`docs/quickstart.md`); no duplication.
+
+With this, all four crates publish at 0.27.1 — the first
+fully-published set since v0.23. The installed CLI is still
+`witness`.
+
 ## [0.27.0] — 2026-05-29
 
 Headline: **crates published to crates.io again** (under the
