@@ -136,22 +136,37 @@ jobs:
             echo "base does not have verdict suite (probably pre-v0.6.3); skipping base side"
           fi
 
-      - name: Compute verdict-suite delta
+      # Dogfood: build witness-viz (head, standalone workspace) so we
+      # report the MC/DC coverage delta with witness's own
+      # `viz-pr-comment` instead of a bespoke script.
+      - name: Build witness-viz (head)
+        working-directory: head/crates/witness-viz
+        run: cargo build --release --bin witness-viz
+
+      - name: Compute MC/DC delta (witness viz-pr-comment)
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p delta-out
-          python3 head/.github/workflows/scripts/verdict_delta.py \
-            delta-base delta-head delta-out/verdict-delta.md \
-            || echo "delta script unavailable; skipping comment body"
+          # viz-pr-comment consumes the run-suite.sh layout
+          # (<dir>/<verdict>/report.json) directly. base/ may lack the
+          # suite on pre-v0.6.3 PRs → no delta-base; fall back to a
+          # head-vs-head snapshot so the step posts current numbers
+          # rather than erroring on a missing dir.
+          BASE_ARG=delta-base
+          [ -d delta-base ] || BASE_ARG=delta-head
+          head/crates/witness-viz/target/release/witness-viz pr-comment \
+            --base "$BASE_ARG" --head delta-head \
+            --out delta-out/mcdc-delta.md \
+            || echo "viz-pr-comment unavailable; skipping comment body"
 
       - name: Post comment
-        if: ${{ hashFiles('delta-out/verdict-delta.md') != '' }}
+        if: ${{ hashFiles('delta-out/mcdc-delta.md') != '' }}
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('delta-out/verdict-delta.md', 'utf8');
-            const marker = '<!-- witness-verdict-delta -->';
+            const body = fs.readFileSync('delta-out/mcdc-delta.md', 'utf8');
+            const marker = '<!-- witness-mcdc-delta -->';
             const fullBody = `${marker}\n${body}`;
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
@@ -163,10 +178,10 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body: fullBody });
             }
 
-      - name: Upload verdict-delta artifact
+      - name: Upload mcdc-delta artifact
         uses: actions/upload-artifact@v4
         with:
-          name: witness-verdict-delta-pr-${{ github.event.pull_request.number }}
+          name: witness-mcdc-delta-pr-${{ github.event.pull_request.number }}
           path: delta-out/
           retention-days: 14
           if-no-files-found: warn

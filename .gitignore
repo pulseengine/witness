@@ -32,3 +32,4 @@ tests/playwright/.last-run.json
 # Local smoke-test output from tools/run_verification.py.
 verification-results.json
 
+*.wasm.map
