@@ -7,6 +7,69 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-05-29
+
+Headline: **crates published to crates.io again** (under the
+`witness-mcdc-*` namespace), and **per-condition provenance** in
+the dashboard — each condition now shows which function its branch
+lives in, the branch kind, and the inline call chain when one
+exists.
+
+### Added — per-condition provenance (PR #63, FEAT-032)
+
+The Decision page shows, under each condition, the provenance
+joined from `manifest.json`: the demangled **function** the branch
+lives in, its **kind** (`br_if` / `br_table_target` /
+`br_table_default`), and — when the branch was genuinely inlined —
+its DWARF **inline call chain** (`a.rs:1 ← b.rs:2`).
+
+This answers "what are these N conditions on one line?" The
+motivating example (json_lite decision #29, 29 conditions) reads
+as `verdict_json_lite::parse_primitive · br_table_target` ×29 —
+i.e. the 29 arms of a `match` compiled to one `br_table`, not an
+inlined call. (The investigation corrected an earlier assumption:
+`branch_inline_chains` covers only genuinely-inlined branches — 2
+of 165 in json_lite — so `function + kind` is the primary signal,
+the chain a bonus layer. See REQ-052 / DEC-035.) Viz-only: parses
+the existing manifest, no witness-core change, no schema bump.
+Degrades to pre-v0.27 output when no manifest is present. Adds
+`rustc-demangle`.
+
+### Changed — crates renamed to `witness-mcdc-*` (PR #63, FEAT-031)
+
+To sidestep the crates.io name conflict that blocked publishing
+since v0.23 (an unrelated prior registration owns `witness` /
+`witness-core`):
+
+| crates.io package | was |
+|---|---|
+| `witness-mcdc` | `witness` |
+| `witness-mcdc-core` | `witness-core` |
+| `witness-mcdc-viz` | `witness-viz` |
+| `witness-mcdc-checker` | (unchanged) |
+
+**Package-name change only (DEC-034).** Every `[lib] name` and
+`[[bin]] name` is unchanged, so `use witness` / `use witness_core`
+compile untouched and `cargo install witness-mcdc` still installs
+a `witness` command. CI, the verdict-suite runner, and the rivet
+`verification.yaml` oracle were updated to the new `-p` specs.
+
+### Published to crates.io
+
+`witness-mcdc-checker`, `witness-mcdc-core`, `witness-mcdc`,
+`witness-mcdc-viz` — the first full-set publish since v0.23. The
+installed CLI is still `witness` (and `witness-viz`).
+
+New rivet artifacts: REQ-051/052, FEAT-031/032, DEC-034/035
+(approved).
+
+### Known limitations (carried)
+
+- 4 of 13 verdicts show no source on the dashboard (decisions
+  attribute to `~/.cargo` dependency files, not vendored under
+  `verdicts/`).
+- Kotlin/Wasm still produces 0 decisions (kotlinc `if`/`else`).
+
 ## [0.26.0] — 2026-05-29
 
 Headline: **the published dashboard now hosts the last 3 releases
