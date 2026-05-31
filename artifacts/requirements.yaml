@@ -851,3 +851,37 @@ artifacts:
     fields:
       priority: should
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.28 — first-class wasip2 / Component-Model input
+  # -------------------------------------------------------------------------
+  - id: REQ-053
+    type: requirement
+    title: Instrument wasip2 components without a manual unbundle step
+    status: approved
+    description: >
+      `witness instrument` (and `witness all`) shall accept a Wasm
+      Component (e.g. the output of `cargo build --target
+      wasm32-wasip2`) directly: when given a component, the tool
+      extracts the embedded core module and instruments that, rather
+      than erroring with a manual `wasm-tools component unbundle`
+      instruction. This removes the friction that made wasm32-wasip2
+      — the ecosystem-direction target — a second-class citizen.
+
+      Selection: `instrument` runs before any export is named
+      (exports are given at `run` time), so it cannot pick by target
+      export. It extracts the SOLE embedded core module — which is
+      exactly what a leaf/computational wasip2 build produces.
+
+      Scope (honest bound): this serves leaf / computational
+      functions whose extracted core module is self-contained (no
+      Component-Model/p2 imports — the common MC/DC case, verified:
+      a no-syscall function's wasip2 core has zero imports and runs
+      under witness's existing preview1 runtime). A component with
+      multiple core modules (a preview1→p2 adapter beside the main
+      module — the syscall-heavy case) is out of scope and routes to
+      wasm32-wasip1 with a clear message rather than failing obscurely.
+    tags: [v0.28, instrument, wasip2, component-model]
+    fields:
+      priority: should
+      category: functional

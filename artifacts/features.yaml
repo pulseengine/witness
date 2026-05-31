@@ -701,3 +701,30 @@ artifacts:
         target: REQ-052
       - type: refines
         target: FEAT-025
+
+  - id: FEAT-033
+    type: feature
+    title: v0.28 — auto-unbundle wasip2 components on instrument
+    status: approved
+    phase: phase-3
+    acceptance-criteria:
+      - "Given a wasm32-wasip2 component exporting is_leap, `witness instrument <component>` succeeds (no InputIsComponent error) and produces an instrumented core module."
+      - "Given that instrumented module, `witness run --invoke-with-args is_leap:2024 …` records branch counters and `witness report` shows is_leap coverage."
+      - "Given a component with multiple embedded core modules (preview1→p2 adapter present), witness emits a clear 'multiple core modules; build for wasm32-wasip1 instead' error rather than guessing or failing obscurely."
+    description: >
+      When `witness instrument` is handed a Component, it walks the
+      component with wasmparser and extracts the embedded core module
+      from Payload::ModuleSection, then instruments it with the
+      existing walrus path. Because `instrument` runs before any
+      export is named, it extracts the SOLE core module (the
+      leaf/computational case); a component with multiple core
+      modules errors clearly toward wasm32-wasip1. In-process — no
+      shell-out to wasm-tools, no new runtime dependency. The
+      preview1 run path is unchanged. Closes REQ-053. Also fixes the
+      stale `InputIsComponent` message (it suggested the removed
+      `wasm-tools component unbundle --module-out` flag; current
+      wasm-tools uses `--module-dir`).
+    tags: [v0.28, instrument, wasip2, component-model]
+    links:
+      - type: satisfies
+        target: REQ-053

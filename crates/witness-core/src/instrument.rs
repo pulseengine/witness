@@ -445,6 +445,56 @@ fn discover_source_map(
     std::fs::read(&sidecar).ok()
 }
 
+/// v0.28 (DEC-036) — extract the sole embedded core module from a Wasm
+/// Component, in-process via `wasmparser` (no shell-out to wasm-tools).
+/// Each top-level `Payload::ModuleSection` is a directly-embedded core
+/// module; `unchecked_range` is its byte span within the component, so
+/// the slice is a standalone core module. `instrument` runs before any
+/// export is named, so we can't select by target export — we require
+/// exactly one core module (the leaf/computational wasip2 case). Zero
+/// or several (a preview1→p2 adapter beside the main module — the
+/// syscall-heavy case) is an honest `ComponentUnbundle` error toward
+/// wasm32-wasip1.
+fn extract_sole_core_module(component_bytes: &[u8], input: &Path) -> Result<Vec<u8>> {
+    use wasmparser::{Parser, Payload};
+
+    let mut cores: Vec<Vec<u8>> = Vec::new();
+    for payload in Parser::new(0).parse_all(component_bytes) {
+        let payload = payload.map_err(|e| Error::ComponentUnbundle {
+            path: input.to_path_buf(),
+            detail: format!("failed to parse component: {e}"),
+        })?;
+        if let Payload::ModuleSection { unchecked_range, .. } = payload {
+            match component_bytes.get(unchecked_range) {
+                Some(slice) => cores.push(slice.to_vec()),
+                None => {
+                    return Err(Error::ComponentUnbundle {
+                        path: input.to_path_buf(),
+                        detail: "embedded core-module range out of bounds".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    let count = cores.len();
+    let mut it = cores.into_iter();
+    match (it.next(), count) {
+        (Some(core), 1) => Ok(core),
+        (None, _) => Err(Error::ComponentUnbundle {
+            path: input.to_path_buf(),
+            detail: "no embedded core module found".to_string(),
+        }),
+        (Some(_), n) => Err(Error::ComponentUnbundle {
+            path: input.to_path_buf(),
+            detail: format!(
+                "{n} embedded core modules (a preview1→p2 adapter is likely present); \
+                 single-module auto-unbundle does not apply"
+            ),
+        }),
+    }
+}
+
 /// Instrument the Wasm module at `input`, writing the instrumented module
 /// to `output` and a branch manifest alongside it.
 pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
@@ -453,26 +503,24 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
         source,
     })?;
 
-    // v0.9.4 — preflight: distinguish a Wasm Component from a core
-    // module before walrus tries (and fails with an opaque "not
-    // supported yet"). Wasm magic + version word:
+    // v0.9.4 preflight / v0.28 auto-unbundle: distinguish a Wasm
+    // Component from a core module before walrus tries (walrus parses
+    // core modules only). Wasm magic + version word:
     //   core module:  \0asm \01 \00 \00 \00
     //   component:    \0asm \0d \00 \01 \00   (DraftD, v1)
-    // Both share the first 4 bytes; bytes 4..8 disambiguate. Anything
-    // else falls through to walrus's normal parse error.
-    if let Some(header) = original_bytes.first_chunk::<8>()
+    // Both share the first 4 bytes; bytes 4..8 disambiguate. When the
+    // input is a component, transparently extract its sole embedded
+    // core module and instrument that (DEC-036); everything
+    // downstream (source-map discovery, original_module_sha256) then
+    // operates on the core module, which is what actually ran.
+    let original_bytes = if let Some(header) = original_bytes.first_chunk::<8>()
         && &header[0..4] == b"\0asm"
+        && (header[6] == 0x01 || header[4] >= 0x0a)
     {
-        let kind_byte = header[4];
-        let layer_byte = header[6];
-        // Core modules: byte4=0x01, layer byte=0x00.
-        // Components:   byte4=0x0d (current draft), layer byte=0x01.
-        if layer_byte == 0x01 || kind_byte >= 0x0a {
-            return Err(Error::InputIsComponent {
-                path: input.to_path_buf(),
-            });
-        }
-    }
+        extract_sole_core_module(&original_bytes, input)?
+    } else {
+        original_bytes
+    };
 
     let mut module = Module::from_buffer(&original_bytes).map_err(|source| Error::ParseModule {
         path: input.to_path_buf(),
@@ -2279,14 +2327,18 @@ mod tests {
         assert_eq!(trace_pages_from_env(), TRACE_DEFAULT_PAGES);
     }
 
-    /// v0.9.4 — Wasm Component magic gets a friendly preflight error
-    /// instead of walrus's opaque "not supported yet". Synthetic header
-    /// is enough to exercise the branch — we don't need a real Component.
+    /// v0.28 — a Component with no extractable single core module gets
+    /// the friendly `ComponentUnbundle` error (toward wasip1), not a
+    /// crash. This synthetic header is a degenerate component (no
+    /// embedded core module), so it hits the "no core module" /
+    /// parse-failure branch. The happy path (real single-module
+    /// wasip2 component → instruments successfully) is covered by the
+    /// integration test with a real fixture.
     #[test]
-    fn component_input_returns_friendly_preflight_error() {
+    fn degenerate_component_returns_unbundle_error() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         // Component header: \0asm followed by version byte 0x0d and
-        // layer byte 0x01 (DraftD).
+        // layer byte 0x01 (DraftD) — no embedded module sections.
         let header: [u8; 12] = [
             b'\0', b'a', b's', b'm', 0x0d, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
@@ -2295,10 +2347,10 @@ mod tests {
         let out = tmp.path().with_extension("inst.wasm");
         let result = instrument_file(tmp.path(), &out);
         match result {
-            Err(crate::error::Error::InputIsComponent { path }) => {
+            Err(crate::error::Error::ComponentUnbundle { path, .. }) => {
                 assert_eq!(path, tmp.path().to_path_buf());
             }
-            Err(other) => panic!("expected InputIsComponent, got {other:?}"),
+            Err(other) => panic!("expected ComponentUnbundle, got {other:?}"),
             Ok(()) => panic!("expected error, got Ok"),
         }
     }
@@ -2316,6 +2368,66 @@ mod tests {
         std::fs::write(tmp.path(), wat::parse_str(wat_src).unwrap()).unwrap();
         let out = tmp.path().with_extension("inst.wasm");
         instrument_file(tmp.path(), &out).expect("core module should pass preflight");
+    }
+
+    /// v0.28 — `extract_sole_core_module` pulls a valid, walrus-parseable
+    /// core module out of a single-module component.
+    #[test]
+    fn extract_sole_core_module_yields_valid_core() {
+        let comp = wat::parse_str(r#"(component (core module (func (export "f"))))"#).unwrap();
+        assert_eq!(comp[6], 0x01, "fixture should be a component");
+        let core =
+            extract_sole_core_module(&comp, std::path::Path::new("t")).expect("extract core");
+        assert_eq!(&core[0..4], b"\0asm");
+        assert_eq!(core[4], 0x01, "extracted bytes should be a core module");
+        walrus::Module::from_buffer(&core).expect("extracted core re-parses under walrus");
+    }
+
+    /// v0.28 — a single-module component auto-unbundles and instruments
+    /// end-to-end; the embedded core's if/else becomes branch entries.
+    #[test]
+    fn single_module_component_auto_unbundles_and_instruments() {
+        let comp_wat = r#"(component
+            (core module
+                (func (export "pick") (param i32) (result i32)
+                    local.get 0
+                    (if (result i32) (then i32.const 1) (else i32.const 0)))))"#;
+        let comp = wat::parse_str(comp_wat).unwrap();
+        assert_eq!(comp[6], 0x01, "fixture should be a component");
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), &comp).unwrap();
+        let out = tmp.path().with_extension("inst.wasm");
+        instrument_file(tmp.path(), &out)
+            .expect("single-module component should auto-unbundle + instrument");
+
+        // Instrumentation ran on the unbundled core — the if/else yields
+        // at least one branch in the manifest.
+        let manifest = Manifest::load(&Manifest::path_for(&out)).expect("manifest");
+        assert!(
+            !manifest.branches.is_empty(),
+            "embedded if/else should produce >=1 branch entry"
+        );
+    }
+
+    /// v0.28 — a component with multiple core modules (adapter present —
+    /// the syscall-heavy case) errors clearly toward wasip1 rather than
+    /// guessing which module to instrument.
+    #[test]
+    fn multi_module_component_errors_toward_wasip1() {
+        let comp_wat = r#"(component
+            (core module (func (export "a")))
+            (core module (func (export "b"))))"#;
+        let comp = wat::parse_str(comp_wat).unwrap();
+        match extract_sole_core_module(&comp, std::path::Path::new("t")) {
+            Err(crate::error::Error::ComponentUnbundle { detail, .. }) => {
+                assert!(
+                    detail.contains("2 embedded core modules"),
+                    "detail should name the count: {detail}"
+                );
+            }
+            other => panic!("expected ComponentUnbundle, got {other:?}"),
+        }
     }
 
     /// v0.10.0 (item 2) — `instrument_file` records the
