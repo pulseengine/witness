@@ -912,7 +912,7 @@ artifacts:
   - id: DEC-028
     type: design-decision
     title: Pure-render seam — single core for serve + export
-    status: approved
+    status: implemented
     description: >
       Dashboard rendering is split into `crate::render` (pure,
       borrow-only `RenderContext`, returns
@@ -952,7 +952,7 @@ artifacts:
   - id: DEC-029
     type: design-decision
     title: GitHub Pages publish via actions/deploy-pages + v* tag policy
-    status: approved
+    status: implemented
     description: >
       On every `v*` tag push, release.yml runs a `publish-pages` job
       that downloads the compliance-evidence archive, builds
@@ -990,7 +990,7 @@ artifacts:
   - id: DEC-030
     type: design-decision
     title: Walrus 0.26.3 unpin — upstream PR #316 merged
-    status: approved
+    status: implemented
     description: >
       The pulseengine/walrus@ae623af git pin carried since v0.21 is
       reverted; witness now depends on crates.io `walrus = "0.26.3"`
@@ -1017,7 +1017,7 @@ artifacts:
   - id: DEC-031
     type: design-decision
     title: Hybrid source rendering — inline snippet + full-file page
-    status: approved
+    status: implemented
     description: >
       Source visibility in the v0.24 viz dashboard is two-tier:
       (1) inline snippet on each Decision and Gap page, showing ±5
@@ -1073,7 +1073,7 @@ artifacts:
   - id: DEC-032
     type: design-decision
     title: pr-comment delta — match by name / id / index, no fuzzy diff
-    status: approved
+    status: implemented
     description: >
       The pr-comment delta matches base↔head verdicts by name,
       decisions within a verdict by `id`, and conditions within a
@@ -1113,7 +1113,7 @@ artifacts:
   - id: DEC-033
     type: design-decision
     title: Multi-version Pages — rebuild whole site each deploy
-    status: approved
+    status: implemented
     description: >
       `actions/deploy-pages` publishes an immutable artifact that
       replaces the entire site each run, so multi-version hosting
@@ -1158,7 +1158,7 @@ artifacts:
   - id: DEC-034
     type: design-decision
     title: Rename package names only — keep lib names, keep bin names
-    status: approved
+    status: implemented
     description: >
       The crate rename touches only `[package] name` and the
       path-dependency keys that reference it. Every `[lib] name`
@@ -1193,7 +1193,7 @@ artifacts:
   - id: DEC-035
     type: design-decision
     title: Render provenance from manifest.json, not a new pipeline
-    status: approved
+    status: implemented
     description: >
       Per-condition provenance reads two maps out of the existing
       `manifest.json` (which the viz already loads for branch

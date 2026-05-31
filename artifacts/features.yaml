@@ -494,7 +494,7 @@ artifacts:
   - id: FEAT-024
     type: feature
     title: v0.23 — static MC/DC dashboard export
-    status: approved
+    status: implemented
     description: >
       `witness viz-export --reports-dir <…> --out <…>` walks every
       page of the witness-viz dashboard through the pure renderer
@@ -510,7 +510,7 @@ artifacts:
       (DEC-029).
     tags: [v0.23, viz, export]
     fields:
-      phase: shipped
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-044
@@ -520,7 +520,7 @@ artifacts:
   - id: FEAT-025
     type: feature
     title: v0.24 — source visibility in viz dashboard
-    status: proposed
+    status: implemented
     description: >
       Decision and Gap pages of the static dashboard render the
       underlying source code inline (±5 lines around the recorded
@@ -533,7 +533,7 @@ artifacts:
       v0.23 left open.
     tags: [v0.24, viz, source, pr-review]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-045
@@ -543,7 +543,7 @@ artifacts:
   - id: FEAT-026
     type: feature
     title: v0.22 — release-artefact standardisation per org-wide brief
-    status: approved
+    status: implemented
     description: >
       Every tagged release ships the asset set the org-wide
       release-artefact brief mandates: per-platform binary archives
@@ -558,7 +558,7 @@ artifacts:
       signing.
     tags: [v0.22, release, supply-chain]
     fields:
-      phase: shipped
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-046
@@ -566,7 +566,7 @@ artifacts:
   - id: FEAT-027
     type: feature
     title: v0.23 — `cargo witness all` end-to-end pipeline subcommand
-    status: approved
+    status: implemented
     description: >
       Single `witness all` / `cargo witness all` invocation runs the
       entire pipeline — instrument → run → report → predicate →
@@ -577,7 +577,7 @@ artifacts:
       alias shim) shipped earlier in the same window.
     tags: [v0.23, cli, ergonomics]
     fields:
-      phase: shipped
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-047
@@ -585,7 +585,7 @@ artifacts:
   - id: FEAT-028
     type: feature
     title: v0.23 — V3 source-map fallback for DWARF-less languages
-    status: approved
+    status: implemented
     description: >
       witness-core now reads V3 source maps (.wasm.map sidecars,
       TC39-compatible) as a fallback source-line attribution backend
@@ -598,7 +598,7 @@ artifacts:
       tracked separately as known-limitation).
     tags: [v0.23, source-attribution]
     fields:
-      phase: shipped
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-048
@@ -606,7 +606,7 @@ artifacts:
   - id: FEAT-029
     type: feature
     title: v0.25 — viz pr-comment Markdown delta
-    status: approved
+    status: implemented
     description: >
       `witness viz-pr-comment --base <dir-or-report> --head
       <dir-or-report>` loads two report sets (a verdict-evidence
@@ -621,7 +621,7 @@ artifacts:
       dashboard (FEAT-024 / FEAT-025).
     tags: [v0.25, viz, pr-review]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-049
@@ -631,7 +631,7 @@ artifacts:
   - id: FEAT-030
     type: feature
     title: v0.26 — multi-version Pages + pages-index
-    status: approved
+    status: implemented
     description: >
       The release `publish-pages` job auto-detects the last 3 release
       tags, downloads each release's compliance-evidence asset,
@@ -645,7 +645,7 @@ artifacts:
       dead) the index table needs. Closes REQ-050.
     tags: [v0.26, viz, pages]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-050
@@ -655,7 +655,7 @@ artifacts:
   - id: FEAT-031
     type: feature
     title: v0.27 — rename crates to witness-mcdc-* + crates.io publish
-    status: approved
+    status: implemented
     description: >
       Rename the crates.io package names to the `witness-mcdc-*`
       namespace (`witness` → `witness-mcdc`, `witness-core` →
@@ -669,7 +669,7 @@ artifacts:
       sidestepped. Closes REQ-051.
     tags: [v0.27, packaging, crates-io]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-051
@@ -677,7 +677,7 @@ artifacts:
   - id: FEAT-032
     type: feature
     title: v0.27 — per-condition provenance rendering in viz
-    status: approved
+    status: implemented
     description: >
       The viz data model parses two per-branch maps from
       `manifest.json` and joins them to conditions by branch_id:
@@ -695,7 +695,7 @@ artifacts:
       rustc-demangle. Closes REQ-052.
     tags: [v0.27, viz, mcdc]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-052

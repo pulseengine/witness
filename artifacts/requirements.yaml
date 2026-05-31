@@ -666,7 +666,7 @@ artifacts:
   - id: REQ-044
     type: requirement
     title: Zero-infrastructure PR-time MC/DC viewing
-    status: approved
+    status: implemented
     description: >
       The system shall produce a browseable MC/DC dashboard that can
       be served from a static host (GitHub Pages, an S3 bucket,
@@ -683,7 +683,7 @@ artifacts:
   - id: REQ-045
     type: requirement
     title: Source visibility in MC/DC reports
-    status: approved
+    status: implemented
     description: >
       Each Decision and Gap page in the dashboard shall make the
       underlying source line(s) directly visible to the reviewer
@@ -703,7 +703,7 @@ artifacts:
   - id: REQ-046
     type: requirement
     title: Release-artefact standardisation (org-wide brief)
-    status: approved
+    status: implemented
     description: >
       Every tagged release shall ship the asset set the org-wide
       release-artefact brief mandates: per-platform binary archives
@@ -721,7 +721,7 @@ artifacts:
   - id: REQ-047
     type: requirement
     title: End-to-end pipeline via single subcommand
-    status: approved
+    status: implemented
     description: >
       The system shall provide a single `witness all` / `cargo
       witness all` invocation that runs the entire pipeline —
@@ -737,7 +737,7 @@ artifacts:
   - id: REQ-048
     type: requirement
     title: Source attribution for DWARF-less languages
-    status: approved
+    status: implemented
     description: >
       The system shall reconstruct Decision source attribution from
       V3 source maps (`.wasm.map` sidecars) when DWARF is absent or
@@ -756,7 +756,7 @@ artifacts:
   - id: REQ-049
     type: requirement
     title: PR-time MC/DC coverage delta comment
-    status: approved
+    status: implemented
     description: >
       The system shall emit a Markdown summary of the MC/DC coverage
       delta between two report sets (base vs head) suitable for
@@ -780,7 +780,7 @@ artifacts:
   - id: REQ-050
     type: requirement
     title: Multi-version dashboard hosting with cross-version summary
-    status: approved
+    status: implemented
     description: >
       The published dashboard shall host the most recent N releases
       (N=3) side by side rather than only the latest, each at a
@@ -801,7 +801,7 @@ artifacts:
   - id: REQ-051
     type: requirement
     title: Crates published under a conflict-free namespace
-    status: approved
+    status: implemented
     description: >
       The published crates shall use a namespace that does not
       collide with an unrelated prior registration on crates.io, so
@@ -821,7 +821,7 @@ artifacts:
   - id: REQ-052
     type: requirement
     title: Per-condition provenance visibility
-    status: approved
+    status: implemented
     description: >
       When a decision carries many conditions attributed to one
       source line, the dashboard shall show, per condition, the
