@@ -464,7 +464,10 @@ fn extract_sole_core_module(component_bytes: &[u8], input: &Path) -> Result<Vec<
             path: input.to_path_buf(),
             detail: format!("failed to parse component: {e}"),
         })?;
-        if let Payload::ModuleSection { unchecked_range, .. } = payload {
+        if let Payload::ModuleSection {
+            unchecked_range, ..
+        } = payload
+        {
             match component_bytes.get(unchecked_range) {
                 Some(slice) => cores.push(slice.to_vec()),
                 None => {
