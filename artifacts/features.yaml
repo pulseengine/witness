@@ -510,7 +510,7 @@ artifacts:
       (DEC-029).
     tags: [v0.23, viz, export]
     fields:
-      phase: shipped
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-044
@@ -533,7 +533,7 @@ artifacts:
       v0.23 left open.
     tags: [v0.24, viz, source, pr-review]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-045
@@ -558,7 +558,7 @@ artifacts:
       signing.
     tags: [v0.22, release, supply-chain]
     fields:
-      phase: shipped
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-046
@@ -577,7 +577,7 @@ artifacts:
       alias shim) shipped earlier in the same window.
     tags: [v0.23, cli, ergonomics]
     fields:
-      phase: shipped
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-047
@@ -598,7 +598,7 @@ artifacts:
       tracked separately as known-limitation).
     tags: [v0.23, source-attribution]
     fields:
-      phase: shipped
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-048
@@ -621,7 +621,7 @@ artifacts:
       dashboard (FEAT-024 / FEAT-025).
     tags: [v0.25, viz, pr-review]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-049
@@ -645,7 +645,7 @@ artifacts:
       dead) the index table needs. Closes REQ-050.
     tags: [v0.26, viz, pages]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-050
@@ -669,7 +669,7 @@ artifacts:
       sidestepped. Closes REQ-051.
     tags: [v0.27, packaging, crates-io]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-051
@@ -695,7 +695,7 @@ artifacts:
       rustc-demangle. Closes REQ-052.
     tags: [v0.27, viz, mcdc]
     fields:
-      phase: in-progress
+      phase: phase-3
     links:
       - type: satisfies
         target: REQ-052
