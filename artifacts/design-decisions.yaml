@@ -1233,3 +1233,55 @@ artifacts:
         target: REQ-052
       - type: refines
         target: DEC-031
+
+  - id: DEC-036
+    type: design-decision
+    title: Unbundle components in-process via wasmparser, not shell-out
+    status: approved
+    description: >
+      Component → core-module extraction is done in-process by
+      walking the component with wasmparser and pulling the embedded
+      core module from `Payload::ModuleSection`, rather than shelling
+      out to `wasm-tools component unbundle`. witness-core already
+      depends on wasmparser (it walks payloads for DWARF custom
+      sections), so no new dependency. `instrument` runs before any
+      export is named (exports come at `run` time), so it cannot
+      select by target export — it extracts the SOLE embedded core
+      module. A component with multiple core modules (a
+      preview1→preview2 adapter beside the main module) errors clearly
+      toward wasm32-wasip1 rather than guessing which is the
+      measurement target. The preview1 run path
+      (Config::wasm_component_model(false), WASI p1 linker) is
+      unchanged — the extracted core of a leaf/computational function
+      has no imports and runs as-is.
+    rationale: >
+      Shelling out would reintroduce an external-tool runtime
+      dependency (wasm-tools on PATH) and a version-coupling hazard —
+      the spike already caught wasm-tools renaming the unbundle flag
+      (`--module-out` → `--module-dir`), which would silently break a
+      shell-out integration and is exactly the bespoke-glue fragility
+      witness avoids elsewhere (embedded wasmtime, no cooperation
+      protocol). In-process keeps witness self-contained and pins the
+      behaviour to a library version in Cargo.lock. Sole-module
+      extraction aligns the selection rule with the honest scope: a
+      single core module IS the leaf/computational case; multiple
+      core modules correlate with the adapter / syscall-heavy case
+      that's already routed to wasip1. No guessing an index.
+    alternatives: >
+      Shell out to `wasm-tools component unbundle` — rejected:
+      external runtime dep + flag-drift fragility (already observed).
+      Guess a module by index / size heuristic when several are
+      present — rejected as unreliable; erroring toward wasip1 is
+      honest. Add an explicit `--component-module` selector — deferred
+      until a real multi-module need appears. Add a full
+      Component-Model run path (instrument core → re-bundle → run
+      under a p2 linker) so syscall-heavy wasip2 works — deferred:
+      large, and wasip1 already serves that case. Keep erroring and
+      tell users to unbundle manually (status quo) — rejected: makes
+      the ecosystem-direction target second-class.
+    tags: [v0.28, instrument, wasip2, component-model]
+    links:
+      - type: satisfies
+        target: REQ-053
+      - type: refines
+        target: DEC-006

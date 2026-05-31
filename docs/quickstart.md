@@ -13,13 +13,13 @@ choice." For Rust:
 | Target | When to use | Catches |
 |---|---|---|
 | `wasm32-wasip1` | **Smoothest path today** — witness consumes the core module directly with no unbundle step. The legacy target everyone has installed; preview 1 is locked in |
-| `wasm32-wasip2` | Modern stable wasi (Component Model). **The direction.** Produces a *component*, not a core module — witness's current pipeline emits a "first unbundle with `wasm-tools component unbundle`" message; auto-unbundling is tracked work |
-| `wasm32-wasip3` | Preview 3 — futures, streams, the *eventual* default. Not yet in stable Rust. Same component-output issue as p2 |
+| `wasm32-wasip2` | Modern stable wasi (Component Model). **The direction.** Produces a *component*, not a core module — as of **v0.28** `witness instrument` **auto-unbundles** the embedded core module for leaf/computational functions (the common MC/DC case), so no manual step is needed. Syscall-heavy code whose core imports the Component-Model ABI still routes to `wasm32-wasip1` (witness says so clearly) |
+| `wasm32-wasip3` | Preview 3 — futures, streams, the *eventual* default. Not yet in stable Rust. Same component output as p2 (auto-unbundle applies once the target is available) |
 | `wasm32-unknown-unknown` | Pure `no_std` fixtures; minimal control-flow probes. `std`-using deps produce undefined `__wbindgen_*` symbols at link time |
 
-**Today**: build with `wasm32-wasip1` for the no-friction path through witness's instrument step.
+**Today**: `wasm32-wasip1` is still the smoothest path; `wasm32-wasip2` now works directly for leaf functions (v0.28 auto-unbundle).
 
-**Where this is going**: the wasi ecosystem is moving to `wasm32-wasip2` and `wasm32-wasip3` (Component Model + futures/streams). Witness will track that — auto-unbundling the component is the next step, and once it lands the default should follow the ecosystem.
+**Where this is going**: the wasi ecosystem is moving to `wasm32-wasip2` and `wasm32-wasip3` (Component Model + futures/streams). v0.28 auto-unbundles the single embedded core module; a full Component-Model run path (so syscall-heavy wasip2 also works) is the next step, after which the default should follow the ecosystem.
 
 The scaffolded leap-year fixture uses `wasm32-unknown-unknown`
 because it's `no_std`-compatible. For realistic crates today,

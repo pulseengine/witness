@@ -55,21 +55,25 @@ pub enum Error {
     #[error("instrumentation error: {0}")]
     Instrument(String),
 
-    /// v0.9.4 — input is a Wasm Component (`\\0asm\\rD\\01\\00`) rather
-    /// than a core module. Walrus-based instrumentation only handles
-    /// core modules; the inner module(s) inside a component need to be
-    /// extracted first via `wasm-tools component decompose`. Tester
-    /// review flagged the previous "not supported yet" error as opaque.
+    /// v0.28 — input is a Wasm Component and witness could not
+    /// auto-extract a single core module to instrument. witness
+    /// transparently unbundles the SOLE embedded core module of a
+    /// component (the wasm32-wasip2 leaf-function case, where the core
+    /// has no Component-Model imports and runs under the preview1
+    /// runtime). `detail` says why this input didn't qualify — no
+    /// core module, or several (a preview1→p2 adapter beside the main
+    /// module, i.e. the syscall-heavy case). Superseded the v0.9.4
+    /// `InputIsComponent` hard-error.
     #[error(
-        "input '{path}' is a Wasm Component, not a core module.\n  \
-         witness instruments core modules only. Either:\n    \
-         (a) compile your crate to wasm32-unknown-unknown or wasm32-wasip1\n    \
-             (instead of wasm32-wasip2 / Component-Model targets), or\n    \
-         (b) extract the inner core module:\n        \
-             wasm-tools component unbundle '{path}' --module-out core.wasm\n        \
-             witness instrument core.wasm"
+        "could not auto-unbundle Wasm Component '{path}': {detail}\n  \
+         witness auto-extracts the core module from single-module \
+         components (the wasm32-wasip2 leaf-function case). For this \
+         input, build for wasm32-unknown-unknown or wasm32-wasip1 \
+         instead, or extract manually:\n    \
+         wasm-tools component unbundle '{path}' --module-dir out/\n    \
+         witness instrument out/<module>.wasm"
     )]
-    InputIsComponent { path: PathBuf },
+    ComponentUnbundle { path: PathBuf, detail: String },
 
     /// v0.9.4 — YAML/TOML/etc. config parse failure. Distinct from
     /// `Runtime` so consumers can tell schema problems apart from
