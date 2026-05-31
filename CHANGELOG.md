@@ -7,6 +7,51 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-05-31
+
+Headline: **`witness instrument` accepts wasm32-wasip2 components
+directly.** No more "go run `wasm-tools component unbundle`
+yourself" — witness auto-extracts the embedded core module and
+instruments it, making the ecosystem-direction target first-class
+for the common MC/DC case.
+
+### Added — auto-unbundle wasip2 components (PR #68, FEAT-033)
+
+Given a Wasm Component (e.g. `cargo build --target
+wasm32-wasip2`), `witness instrument` (and `witness all`) walks it
+with `wasmparser`, extracts the embedded core module, and
+instruments that — in-process, no shell-out to `wasm-tools`, no new
+runtime dependency. The preview1 run path is unchanged; an
+extracted leaf-function core has no Component-Model imports and
+runs as-is. Verified end-to-end: a wasip2 component exporting
+`is_leap` instruments → runs → reports 3/3 (100%) with no manual
+step.
+
+Selection rule (DEC-036): `instrument` runs before any export is
+named, so it extracts the **sole** embedded core module. A
+component with multiple core modules — a preview1→p2 adapter
+beside the main module, i.e. the syscall-heavy case — gets a clear
+`ComponentUnbundle` error pointing at wasm32-wasip1, rather than
+guessing.
+
+### Scope (honest bound)
+
+Serves leaf / computational functions whose extracted core is
+self-contained — the common MC/DC predicate case. Syscall-heavy
+wasip2 code (core imports the p2 canonical ABI) still routes to
+wasm32-wasip1; a full Component-Model run path (instrument core →
+re-bundle → run under a p2 linker) is deferred future work.
+
+### Fixed
+
+- The old `InputIsComponent` error suggested `wasm-tools component
+  unbundle --module-out`, but wasm-tools renamed that flag to
+  `--module-dir`. Replaced with `ComponentUnbundle` carrying
+  corrected guidance — and chose in-process extraction precisely to
+  avoid that external-tool flag-drift fragility.
+
+New rivet artifacts: REQ-053, FEAT-033, DEC-036.
+
 ## [0.27.1] — 2026-05-30
 
 Fix: the `witness` CLI crate (`witness-mcdc`) now publishes to
