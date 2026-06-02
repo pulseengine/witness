@@ -7,6 +7,59 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-06-02
+
+Consolidate release after six feature releases (v0.23→v0.28):
+traceability hygiene, CI infrastructure, and a dashboard
+readability fix. No new tool capabilities.
+
+### Changed — group repeated br_table provenance (PR #72)
+
+Decision pages with many conditions in one function — the
+`br_table` case, e.g. 29 arms of a `match` all in
+`parse_primitive` — repeated the same `function · kind` provenance
+line under every condition. Now hoisted to a single summary when
+all conditions share a function, none is inlined, and there are
+≥3:
+
+> All 29 conditions live in `parse_primitive` — 27 br_table_target
+> + 2 br_table_default
+
+Per-condition status (proved/gap/dead) and gap links still render
+per row; only the repeated provenance collapses. Mixed or inlined
+decisions keep the per-condition detail.
+
+### Changed — Miri off the saturated self-hosted pool (PR #71)
+
+Miri ran on `[self-hosted, linux, x64, lean-mem]`, which was
+chronically saturated — it sat QUEUED ~3h on five release PRs
+across v0.24.1–v0.28, each needing a manual cancel/re-trigger or
+admin-merge. Moved to GitHub-hosted `ubuntu-latest` +
+`timeout-minutes: 25`. Miri here only interprets a handful of
+pure-Rust module tests, well within a hosted runner. Validated:
+the move's own Miri job passed on the hosted runner.
+
+### Changed — rivet artifact reconciliation (PR #70)
+
+Marked 14 verifiably-shipped pre-v0.22 features `implemented`
+(FEAT-001/002/003/006/007/010/011/012/015/017/019/020/021/022) —
+each confirmed present in the current code/CLI/CI, not blanket.
+Left aspirational/unverified items as-is (e.g. FEAT-005 v1.0
+Check-It, FEAT-009 the paper, FEAT-023 the infeasible viz
+self-coverage). Completes the older-artifact audit deferred from
+the v0.22–v0.27 reconciliation; `rivet validate` PASS.
+
+### Known follow-ups (flagged, not done)
+
+- **rustfmt version skew**: CI uses `dtolnay/rust-toolchain@stable`
+  (a moving target), so a locally-pinned rustfmt reformats
+  already-merged CI-clean files. Pinning rustfmt (a
+  `rust-toolchain.toml` or fixed fmt-job version) would retire it.
+- A few older `implemented` features still carry `phase: future` —
+  a minor phase-semantics cleanup.
+- Older REQ/DEC reconciliation (same per-link discipline) not yet
+  done.
+
 ## [0.28.0] — 2026-05-31
 
 Headline: **`witness instrument` accepts wasm32-wasip2 components
