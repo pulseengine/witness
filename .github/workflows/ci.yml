@@ -67,7 +67,16 @@ jobs:
 
   miri:
     name: Miri
-    runs-on: [self-hosted, linux, x64, lean-mem]
+    # v0.29 — moved off the self-hosted `lean-mem` pool to GitHub-hosted
+    # ubuntu-latest. That pool was chronically saturated: Miri sat
+    # QUEUED ~3h on five release PRs across v0.24.1–v0.28, each needing a
+    # manual cancel/re-trigger or admin-merge. `timeout-minutes` bounds
+    # RUN time but not QUEUE time, so the real fix is leaving the starved
+    # pool. Miri here only interprets a handful of pure-Rust module tests
+    # (report/decisions/predicate) — well within a hosted runner's 16 GB.
+    # Trade: a few GitHub-hosted minutes per run.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@nightly
