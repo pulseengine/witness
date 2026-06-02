@@ -40,7 +40,11 @@ fn write_bundle(root: &Path) {
             ]
         }]
     });
-    std::fs::write(dir.join("report.json"), serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("report.json"),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    )
+    .unwrap();
 
     // Manifest: branches[] keyed by `id`, plus branch_inline_chains
     // keyed by stringified id. Function names are Rust-mangled so the
@@ -60,7 +64,100 @@ fn write_bundle(root: &Path) {
             ]
         }
     });
-    std::fs::write(dir.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+}
+
+/// v0.29 — a decision whose conditions are all br_table arms in one
+/// function: write a bundle with N≥3 such conditions and assert the
+/// Decision page hoists a single provenance summary instead of N
+/// repeated per-condition lines, while keeping per-condition status.
+fn write_brtable_bundle(root: &Path, name: &str) {
+    let dir = root.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    // 5 conditions: 4 br_table_target + 1 br_table_default, all in one fn.
+    let conds: Vec<_> = (0..5u32)
+        .map(|i| {
+            json!({ "index": i, "branch_id": 100 + i,
+                    "status": if i == 0 { "gap" } else { "proved" },
+                    "pair": [0, 1] })
+        })
+        .collect();
+    let report = json!({
+        "schema": "witness.mcdc.report/v0.5", "witness_version": "0.29.0", "module": name,
+        "overall": {"decisions_total":1,"decisions_full_mcdc":0,"conditions_total":5,
+                    "conditions_proved":4,"conditions_gap":1,"conditions_dead":0},
+        "decisions": [{ "id": 0, "source_file": "lib.rs", "source_line": 211,
+            "status": "partial_mcdc", "conditions": conds, "truth_table": [] }]
+    });
+    std::fs::write(
+        dir.join("report.json"),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    )
+    .unwrap();
+    let branches: Vec<_> = (0..5u32)
+        .map(|i| {
+            json!({ "id": 100 + i, "function_name": "_ZN1v15parse_primitive17habcdef0123456789E",
+                    "kind": if i < 4 { "br_table_target" } else { "br_table_default" } })
+        })
+        .collect();
+    let manifest = json!({ "schema_version": "witness.manifest/v0.6", "branches": branches,
+        "branch_inline_chains": {} });
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn repeated_brtable_provenance_is_grouped_into_one_summary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reports = tmp.path().join("reports");
+    let out = tmp.path().join("dist");
+    std::fs::create_dir_all(&reports).unwrap();
+    write_brtable_bundle(&reports, "bt");
+
+    run_export(&ExportOpts {
+        reports_dir: reports.clone(),
+        out_dir: out.clone(),
+        site_title: None,
+        source_root: None,
+    })
+    .expect("run_export");
+
+    let page = std::fs::read_to_string(out.join("decision/bt/0.html")).expect("decision page");
+
+    // One hoisted summary naming the function + kind breakdown.
+    assert!(
+        page.contains(r#"class="prov-summary"#),
+        "expected a grouped provenance summary: {page}"
+    );
+    assert!(
+        page.contains("All 5 conditions live in")
+            && page.contains("v::parse_primitive")
+            && page.contains("4 br_table_target")
+            && page.contains("1 br_table_default"),
+        "summary should name count + function + kind breakdown"
+    );
+    // The repeated per-condition provenance line is suppressed.
+    assert!(
+        !page.contains(r#"class="prov muted"#),
+        "per-condition provenance must be collapsed into the summary"
+    );
+    // Per-condition STATUS still renders (c0 gap, others proved).
+    assert_eq!(
+        page.matches("class=\"cond-").count(),
+        5,
+        "all 5 condition rows (with their status) must still render"
+    );
+    assert!(
+        page.contains("view gap →"),
+        "the gap condition keeps its gap link"
+    );
 }
 
 #[test]
@@ -72,9 +169,15 @@ fn loader_joins_branches_and_chains_and_demangles() {
 
     // br_table arm: demangled function, kind, no chain.
     let c0 = prov.get(&14).expect("branch 14 present");
-    assert_eq!(c0.function, "v::parse_primitive", "demangled, hash stripped");
+    assert_eq!(
+        c0.function, "v::parse_primitive",
+        "demangled, hash stripped"
+    );
     assert_eq!(c0.kind, "br_table_target");
-    assert!(c0.inline_chain.is_empty(), "br_table arm has no inline chain");
+    assert!(
+        c0.inline_chain.is_empty(),
+        "br_table arm has no inline chain"
+    );
 
     // inlined br_if: function, kind, 2-frame chain.
     let c1 = prov.get(&113).expect("branch 113 present");

@@ -528,9 +528,7 @@ fn render_source_snippet_for(
     }
 
     let start = target_line.saturating_sub(SNIPPET_CONTEXT_LINES).max(1);
-    let end = target_line
-        .saturating_add(SNIPPET_CONTEXT_LINES)
-        .min(total);
+    let end = target_line.saturating_add(SNIPPET_CONTEXT_LINES).min(total);
 
     let mut out = String::from("<pre class=\"src-snippet\">");
     // Width for the line-number column — pad to the max line number
@@ -739,7 +737,19 @@ fn render_conditions(
     verdict_name: &str,
     provenance: &std::collections::BTreeMap<u32, data::BranchProvenance>,
 ) -> String {
-    let mut out = String::from("<ul class=\"conditions\">\n");
+    // v0.29 — when every condition shares one function and none is
+    // inlined (the br_table case: N arms of a `match` all in one
+    // function), hoist the provenance to a single summary line instead
+    // of repeating "parse_primitive · br_table_target" N times. The
+    // per-condition status (proved/gap/dead) still renders per row —
+    // only the repeated provenance is collapsed.
+    let group_summary = common_provenance_summary(decision, provenance);
+
+    let mut out = String::new();
+    if let Some(ref summary) = group_summary {
+        let _ = write!(out, r#"<p class="prov-summary muted">{summary}</p>"#);
+    }
+    out.push_str("<ul class=\"conditions\">\n");
     for c in &decision.conditions {
         let _ = write!(
             out,
@@ -774,14 +784,76 @@ fn render_conditions(
         }
         // v0.27 — per-condition provenance (DEC-035): which function
         // the branch lives in, its kind (br_if vs br_table arm), and
-        // the inline call chain when one exists.
-        if let Some(prov) = provenance.get(&c.branch_id) {
+        // the inline call chain when one exists. v0.29 — suppressed
+        // per-condition when a group summary already states it (above).
+        if group_summary.is_none()
+            && let Some(prov) = provenance.get(&c.branch_id)
+        {
             out.push_str(&render_condition_provenance(prov));
         }
         out.push_str("</li>\n");
     }
     out.push_str("</ul>\n");
     out
+}
+
+/// v0.29 — when every condition of a decision has provenance, all
+/// share the same function, none is inlined, and there are enough to
+/// be repetitive (≥3), return a single hoisted summary line instead
+/// of N identical per-condition provenance lines. `None` (→ keep
+/// per-condition rendering) when conditions differ, any is inlined
+/// (the chain is per-condition-meaningful), or the count is small.
+///
+/// Example: 27 `br_table_target` + 2 `br_table_default` all in
+/// `parse_primitive` → "All 29 conditions live in
+/// `parse_primitive` — 27 br_table_target + 2 br_table_default".
+fn common_provenance_summary(
+    decision: &DecisionReport,
+    provenance: &std::collections::BTreeMap<u32, data::BranchProvenance>,
+) -> Option<String> {
+    let provs: Vec<&data::BranchProvenance> = decision
+        .conditions
+        .iter()
+        .filter_map(|c| provenance.get(&c.branch_id))
+        .collect();
+    // Only collapse when it's genuinely repetitive AND every condition
+    // is accounted for (no mixed has-prov / no-prov rows).
+    if provs.len() < 3 || provs.len() != decision.conditions.len() {
+        return None;
+    }
+    let function = provs[0].function.as_str();
+    if function.is_empty() {
+        return None;
+    }
+    // All same function, none inlined (an inline chain is worth showing
+    // per-condition, so don't hoist those).
+    if !provs
+        .iter()
+        .all(|p| p.function == function && p.inline_chain.is_empty())
+    {
+        return None;
+    }
+    // Kind breakdown, e.g. "27 br_table_target + 2 br_table_default".
+    let mut kinds: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for p in &provs {
+        if !p.kind.is_empty() {
+            *kinds.entry(p.kind.as_str()).or_default() += 1;
+        }
+    }
+    let breakdown = kinds
+        .iter()
+        .map(|(k, n)| format!("{n} {}", escape(k)))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let mut summary = format!(
+        "All {} conditions live in <code>{}</code>",
+        provs.len(),
+        escape(function),
+    );
+    if !breakdown.is_empty() {
+        let _ = write!(summary, " — {breakdown}");
+    }
+    Some(summary)
 }
 
 /// Render the provenance line for one condition: function · kind,
@@ -794,7 +866,11 @@ fn render_condition_provenance(prov: &data::BranchProvenance) -> String {
         let _ = write!(out, "<code>{}</code>", escape(&prov.function));
     }
     if !prov.kind.is_empty() {
-        let _ = write!(out, r#" · <span class="kind">{}</span>"#, escape(&prov.kind));
+        let _ = write!(
+            out,
+            r#" · <span class="kind">{}</span>"#,
+            escape(&prov.kind)
+        );
     }
     if !prov.inline_chain.is_empty() {
         // Outermost (call site) first → leaf last, joined with ←.
@@ -804,7 +880,10 @@ fn render_condition_provenance(prov: &data::BranchProvenance) -> String {
             .map(|f| format!("{}:{}", escape(&f.call_file), f.call_line))
             .collect::<Vec<_>>()
             .join(" ← ");
-        let _ = write!(out, r#"<br><span class="inline-chain">inlined: {chain}</span>"#);
+        let _ = write!(
+            out,
+            r#"<br><span class="inline-chain">inlined: {chain}</span>"#
+        );
     }
     out.push_str("</div>");
     out
