@@ -2,7 +2,7 @@ artifacts:
   - id: FEAT-001
     type: feature
     title: v0.1 — branch-level coverage on Wasm
-    status: approved
+    status: implemented
     description: >
       CLI with instrument / run / report subcommands. Strict per-instruction
       counting at br_if (per-taken), if-else (per-arm), br_table (executed-
@@ -25,7 +25,7 @@ artifacts:
   - id: FEAT-002
     type: feature
     title: v0.2 — MC/DC condition decomposition via DWARF reconstruction
-    status: draft
+    status: implemented
     description: >
       DWARF-informed reconstruction of source-level decisions from Wasm
       br_if sequences, producing MC/DC condition tables per decision.
@@ -49,7 +49,7 @@ artifacts:
   - id: FEAT-006
     type: feature
     title: v0.2 — subprocess harness mode
-    status: draft
+    status: implemented
     description: >
       Add `witness run --harness <cmd>` mode that spawns a user-supplied
       subprocess with WITNESS_MODULE / WITNESS_OUTPUT / WITNESS_MANIFEST
@@ -66,7 +66,7 @@ artifacts:
   - id: FEAT-007
     type: feature
     title: v0.2 — per-target br_table counting
-    status: draft
+    status: implemented
     description: >
       Replace v0.1's single "executed" counter for br_table with one
       counter per target via a __witness_brtable_<id>(selector) helper-
@@ -104,7 +104,7 @@ artifacts:
   - id: FEAT-003
     type: feature
     title: v0.3 — rivet and sigil integration
-    status: draft
+    status: implemented
     description: >
       Coverage reports emitted in the witness-rivet-evidence/v1 schema
       consumed by the upstreamed rivet-core::coverage_evidence::CoverageStore;
@@ -128,7 +128,7 @@ artifacts:
   - id: FEAT-010
     type: feature
     title: v0.3 — quality bar (proptest, mutants, miri)
-    status: draft
+    status: implemented
     description: >
       Property-based tests via proptest on merge_records, serde
       round-trip of Manifest and RunRecord, RequirementMap flattening.
@@ -146,7 +146,7 @@ artifacts:
   - id: FEAT-011
     type: feature
     title: v0.4 — DWARF reconstruction + witness diff + compliance bundle
-    status: draft
+    status: implemented
     description: >
       DWARF-grounded reconstruction algorithm body lifted from v0.2.1
       into v0.4: parse Wasm DWARF custom sections via gimli, build a
@@ -196,7 +196,7 @@ artifacts:
   - id: FEAT-012
     type: feature
     title: v0.6 — real MC/DC truth tables and verdict suite
-    status: draft
+    status: implemented
     description: >
       Decision-level instrumentation primitive (Option C) emitting
       per-row condition vectors. Exact primitive (pattern-counters
@@ -265,7 +265,7 @@ artifacts:
   - id: FEAT-015
     type: feature
     title: v0.6.1 — on-Wasm trace-buffer instrumentation
-    status: proposed
+    status: implemented
     description: >
       Implementation of the trace-buffer primitive recommended in
       docs/research/v06-instrumentation-primitive.md: exported
@@ -312,7 +312,7 @@ artifacts:
   - id: FEAT-017
     type: feature
     title: v0.8 — Axum+HTMX wasm-component visualiser
-    status: proposed
+    status: implemented
     description: >
       Witness-viz Axum router compiled to wasm32-wasip2 via
       wstd-axum, with maud server-side templating and HTMX 2.x
@@ -368,7 +368,7 @@ artifacts:
   - id: FEAT-019
     type: feature
     title: v0.9 — witness-viz Axum visualiser
-    status: proposed
+    status: implemented
     description: >
       Native Axum 0.8 + tokio 1 web server (port 3037) rendering MC/DC
       truth tables for a compliance bundle. Server-side HTML via raw
@@ -393,7 +393,7 @@ artifacts:
   - id: FEAT-020
     type: feature
     title: v0.9 — MCP server for MC/DC queries
-    status: proposed
+    status: implemented
     description: >
       rmcp-based MCP transport mounted on the witness-viz Axum router
       (DEC-027) exposing MC/DC-native tools: get_decision_truth_table,
@@ -413,7 +413,7 @@ artifacts:
   - id: FEAT-021
     type: feature
     title: v0.9 — truth-table-first PR review
-    status: proposed
+    status: implemented
     description: >
       PR comment renders the truth table for each changed decision
       with missing-witness rows highlighted in tutorial style — the
@@ -433,7 +433,7 @@ artifacts:
   - id: FEAT-022
     type: feature
     title: v0.9 — per-DWARF-inlined-context outcomes
-    status: proposed
+    status: implemented
     description: >
       Extend kind=2 trace records with the inlined-subroutine id from
       DWARF so per-call outcomes are keyed by (function_index,
