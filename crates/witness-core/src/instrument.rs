@@ -2350,8 +2350,22 @@ mod tests {
         let out = tmp.path().with_extension("inst.wasm");
         let result = instrument_file(tmp.path(), &out);
         match result {
-            Err(crate::error::Error::ComponentUnbundle { path, .. }) => {
-                assert_eq!(path, tmp.path().to_path_buf());
+            Err(e @ crate::error::Error::ComponentUnbundle { .. }) => {
+                // v0.30 — the guidance leads with the meld fusion path
+                // (DEC-037), keeping the wasip1 fallback.
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("meld fuse"),
+                    "guidance must point at meld: {msg}"
+                );
+                assert!(
+                    msg.contains("witness instrument core.wasm"),
+                    "guidance must show the follow-up instrument step: {msg}"
+                );
+                assert!(
+                    msg.contains("wasm32-wasip1"),
+                    "guidance keeps the wasip1 fallback: {msg}"
+                );
             }
             Err(other) => panic!("expected ComponentUnbundle, got {other:?}"),
             Ok(()) => panic!("expected error, got Ok"),

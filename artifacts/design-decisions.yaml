@@ -1285,3 +1285,49 @@ artifacts:
         target: REQ-053
       - type: refines
         target: DEC-006
+
+  - id: DEC-037
+    type: design-decision
+    title: Component MC/DC via meld fusion, not witness component surgery
+    status: approved
+    description: >
+      For Component-Model inputs beyond the single-embedded-core leaf
+      case (FEAT-033), the path is composition with meld, not growing
+      a component run path inside witness. meld fuses a component into
+      a single core module (canonical-ABI adapters resolved at build
+      time); witness then instruments that core module unchanged. The
+      witness-side change is guidance only: the ComponentUnbundle
+      error points the user at `meld fuse <comp> -o core.wasm`. No
+      runtime coupling — witness does not shell out to meld.
+    rationale: >
+      A witness-internal run path for syscall-heavy components hit a
+      hard wall (spike, v0.30): the WASI p2 canonical-ABI imports
+      only resolve inside a component, and — decisively — witness
+      extracts counters via the core module's exported globals
+      (DEC-003), but a component can only export func/value/type/
+      instance, NOT raw core globals. Re-bundling an instrumented
+      core encapsulates the counters; there is no get_global on an
+      inner core instance. meld dissolves this by flattening to a
+      core module BEFORE witness sees it — so the established
+      counter mechanism works untouched. This is the toolchain's
+      composition premise (meld fuses, witness measures), and it
+      keeps each tool to its specialty. Verified end-to-end: a leaf
+      component fused to a 0-import core, instrumented, ran, and
+      measured 3/3 branch coverage.
+    alternatives: >
+      Grow a Component-Model run path in witness (instrument core →
+      re-bundle → run under a p2 linker) — rejected: requires
+      re-architecting counter extraction (core globals aren't
+      component-exportable), a multi-release effort, and duplicates
+      meld's fusion. Shell out to meld from witness automatically —
+      deferred: reintroduces the external-tool runtime coupling /
+      version-drift fragility DEC-036 avoided; documented guidance is
+      lower-risk. Block component inputs entirely — rejected: makes
+      the ecosystem-direction target unmeasurable when a clean
+      composition exists.
+    tags: [v0.30, component-model, meld]
+    links:
+      - type: satisfies
+        target: REQ-054
+      - type: refines
+        target: DEC-036
