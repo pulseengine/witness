@@ -7,6 +7,60 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-06-03
+
+Headline: **MC/DC on Wasm Components via meld** — fuse a component
+to a single core module with meld, then instrument it with
+witness. Composition across the toolchain, not component surgery
+inside witness.
+
+### Added — meld→witness composition for Component-Model MC/DC (PR #74)
+
+A Wasm *Component* (the `wasm32-wasip2` output) wraps core
+module(s) + canonical-ABI glue. witness instruments **core
+modules**; meld fuses a component into a single core module
+(resolving the canonical ABI at build time), so witness's existing
+core pipeline + exported-counter-globals mechanism work unchanged:
+
+```bash
+meld fuse mycomponent.wasm -o core.wasm
+witness instrument core.wasm -o inst.wasm
+witness run inst.wasm --invoke-with-args 'f:…' -o run.json
+```
+
+Verified end-to-end: a leaf wasip2 component → `meld fuse` → core
+with zero imports → instrument → run → `is_leap` 3/3 (100%).
+
+- `witness instrument`'s component guidance (the `ComponentUnbundle`
+  error) now leads with the `meld fuse` command for multi-module /
+  canonical-ABI components, keeping the wasip1 fallback. The v0.28
+  in-process single-module auto-unbundle still handles the leaf
+  case with no meld dependency.
+- quickstart.md gains a "Component Model inputs — fuse with meld
+  first" section.
+
+### Why composition, not a witness run path (DEC-037)
+
+A witness-internal Component run path hits a hard wall: the WASI
+p2 canonical-ABI imports only resolve inside a component, and
+witness extracts counters via the core module's exported globals
+(DEC-003), which a component cannot re-export. meld flattening to
+a core module *before* witness sees it dissolves the wall — and
+keeps witness a core-module instrumenter with no runtime coupling
+to meld.
+
+### Honest boundaries
+
+- Leaf / computational components (no host I/O) fuse to a
+  zero-import core → instrument **and run** today.
+- Syscall-heavy components' fused cores import `wasi:cli/*` +
+  `wasi:io/*` → witness instruments them, but running needs a
+  WASI-p2 host (`--harness`, or a future linker).
+- Function/source names in the report need a DWARF-bearing input
+  + meld's `--remap` (else `(anon)`).
+
+New rivet artifacts: REQ-054, FEAT-034, DEC-037.
+
 ## [0.29.0] — 2026-06-02
 
 Consolidate release after six feature releases (v0.23→v0.28):
