@@ -19,7 +19,42 @@ choice." For Rust:
 
 **Today**: `wasm32-wasip1` is still the smoothest path; `wasm32-wasip2` now works directly for leaf functions (v0.28 auto-unbundle).
 
-**Where this is going**: the wasi ecosystem is moving to `wasm32-wasip2` and `wasm32-wasip3` (Component Model + futures/streams). v0.28 auto-unbundles the single embedded core module; a full Component-Model run path (so syscall-heavy wasip2 also works) is the next step, after which the default should follow the ecosystem.
+**Where this is going**: the wasi ecosystem is moving to `wasm32-wasip2` and `wasm32-wasip3` (Component Model + futures/streams). v0.28 auto-unbundles the single embedded core module; for multi-module / canonical-ABI components, fuse with **meld** first (see "Component Model" below). The default should follow the ecosystem in a future release.
+
+### Component Model inputs — fuse with meld first (v0.30)
+
+witness instruments **core modules**. A Wasm *Component* (the
+`wasm32-wasip2` output) is a wrapper around one or more core
+modules plus canonical-ABI glue. For the simple leaf case witness
+auto-extracts the single embedded core; for anything else, fuse
+the component to one core module with [`meld`](https://github.com/pulseengine/meld)
+first, then instrument that:
+
+```bash
+meld fuse mycomponent.wasm -o core.wasm   # component → single core module
+witness instrument core.wasm -o inst.wasm # witness's normal core pipeline
+witness run inst.wasm --invoke-with-args 'f:…' -o run.json
+witness report --input run.json
+```
+
+Why this split (DEC-037): meld resolves the canonical ABI at
+build time and emits a single core module — exactly what witness
+instruments. witness's counter mechanism (exported globals) works
+unchanged on that core, so no component surgery is needed in
+witness. Each tool stays in its lane: **meld fuses, witness
+measures.**
+
+Honest boundaries (spike-verified):
+
+- A **leaf / computational** component (no host I/O) fuses to a
+  core with **zero imports** — it instruments *and runs* directly
+  under witness's embedded runtime. (Verified: `is_leap` → 3/3.)
+- A **syscall-heavy** component's fused core imports `wasi:cli/*`
+  + `wasi:io/*` — witness instruments it, but running it needs a
+  WASI-p2 host: use `witness run --harness <cmd>` with a
+  component-aware runtime, or build `wasm32-wasip1` instead.
+- For source/function names in the report (not `(anon)`), give
+  meld a DWARF-bearing input and use its `--remap` mode.
 
 The scaffolded leap-year fixture uses `wasm32-unknown-unknown`
 because it's `no_std`-compatible. For realistic crates today,

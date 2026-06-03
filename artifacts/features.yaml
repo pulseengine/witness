@@ -728,3 +728,33 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-053
+
+  - id: FEAT-034
+    type: feature
+    title: v0.30 — meld→witness composition for Component-Model MC/DC
+    status: approved
+    phase: phase-3
+    acceptance-criteria:
+      - "Documented, verified flow: `meld fuse <component> -o core.wasm` then `witness instrument core.wasm` → run → report measures the component's branch coverage."
+      - "When witness is handed a Component it cannot single-module auto-unbundle (multi-module / p2), the ComponentUnbundle error leads with the `meld fuse` command, keeping the wasip1 fallback."
+      - "quickstart.md documents the meld→witness flow and its honest boundaries (leaf runs; syscall-heavy → --harness; meld --remap for name/source attribution)."
+    description: >
+      Establishes the cross-tool composition for Component-Model
+      MC/DC. meld (static component fuser) flattens a component to a
+      single core module; witness instruments that core with its
+      existing pipeline — its exported-counter-globals mechanism
+      (DEC-003) works unchanged because the fused output is a core
+      module, dissolving the counter-encapsulation wall that
+      blocked a witness-internal component run path. v0.30 ships
+      documentation + precise witness-side guidance (error message
+      points multi-module/p2 components at `meld fuse`); witness
+      stays a core-module instrumenter (no runtime coupling to meld).
+      Verified end-to-end on a leaf wasip2 component (fuse → core
+      with 0 imports → instrument → run → 3/3 coverage). Closes
+      REQ-054.
+    tags: [v0.30, component-model, meld, mcdc]
+    links:
+      - type: satisfies
+        target: REQ-054
+      - type: refines
+        target: FEAT-033

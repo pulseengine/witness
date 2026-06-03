@@ -885,3 +885,33 @@ artifacts:
     fields:
       priority: should
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.30 — MC/DC on Component-Model inputs via meld fusion
+  # -------------------------------------------------------------------------
+  - id: REQ-054
+    type: requirement
+    title: MC/DC on Component-Model wasm via meld fusion
+    status: approved
+    description: >
+      The system shall support measuring MC/DC on WebAssembly
+      Component-Model artifacts by composing with meld rather than
+      growing component surgery inside witness: meld fuses a
+      component into a single core module (resolving the canonical
+      ABI at build time), and witness instruments that core module
+      with its existing core-module pipeline. For Component inputs
+      witness cannot instrument directly, the tool shall point the
+      user at the meld fusion step with a precise, copy-pasteable
+      command rather than a generic error.
+
+      Scope (honest bound, spike-verified): a leaf/computational
+      component fuses to a core module with zero imports →
+      instrument + run + report all work today (`is_leap` measured
+      3/3). A syscall-heavy component's fused core imports the WASI
+      p2 interfaces (`wasi:cli/*`, `wasi:io/*`) → witness instruments
+      it but cannot run it under the embedded preview1 runtime; that
+      case routes to `--harness` (FEAT-006) or a future p2 host.
+    tags: [v0.30, component-model, meld, mcdc]
+    fields:
+      priority: should
+      category: functional

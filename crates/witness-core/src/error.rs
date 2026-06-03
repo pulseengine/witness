@@ -64,14 +64,24 @@ pub enum Error {
     /// core module, or several (a preview1→p2 adapter beside the main
     /// module, i.e. the syscall-heavy case). Superseded the v0.9.4
     /// `InputIsComponent` hard-error.
+    ///
+    /// v0.30 — guidance now leads with meld (DEC-037): meld fuses any
+    /// component into a single core module (resolving the canonical
+    /// ABI), which witness then instruments with its core pipeline.
+    /// This is the supported path for multi-module / canonical-ABI
+    /// components, where witness's in-process single-module unbundle
+    /// doesn't apply.
     #[error(
         "could not auto-unbundle Wasm Component '{path}': {detail}\n  \
-         witness auto-extracts the core module from single-module \
-         components (the wasm32-wasip2 leaf-function case). For this \
-         input, build for wasm32-unknown-unknown or wasm32-wasip1 \
-         instead, or extract manually:\n    \
-         wasm-tools component unbundle '{path}' --module-dir out/\n    \
-         witness instrument out/<module>.wasm"
+         witness instruments core modules; it auto-extracts only a \
+         single embedded core (the wasm32-wasip2 leaf case). For a \
+         multi-module / canonical-ABI component, fuse it to one core \
+         module with meld, then instrument that:\n    \
+         meld fuse '{path}' -o core.wasm\n    \
+         witness instrument core.wasm\n  \
+         (A leaf core runs under the embedded runtime; a syscall-heavy \
+         core imports wasi:cli/* + wasi:io/* — run it via `--harness`. \
+         Or build for wasm32-wasip1 to skip the Component Model.)"
     )]
     ComponentUnbundle { path: PathBuf, detail: String },
 
