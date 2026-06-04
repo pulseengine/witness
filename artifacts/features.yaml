@@ -737,7 +737,7 @@ artifacts:
     acceptance-criteria:
       - "Documented, verified flow: `meld fuse <component> -o core.wasm` then `witness instrument core.wasm` → run → report measures the component's branch coverage."
       - "When witness is handed a Component it cannot single-module auto-unbundle (multi-module / p2), the ComponentUnbundle error leads with the `meld fuse` command, keeping the wasip1 fallback."
-      - "quickstart.md documents the meld→witness flow and its honest boundaries (leaf runs; syscall-heavy → --harness; meld --remap for name/source attribution)."
+      - "quickstart.md documents the meld→witness flow and its honest boundaries (leaf runs; syscall-heavy → --harness; `meld fuse --preserve-names` for name attribution — corrected from the imprecise '--remap' in the v0.30 draft, see FEAT-035)."
     description: >
       Establishes the cross-tool composition for Component-Model
       MC/DC. meld (static component fuser) flattens a component to a
@@ -758,3 +758,35 @@ artifacts:
         target: REQ-054
       - type: refines
         target: FEAT-033
+
+  # -------------------------------------------------------------------------
+  # v0.31 — readable demangled function attribution
+  # -------------------------------------------------------------------------
+  - id: FEAT-035
+    type: feature
+    title: v0.31 — demangle function names in witness-core attribution
+    status: proposed
+    phase: phase-3
+    acceptance-criteria:
+      - "witness-core exposes a single `demangle` helper (rustc-demangle for Rust, cpp_demangle for C++, identity passthrough otherwise) used at the attribution site."
+      - "Branch attribution carries a demangled display name in addition to the retained raw `function_name`; report JSON, LCOV, and rivet-evidence emit the demangled form."
+      - "A unit test asserts `_ZN17verdict_leap_year12is_leap_year17h..E` → `verdict_leap_year::is_leap_year`, a `_Z`-style C++ symbol demangles, and a plain name passes through unchanged."
+      - "witness-viz no longer needs its local demangle to get a readable name (the value already arrives demangled), though it may keep it as defense-in-depth."
+    description: >
+      Falsification-driven (v0.31 spike): the predicted feature
+      'meld --remap + DWARF' was wrong on two counts — meld has no
+      --remap (the flag is `meld fuse --preserve-names`), and names
+      already flow end-to-end into witness when that flag is used.
+      The real gap, found by running the pipeline on a fused leaf
+      component: witness-core stores the RAW mangled symbol
+      (instrument.rs:1618, `function_name = module.funcs.get(fid)
+      .name.clone()`); only witness-viz demangles (data.rs:232), so
+      `report`/`lcov`/`rivet-evidence`/`predicate` leak mangled
+      names. This feature moves demangling to a shared witness-core
+      helper applied once at the attribution site, retaining the raw
+      symbol for attestation. rustc-demangle is already a workspace
+      dep; cpp_demangle is already in Cargo.lock. Closes REQ-055.
+    tags: [v0.31, demangle, attribution, reporting]
+    links:
+      - type: satisfies
+        target: REQ-055

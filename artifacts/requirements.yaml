@@ -915,3 +915,32 @@ artifacts:
     fields:
       priority: should
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.31 — readable demangled function attribution
+  # -------------------------------------------------------------------------
+  - id: REQ-055
+    type: requirement
+    title: Readable (demangled) function attribution in coverage evidence
+    status: proposed
+    description: >
+      The system shall surface a human-readable, demangled function
+      name for each branch's attribution wherever witness emits
+      function names — the report JSON, LCOV, rivet-evidence, and
+      the predicate Statement — not only in the HTML visualiser.
+      A branch in a Rust function whose name-section symbol is
+      `_ZN17verdict_leap_year12is_leap_year17h..E` shall be
+      attributed as `verdict_leap_year::is_leap_year`; a C++ mangled
+      symbol shall be demangled likewise; a name that is not a
+      recognised mangling shall pass through unchanged.
+
+      The raw mangled symbol shall be retained as ground truth for
+      attestation stability (the demangled form is a derived display
+      value, not a replacement). This makes the v0.30 meld→witness
+      composition legible for real components, whose fused cores
+      carry mangled symbols once built with `meld fuse
+      --preserve-names`.
+    tags: [v0.31, demangle, attribution, reporting]
+    fields:
+      priority: should
+      category: functional
