@@ -858,7 +858,7 @@ artifacts:
   - id: REQ-053
     type: requirement
     title: Instrument wasip2 components without a manual unbundle step
-    status: approved
+    status: implemented
     description: >
       `witness instrument` (and `witness all`) shall accept a Wasm
       Component (e.g. the output of `cargo build --target
@@ -892,7 +892,7 @@ artifacts:
   - id: REQ-054
     type: requirement
     title: MC/DC on Component-Model wasm via meld fusion
-    status: approved
+    status: implemented
     description: >
       The system shall support measuring MC/DC on WebAssembly
       Component-Model artifacts by composing with meld rather than
