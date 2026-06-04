@@ -53,8 +53,10 @@ Honest boundaries (spike-verified):
   + `wasi:io/*` — witness instruments it, but running it needs a
   WASI-p2 host: use `witness run --harness <cmd>` with a
   component-aware runtime, or build `wasm32-wasip1` instead.
-- For source/function names in the report (not `(anon)`), give
-  meld a DWARF-bearing input and use its `--remap` mode.
+- For function names in the report (not `(anon)`), fuse with
+  `meld fuse --preserve-names` so the name section survives into
+  the core module; witness reads it. Names arrive demangled in
+  v0.31+ (e.g. `verdict_leap_year::is_leap_year`).
 
 The scaffolded leap-year fixture uses `wasm32-unknown-unknown`
 because it's `no_std`-compatible. For realistic crates today,

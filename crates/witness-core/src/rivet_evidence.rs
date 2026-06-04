@@ -249,6 +249,7 @@ mod tests {
                 id: u32::try_from(i).unwrap(),
                 function_index: 0,
                 function_name: None,
+                function_display: None,
                 kind: BranchKind::BrIf,
                 instr_index: u32::try_from(i).unwrap(),
                 hits: h,

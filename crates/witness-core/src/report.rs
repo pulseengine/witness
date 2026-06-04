@@ -65,7 +65,7 @@ impl Report {
         for b in &record.branches {
             let entry = per_fn
                 .entry(b.function_index)
-                .or_insert_with(|| (b.function_name.clone(), 0, 0));
+                .or_insert_with(|| (b.display_name().map(str::to_string), 0, 0));
             // SAFETY-REVIEW: total branches per function is bounded by the
             // manifest entry count, which fits in u32 by construction.
             entry.1 = entry.1.saturating_add(1);
@@ -90,7 +90,8 @@ impl Report {
             .map(|b: &BranchHit| UncoveredBranch {
                 branch_id: b.id,
                 function_index: b.function_index,
-                function_name: b.function_name.clone(),
+                // v0.31 — surface the demangled display name (DEC-038).
+                function_name: b.display_name().map(str::to_string),
                 instr_index: b.instr_index,
                 kind: b.kind,
             })
@@ -176,6 +177,7 @@ mod tests {
             id,
             function_index: fn_idx,
             function_name: Some(fn_name.to_string()),
+            function_display: None,
             kind,
             instr_index: id,
             hits,

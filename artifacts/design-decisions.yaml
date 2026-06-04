@@ -1333,3 +1333,43 @@ artifacts:
         target: DEC-036
       - type: constrained-by
         target: DEC-003
+
+  # -------------------------------------------------------------------------
+  # v0.31 — where demangling lives
+  # -------------------------------------------------------------------------
+  - id: DEC-038
+    type: design-decision
+    title: Demangle once in witness-core; retain the raw symbol for attestation
+    status: proposed
+    description: >
+      Demangling of function symbols happens once, in a shared
+      witness-core helper applied at the branch-attribution site, and
+      the demangled string is stored as a derived display field
+      alongside the retained raw `function_name`. Presentation layers
+      (report text, LCOV, rivet-evidence, predicate, viz) consume the
+      demangled field rather than each re-demangling the raw symbol.
+    rationale: >
+      Before v0.31, only witness-viz demangled (data.rs:232) while
+      witness-core stored the raw mangled symbol — so the HTML was
+      readable but report JSON / LCOV / rivet-evidence / predicate
+      leaked `_ZN..E` names. Demangling at every presentation layer
+      duplicates logic (the exact failure mode the toolchain avoids)
+      and drifts; demangling once at the source fixes all consumers
+      together. The raw symbol is retained, not replaced, because the
+      attestation/predicate body is a stable evidence artifact —
+      demangling output can change across rustc-demangle versions, so
+      the canonical record keeps the ground-truth symbol and treats
+      the demangled name as a display convenience.
+    alternatives: >
+      Demangle in each presentation layer (status quo + extend to
+      report/lcov/rivet-evidence) — rejected: duplicated, drift-prone.
+      Replace the raw symbol with the demangled string in the manifest
+      — rejected: loses attestation ground truth and couples the
+      evidence body to a demangler version. Leave it viz-only —
+      rejected: REQ-055 requires readable names in all emitters.
+    tags: [v0.31, demangle, attribution]
+    links:
+      - type: satisfies
+        target: REQ-055
+      - type: constrained-by
+        target: DEC-003

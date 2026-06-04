@@ -3222,9 +3222,11 @@ version = "0.30.0"
 dependencies = [
  "anyhow",
  "base64",
+ "cpp_demangle",
  "ed25519-compact",
  "gimli 0.31.1",
  "proptest",
+ "rustc-demangle",
  "serde",
  "serde_json",
  "serde_yaml",

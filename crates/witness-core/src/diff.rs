@@ -132,6 +132,12 @@ impl Snapshot {
                     id: b.id,
                     function_index: b.function_index,
                     function_name: b.function_name.clone(),
+                    // Run records carry only the raw symbol; derive the
+                    // display form via the shared helper (DEC-038).
+                    function_display: b.function_name.as_deref().and_then(|raw| {
+                        let d = crate::demangle::demangle(raw);
+                        (d != raw).then_some(d)
+                    }),
                     kind: b.kind,
                     instr_index: b.instr_index,
                     target_index: None,
@@ -333,6 +339,7 @@ mod tests {
             id,
             function_index: 0,
             function_name: None,
+            function_display: None,
             kind,
             instr_index,
             target_index: None,
@@ -363,6 +370,7 @@ mod tests {
                 id,
                 function_index: 0,
                 function_name: None,
+                function_display: None,
                 kind: BranchKind::BrIf,
                 instr_index: id,
                 hits: h,

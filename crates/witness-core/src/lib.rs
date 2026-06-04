@@ -18,6 +18,7 @@
 
 pub mod attest;
 pub mod decisions;
+pub mod demangle;
 pub mod diff;
 pub mod error;
 pub mod instrument;
