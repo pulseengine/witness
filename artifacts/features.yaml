@@ -705,7 +705,7 @@ artifacts:
   - id: FEAT-033
     type: feature
     title: v0.28 — auto-unbundle wasip2 components on instrument
-    status: approved
+    status: implemented
     phase: phase-3
     acceptance-criteria:
       - "Given a wasm32-wasip2 component exporting is_leap, `witness instrument <component>` succeeds (no InputIsComponent error) and produces an instrumented core module."
@@ -732,7 +732,7 @@ artifacts:
   - id: FEAT-034
     type: feature
     title: v0.30 — meld→witness composition for Component-Model MC/DC
-    status: approved
+    status: implemented
     phase: phase-3
     acceptance-criteria:
       - "Documented, verified flow: `meld fuse <component> -o core.wasm` then `witness instrument core.wasm` → run → report measures the component's branch coverage."

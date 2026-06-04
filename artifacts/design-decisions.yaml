@@ -1289,7 +1289,7 @@ artifacts:
   - id: DEC-037
     type: design-decision
     title: Component MC/DC via meld fusion, not witness component surgery
-    status: approved
+    status: implemented
     description: >
       For Component-Model inputs beyond the single-embedded-core leaf
       case (FEAT-033), the path is composition with meld, not growing
@@ -1331,3 +1331,5 @@ artifacts:
         target: REQ-054
       - type: refines
         target: DEC-036
+      - type: constrained-by
+        target: DEC-003
