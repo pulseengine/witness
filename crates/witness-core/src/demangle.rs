@@ -94,4 +94,37 @@ mod tests {
         assert_eq!(demangle_opt(None), None);
         assert_eq!(demangle_opt(Some("_Z3foov")).as_deref(), Some("foo()"));
     }
+
+    /// MC/DC truth table for the scheme-selection decision (step 5 of the
+    /// feature loop — witness the decision, don't trust a percentage).
+    ///
+    /// Conditions: A = `try_demangle` Ok (Rust), B = `Symbol::new` Ok
+    /// (C++ parse), C = cpp `demangle` Ok (C++ render).
+    ///
+    /// | # | A | B | C | outcome      | covered |
+    /// |---|---|---|---|--------------|---------|
+    /// | 1 | T | – | – | Rust         | yes     |
+    /// | 2 | F | T | T | C++          | yes     |
+    /// | 3 | F | F | – | passthrough  | yes     |
+    /// | 4 | F | T | F | passthrough* | GAP     |
+    ///
+    /// Row 4 is a defensive fall-through: a symbol cpp_demangle *parses*
+    /// but fails to *render* (e.g. recursion-limit). Its observable
+    /// outcome is identical to row 3 (the raw string passes through), and
+    /// no simple deterministic input reaches it — so it is documented as
+    /// an honest gap row rather than covered by a brittle fixture. A and
+    /// B each have a unique-cause pair among rows 1–3; C's independence
+    /// pair (rows 2 vs 4) is the gap.
+    #[test]
+    fn mcdc_decision_arms_reachable_rows() {
+        // Row 1 — A=T.
+        assert_eq!(
+            demangle("_ZN17verdict_leap_year12is_leap_year17hdd79b6616066b4acE"),
+            "verdict_leap_year::is_leap_year"
+        );
+        // Row 2 — A=F, B=T, C=T.
+        assert_eq!(demangle("_Z3foov"), "foo()");
+        // Row 3 — A=F, B=F. Passthrough; output equals input.
+        assert_eq!(demangle("run_row_0"), "run_row_0");
+    }
 }
