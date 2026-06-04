@@ -205,7 +205,18 @@ pub enum BranchKind {
 pub struct BranchEntry {
     pub id: u32,
     pub function_index: u32,
+    /// Raw name-section symbol — ground truth, retained for attestation
+    /// stability (demangler output can drift across versions). May be
+    /// mangled (`_ZN..E`).
     pub function_name: Option<String>,
+    /// v0.31 (DEC-038) — human-readable demangled form of
+    /// `function_name`, derived once here so every emitter
+    /// (report/LCOV/rivet-evidence/predicate/viz) shares one
+    /// demangling. Absent when `function_name` is. Skipped from
+    /// serialization when equal to `function_name` (a non-mangled name)
+    /// to keep manifests of plain-named modules byte-stable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function_display: Option<String>,
     pub kind: BranchKind,
     pub instr_index: u32,
     /// For `BrTableTarget` entries: which target index (0..N) this counter
@@ -225,6 +236,18 @@ pub struct BranchEntry {
     /// schema — flagged by E1 BUG-4. v0.10.3 emits just the integer
     /// (e.g. `"1"`); diagnostic-only field, no consumer parses it.
     pub seq_debug: String,
+}
+
+impl BranchEntry {
+    /// The name to show a human: the demangled `function_display` when
+    /// present, else the raw `function_name`. v0.31 (DEC-038) — emitters
+    /// (report / LCOV / rivet-evidence) call this so readability is
+    /// consistent and the demangling decision lives in one place.
+    pub fn display_name(&self) -> Option<&str> {
+        self.function_display
+            .as_deref()
+            .or(self.function_name.as_deref())
+    }
 }
 
 /// Group of `BranchEntry` ids treated as a single source-level decision
@@ -681,6 +704,13 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
                 id,
                 function_index: scan.function_index,
                 function_name: scan.function_name.clone(),
+                // v0.31 — derive the readable form once. Only populated
+                // when demangling actually changes the symbol, so
+                // plain-named modules keep byte-identical manifests.
+                function_display: scan.function_name.as_deref().and_then(|raw| {
+                    let d = crate::demangle::demangle(raw);
+                    (d != raw).then_some(d)
+                }),
                 kind: branch.kind,
                 instr_index: branch.instr_index,
                 target_index: branch.target_index,

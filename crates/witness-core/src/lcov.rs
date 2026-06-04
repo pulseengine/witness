@@ -54,7 +54,8 @@ pub fn emit_lcov(manifest: &Manifest, record: &RunRecord) -> String {
                 .branches
                 .iter()
                 .find(|b| d.conditions.first().is_some_and(|c| *c == b.id))
-                .and_then(|b| b.function_name.clone())
+                // v0.31 — LCOV FN records carry the demangled name (DEC-038).
+                .and_then(|b| b.display_name().map(str::to_string))
                 .unwrap_or_else(|| format!("decision_{}", d.id));
             if !fn_seen {
                 out.push_str(&format!("FN:{line},{fn_name}\n"));
@@ -193,6 +194,7 @@ mod tests {
                     id: 0,
                     function_index: 1,
                     function_name: Some("f".to_string()),
+                    function_display: None,
                     kind: BranchKind::BrIf,
                     instr_index: 5,
                     target_index: None,
@@ -203,6 +205,7 @@ mod tests {
                     id: 1,
                     function_index: 1,
                     function_name: Some("f".to_string()),
+                    function_display: None,
                     kind: BranchKind::BrIf,
                     instr_index: 6,
                     target_index: None,
@@ -214,6 +217,7 @@ mod tests {
                     id: 2,
                     function_index: 2,
                     function_name: None,
+                    function_display: None,
                     kind: BranchKind::IfThen,
                     instr_index: 1,
                     target_index: None,
@@ -248,6 +252,7 @@ mod tests {
                     id: u32::try_from(i).unwrap(),
                     function_index: 1,
                     function_name: Some("f".to_string()),
+                    function_display: None,
                     kind: BranchKind::BrIf,
                     instr_index: u32::try_from(i).unwrap(),
                     hits: h,

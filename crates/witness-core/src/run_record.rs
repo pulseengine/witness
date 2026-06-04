@@ -183,9 +183,26 @@ pub struct BranchHit {
     pub id: u32,
     pub function_index: u32,
     pub function_name: Option<String>,
+    /// v0.31 (DEC-038) — demangled display form of `function_name`,
+    /// propagated from the manifest so the report reads it without
+    /// re-demangling. Absent for plain (non-mangled) names and for run
+    /// records produced before v0.31.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function_display: Option<String>,
     pub kind: BranchKind,
     pub instr_index: u32,
     pub hits: u64,
+}
+
+impl BranchHit {
+    /// Human-readable name: demangled `function_display` if present,
+    /// else the raw `function_name`. Mirrors
+    /// [`crate::instrument::BranchEntry::display_name`].
+    pub fn display_name(&self) -> Option<&str> {
+        self.function_display
+            .as_deref()
+            .or(self.function_name.as_deref())
+    }
 }
 
 impl RunRecord {
@@ -437,6 +454,7 @@ mod tests {
                 id: u32::try_from(i).unwrap(),
                 function_index: 0,
                 function_name: None,
+                function_display: None,
                 kind: BranchKind::BrIf,
                 instr_index: u32::try_from(i).unwrap(),
                 hits: h,

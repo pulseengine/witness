@@ -1106,6 +1106,9 @@ fn build_run_record(
                 function_name: entries_by_id
                     .get(&b.id)
                     .and_then(|e| e.function_name.clone()),
+                function_display: entries_by_id
+                    .get(&b.id)
+                    .and_then(|e| e.function_display.clone()),
                 kind: b.kind,
                 instr_index: b.instr_index,
                 hits,

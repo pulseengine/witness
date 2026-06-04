@@ -1410,6 +1410,7 @@ mod tests {
                 id: 10 + i,
                 function_index: 0,
                 function_name: None,
+                function_display: None,
                 kind: BranchKind::BrTableTarget,
                 instr_index: 0,
                 hits: 1,
@@ -1418,6 +1419,7 @@ mod tests {
                 id: 13,
                 function_index: 0,
                 function_name: None,
+                function_display: None,
                 kind: BranchKind::BrTableDefault,
                 instr_index: 0,
                 hits: 1,
@@ -1473,6 +1475,7 @@ mod tests {
                 id: 10 + i,
                 function_index: 0,
                 function_name: None,
+                function_display: None,
                 kind: if i < 2 {
                     BranchKind::BrTableTarget
                 } else {
