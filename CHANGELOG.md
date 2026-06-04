@@ -7,6 +7,48 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-06-04
+
+Headline: **Readable function attribution** — coverage reports now
+show demangled names (`verdict_leap_year::is_leap_year`) instead of
+raw mangled symbols (`_ZN17verdict_leap_year12is_leap_year17h..E`),
+across the report (text + JSON) and LCOV. Makes the v0.30
+meld→witness composition legible for real components.
+
+### Added — demangle function names in witness-core (PR #77, FEAT-035)
+
+- New `demangle` helper in witness-core: Rust symbols via
+  `rustc-demangle` (the `::h<hash>` disambiguator dropped), C++ via
+  `cpp_demangle`, identity passthrough for anything unrecognised.
+- `BranchEntry` / `BranchHit` gain a derived `function_display`
+  field; the raw `function_name` is **retained** as attestation
+  ground truth (demangler output can drift across versions). A new
+  `display_name()` accessor is used by the report and LCOV emitters.
+- Demangling happens **once**, at the attribution site (DEC-038),
+  rather than each presentation layer re-demangling — witness-viz
+  previously demangled alone, so `report`/`lcov`/`rivet-evidence`
+  leaked mangled names.
+
+### Falsification
+
+The planned v0.31 was "wire up `meld --remap` + DWARF for component
+name attribution." Running the pipeline falsified that twice: meld
+has **no `--remap`** (the flag is `meld fuse --preserve-names`), and
+names already flow end-to-end into witness when that flag is used —
+zero witness changes needed. The real gap was witness-core storing
+the raw mangled symbol. So v0.31 demangles at the source instead.
+The imprecise `--remap` reference in the v0.30 quickstart + FEAT-034
+is corrected to `--preserve-names`.
+
+### Honest bound
+
+The demangle decision's MC/DC truth table is documented in-tree; row
+4 (a C++ symbol that parses but fails to render) is an unreached
+defensive fall-through whose observable outcome equals passthrough —
+recorded as a gap rather than covered by a brittle fixture.
+
+New rivet artifacts: REQ-055, FEAT-035, DEC-038.
+
 ## [0.30.0] — 2026-06-03
 
 Headline: **MC/DC on Wasm Components via meld** — fuse a component
