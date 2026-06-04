@@ -7,6 +7,53 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-06-04
+
+Headline: **i64 overflow-safe hit counters** — a fix for a latent
+correctness bug where hot branches misreported coverage at
+real-application scale.
+
+### Fixed — counter overflow at scale (PR #79, FEAT-036)
+
+The per-branch hit counter (`__witness_counter_<id>`) was an i32
+incremented with `i32.add` (wraps at 2³²), read back by
+reinterpreting the bits — so a branch hit more than `i32::MAX`
+(~2.1 billion) times **sign-flipped and decoded as a garbage u64**,
+silently misreporting coverage. The report side already carries
+`hits` as `u64`.
+
+- The counter global is now **i64** (`i64.const 0` init, `i64.add`
+  increment), pushing the wrap bound to an unreachable 2⁶⁴.
+- brval/brcnt MC/DC-reconstruction globals **stay i32** (they carry
+  bit patterns / outcomes, not accumulating counts). A dedicated
+  i32 increment helper decouples the br_table brcnt path from the
+  counter helper.
+- The host counter readback was already `Val::I64`-ready — no run
+  changes; two surgical edits in the instrumenter.
+
+### Falsification
+
+The roadmap's planned v0.32 was the syscall-heavy component run
+path. A spike falsified its feasibility as a one-release item: a
+fused syscall-heavy core instruments fine but cannot run — its ~30
+`wasi:cli/io@0.2.6` canonical-ABI imports are unsatisfiable by the
+embedded runtime, re-componentizing is blocked, and there is no
+off-the-shelf core-level WASI-p2 host (the `--harness` subprocess is
+the only entry, and a real p2 host is a multi-release effort). So
+v0.32 pivoted to a wall-free, self-contained win — which surfaced
+the i32-counter overflow bug above.
+
+### Scope (DEC-039)
+
+REQ-036 also asks for a saturation guard and a streaming
+counter-encoding mode. The saturation guard is deliberately **not**
+added (a compare+branch on every increment is the worst place to
+spend cycles, against a bound i64 already makes unreachable);
+streaming encoding is deferred.
+
+New rivet artifacts: DEC-039, FEAT-036 (satisfying the counter-width
+clause of the pre-existing REQ-036).
+
 ## [0.31.0] — 2026-06-04
 
 Headline: **Readable function attribution** — coverage reports now
