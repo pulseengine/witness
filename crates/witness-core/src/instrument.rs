@@ -656,11 +656,13 @@ pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Ve
             if let Some(&hint) = scan.hints.get(&idx_in_scan) {
                 chain_hints.insert(id, hint);
             }
+            // v0.32 (DEC-039) — i64 so a hot branch's hit count cannot
+            // wrap/sign-flip past i32::MAX at real-application scale.
             let counter = module.globals.add_local(
-                ValType::I32,
+                ValType::I64,
                 true,
                 false,
-                ConstExpr::Value(Value::I32(0)),
+                ConstExpr::Value(Value::I64(0)),
             );
             module
                 .exports
@@ -1536,7 +1538,7 @@ fn build_brtable_helper(
                         local: selector_local,
                     }));
                     then.instr(Instr::GlobalSet(GlobalSet { global: brval }));
-                    counter_inc_into(then, brcnt);
+                    i32_global_inc_into(then, brcnt);
                 },
                 |_else| {},
             );
@@ -1567,7 +1569,7 @@ fn build_brtable_helper(
                 then.instr(Instr::GlobalSet(GlobalSet {
                     global: default_brval,
                 }));
-                counter_inc_into(then, default_brcnt);
+                i32_global_inc_into(then, default_brcnt);
             },
             |_else| {},
         );
@@ -1584,15 +1586,30 @@ fn build_brtable_helper(
 }
 
 /// Append `counter += 1` to the given instruction-sequence builder.
+/// The counter global is i64 (DEC-039), so the increment is i64.add.
 fn counter_inc_into(seq: &mut walrus::InstrSeqBuilder<'_>, counter: GlobalId) {
     seq.instr(Instr::GlobalGet(GlobalGet { global: counter }));
+    seq.instr(Instr::Const(Const {
+        value: Value::I64(1),
+    }));
+    seq.instr(Instr::Binop(Binop {
+        op: BinaryOp::I64Add,
+    }));
+    seq.instr(Instr::GlobalSet(GlobalSet { global: counter }));
+}
+
+/// Append `g += 1` for an **i32** global. Used for the brcnt
+/// MC/DC-reconstruction globals, which stay i32 (DEC-039) — distinct
+/// from the i64 hit counter handled by `counter_inc_into`.
+fn i32_global_inc_into(seq: &mut walrus::InstrSeqBuilder<'_>, g: GlobalId) {
+    seq.instr(Instr::GlobalGet(GlobalGet { global: g }));
     seq.instr(Instr::Const(Const {
         value: Value::I32(1),
     }));
     seq.instr(Instr::Binop(Binop {
         op: BinaryOp::I32Add,
     }));
-    seq.instr(Instr::GlobalSet(GlobalSet { global: counter }));
+    seq.instr(Instr::GlobalSet(GlobalSet { global: g }));
 }
 
 /// v0.8 — per-br_if classification hint.
@@ -2100,13 +2117,14 @@ fn counter_inc_seq(func: &mut walrus::LocalFunction, counter: GlobalId) -> Instr
 }
 
 fn counter_inc_instrs(counter: GlobalId) -> [Instr; 4] {
+    // i64 counter (DEC-039) — increment with i64.add.
     [
         Instr::GlobalGet(GlobalGet { global: counter }),
         Instr::Const(Const {
-            value: Value::I32(1),
+            value: Value::I64(1),
         }),
         Instr::Binop(Binop {
-            op: BinaryOp::I32Add,
+            op: BinaryOp::I64Add,
         }),
         Instr::GlobalSet(GlobalSet { global: counter }),
     ]
@@ -2146,6 +2164,51 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|e| e.kind == BranchKind::IfThen));
         assert!(entries.iter().any(|e| e.kind == BranchKind::IfElse));
+    }
+
+    /// v0.32 (FEAT-036 / DEC-039) — the hit counter global is i64 so it
+    /// cannot wrap/sign-flip past i32::MAX at real-application scale. The
+    /// brval/brcnt MC/DC-reconstruction globals stay i32 (bit patterns,
+    /// not accumulating counts). This is the oracle for the widening.
+    #[test]
+    fn hit_counter_global_is_i64_brval_brcnt_stay_i32() {
+        let wat_src = r#"
+            (module
+              (func (export "f") (param i32) (result i32)
+                local.get 0
+                if (result i32)
+                  i32.const 1
+                else
+                  i32.const 0
+                end))
+        "#;
+        let mut module = wat_to_module(wat_src);
+        instrument_module(&mut module, "test").unwrap();
+
+        let ty_of = |prefix: &str| -> Vec<ValType> {
+            module
+                .exports
+                .iter()
+                .filter(|e| e.name.starts_with(prefix))
+                .filter_map(|e| match e.item {
+                    walrus::ExportItem::Global(g) => Some(module.globals.get(g).ty),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let counters = ty_of(COUNTER_EXPORT_PREFIX);
+        assert!(!counters.is_empty(), "expected counter globals");
+        assert!(
+            counters.iter().all(|t| *t == ValType::I64),
+            "hit counters must be i64, got {counters:?}"
+        );
+        for t in ty_of(BRVAL_EXPORT_PREFIX) {
+            assert_eq!(t, ValType::I32, "brval must stay i32");
+        }
+        for t in ty_of(BRCNT_EXPORT_PREFIX) {
+            assert_eq!(t, ValType::I32, "brcnt must stay i32");
+        }
     }
 
     #[test]
