@@ -1373,3 +1373,44 @@ artifacts:
         target: REQ-055
       - type: constrained-by
         target: DEC-003
+
+  # -------------------------------------------------------------------------
+  # v0.32 — counter width
+  # -------------------------------------------------------------------------
+  - id: DEC-039
+    type: design-decision
+    title: Hit counters are i64 (wrapping), not i32 and not saturation-guarded
+    status: proposed
+    description: >
+      The per-branch hit counter global (`__witness_counter_<id>`) is
+      an i64, incremented with i64.add. The brval/brcnt MC/DC
+      reconstruction globals stay i32 (they carry bit patterns /
+      outcomes, not accumulating counts), and linear-memory cursor
+      arithmetic stays i32 (wasm32 addresses). No per-increment
+      saturation guard is added.
+    rationale: >
+      The counters were i32 incremented with i32.add (wraps at 2^32),
+      and the host read them back reinterpreting the bits — so a branch
+      hit more than i32::MAX (~2.1e9) times sign-flipped and decoded as
+      a garbage u64, silently misreporting coverage at real-application
+      scale. The report side already carries hits as u64, so i64 at the
+      wasm level simply aligns the representation. i64 wraps only at
+      2^64 (~1.8e19) — unreachable in any real run, fuzz corpus
+      included. REQ-036 says "saturating"; we deliberately do NOT add a
+      saturation guard because it would put a branch on the hottest
+      path (every counter increment), bloating instrumentation and
+      runtime for a bound that i64 already makes unreachable. The host
+      readback already handles Val::I64, so the change is two edits in
+      the instrumenter.
+    alternatives: >
+      Keep i32 + add a saturation guard — rejected: a compare+branch on
+      every increment is the worst place to spend cycles, and still
+      caps at 2^32. True saturating i64 (guarded) — rejected for the
+      same hot-path cost against an unreachable 2^64 bound. The
+      streaming counter-encoding mode for modules exceeding the
+      exported-globals cap (REQ-036's second clause) is deferred to a
+      later release; this DEC covers counter width only.
+    tags: [v0.32, scaling, instrumentation, counters]
+    links:
+      - type: satisfies
+        target: REQ-036

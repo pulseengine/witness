@@ -790,3 +790,34 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-055
+
+  # -------------------------------------------------------------------------
+  # v0.32 — i64 overflow-safe hit counters
+  # -------------------------------------------------------------------------
+  - id: FEAT-036
+    type: feature
+    title: v0.32 — i64 overflow-safe hit counters
+    status: proposed
+    phase: phase-3
+    acceptance-criteria:
+      - "Each `__witness_counter_<id>` global is emitted as i64 and incremented with i64.add; brval/brcnt globals remain i32."
+      - "A counter accumulates past i32::MAX without wrapping or sign-flipping; the host reads the full magnitude back (readback already handles Val::I64)."
+      - "Existing MC/DC truth tables for a fixture are unchanged (widening adds no guest branch / control flow)."
+      - "Unit test asserts the emitted counter global type is i64 and the increment opcode is i64.add."
+    description: >
+      Closes the counter-width clause of REQ-036 (DEC-039). The hit
+      counter was an i32 incremented with i32.add — wrapping at 2^32
+      and sign-flipping past i32::MAX when read back, silently
+      misreporting coverage on hot branches at real-application scale.
+      Widening to i64 aligns the wasm representation with the already-
+      u64 report side and pushes the wrap bound to an unreachable 2^64.
+      Two surgical edits in instrument.rs (counter global type + init,
+      and the increment sequence); no new control flow. The streaming
+      counter-encoding mode (REQ-036 second clause) and a true
+      saturation guard are deliberately out of scope (DEC-039).
+    tags: [v0.32, scaling, instrumentation, counters]
+    links:
+      - type: satisfies
+        target: REQ-036
+      - type: implements
+        target: DEC-039
