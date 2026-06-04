@@ -41,7 +41,7 @@ name = "cargo-witness"
 path = "src/bin/cargo-witness.rs"
 
 [dependencies]
-witness-mcdc-core = { path = "../witness-core", version = "0.32.0" }
+witness-mcdc-core = { path = "../witness-core", version = "0.33.0" }
 walrus = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }

@@ -7,6 +7,50 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-06-04
+
+Headline: **Sound br_table MC/DC** — a `match`/`br_table` decision is
+no longer reported as full MC/DC just because every arm executed.
+
+### Fixed — br_table MC/DC soundness (PR #81, FEAT-038)
+
+A `br_table` (Rust `match` lowered to a jump table) decision was
+marked `FullMcdc` whenever no arm was `Dead`, deriving each arm's
+"Proved" status from `hits > 0` alone — branch coverage mislabelled
+as MC/DC. A single observed discriminant (or a run lacking the raw
+discriminant capture) thus "proved" arms with **zero**
+independent-effect evidence. This contradicts witness's core
+promise (DEC-002: branch coverage is not MC/DC).
+
+- A br_table decision is now `FullMcdc` **only if** the bit-level
+  `br_table_audit` (independent-effect over the discriminant's bits)
+  is `Proved`; otherwise `Partial` (any arm ran) or `Unreached`. The
+  verdict never comes from arm-hit counts.
+- The mcdc report now surfaces the bit-audit (bit width, per-bit
+  status, witness discriminant rows) — the evidence that backs or
+  refuses the verdict.
+
+Verified end-to-end on a `match`→br_table fixture: a single
+discriminant reports `Partial` (audit Gap); all discriminants report
+`FullMcdc` (audit Proved, per-bit proofs shown).
+
+Closes REQ-037; DEC-041 supersedes the v0.6 DEC-015 deferral.
+
+### Falsification
+
+The roadmap's v0.33 candidate was a streaming counter-encoding mode
+for "modules exceeding the host's exported-globals cap." A spike
+falsified it twice: there is **no globals cap** (instrumentation
+scales to 200k+ counters), and a readback I suspected was O(N²) was
+measured **identical** before/after a rewrite (wasmtime `get_global`
+is O(1); a pathological 50k-branch *single function* took 180s in
+**Cranelift compilation**, not readback — real code spreads branches
+across functions). No code shipped from that dead end; recorded as a
+negative result. Pivoting to REQ-037 surfaced the real, higher-value
+soundness bug fixed above.
+
+New rivet artifacts: DEC-041, FEAT-038.
+
 ## [0.32.0] — 2026-06-04
 
 Headline: **i64 overflow-safe hit counters** — a fix for a latent
