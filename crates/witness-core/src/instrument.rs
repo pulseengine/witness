@@ -2190,9 +2190,12 @@ mod tests {
                 .exports
                 .iter()
                 .filter(|e| e.name.starts_with(prefix))
-                .filter_map(|e| match e.item {
-                    walrus::ExportItem::Global(g) => Some(module.globals.get(g).ty),
-                    _ => None,
+                .filter_map(|e| {
+                    #[allow(clippy::wildcard_enum_match_arm)]
+                    match e.item {
+                        walrus::ExportItem::Global(g) => Some(module.globals.get(g).ty),
+                        _ => None,
+                    }
                 })
                 .collect()
         };
