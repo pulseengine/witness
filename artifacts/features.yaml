@@ -821,3 +821,32 @@ artifacts:
         target: REQ-036
       - type: implements
         target: DEC-039
+
+  # -------------------------------------------------------------------------
+  # v0.33 — sound br_table MC/DC verdict
+  # -------------------------------------------------------------------------
+  - id: FEAT-038
+    type: feature
+    title: v0.33 — sound br_table MC/DC verdict (bit-audit, not arm-hits)
+    status: proposed
+    phase: phase-3
+    acceptance-criteria:
+      - "A br_table arm is no longer reported as MC/DC-'proved' merely because hits>0; a single observed discriminant yields a non-full (Gap/Partial) verdict for that decision."
+      - "The br_table decision's MC/DC status is derived from the existing bit-level br_table_audit (per-bit independent-effect)."
+      - "The mcdc text report surfaces the bit-level audit (bit_width, per-bit status, witness discriminant pairs)."
+      - "Falsifying oracle: a single-discriminant run over a match→br_table fixture does NOT show the arm as Proved (it does today); full-discriminant coverage proves the observed bits."
+    description: >
+      Closes REQ-037 and fixes a soundness bug (DEC-041). The per-arm
+      verdict marked an arm Proved iff executed once (hits>0), with no
+      independent-effect pair — false MC/DC. The sound bit-level audit
+      (derive_br_table_audit) was already computed but unused by the
+      verdict/report. This feature wires the audit into the decision
+      verdict and surfaces it, so br_table dispatch gets genuine MC/DC
+      evidence (or an honest Gap) instead of branch coverage mislabeled
+      as "proved."
+    tags: [v0.33, mcdc, br_table, soundness]
+    links:
+      - type: satisfies
+        target: REQ-037
+      - type: implements
+        target: DEC-041

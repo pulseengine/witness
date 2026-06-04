@@ -1414,3 +1414,49 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-036
+
+  # -------------------------------------------------------------------------
+  # v0.33 — br_table MC/DC verdict soundness
+  # -------------------------------------------------------------------------
+  - id: DEC-041
+    type: design-decision
+    title: br_table MC/DC verdict comes from the bit-level audit, not arm-hits
+    status: proposed
+    description: >
+      A br_table decision's MC/DC verdict is derived from the
+      bit-level `br_table_audit` (independent-effect over the
+      discriminant's bits), not from per-arm execution counts. An arm
+      being taken (hits > 0) is reported as branch coverage, never as
+      "MC/DC proved." The decision is FullMcdc only when the audit
+      proves every observed bit; a single observed discriminant yields
+      Gap/Partial, not a full pass. The mcdc report surfaces the
+      bit-level audit (bit_width, per-bit status + witness pairs).
+      Supersedes DEC-015 (which deferred br_table MC/DC to "v0.7").
+    rationale: >
+      A v0.33 spike found a soundness bug: the per-arm condition
+      verdict (mcdc_report.rs ~line 700) marked an arm `Proved` iff
+      `hits > 0`, with `pair: None` — i.e. proved by a SINGLE
+      execution, no independent-effect demonstrated. Running every arm
+      once would report false FullMcdc on what is really branch
+      coverage, violating DEC-002 (branch coverage is not MC/DC) and
+      witness's core promise. Decisively, the sound mechanism already
+      exists: `derive_br_table_audit` computes a bit-level audit
+      (bit_width, per-bit Proved/Partial/Gap, witness pairs) and
+      attaches it to the decision — it was simply not wired into the
+      verdict or the report. So the fix is to make the verdict
+      consistent with the audit, not to invent new analysis.
+    alternatives: >
+      Keep per-arm conditions but require a contrast (arm taken AND
+      some other discriminant observed) — simpler, but a weaker model
+      than the bit-level audit witness already chose, and it would
+      report two competing notions of "proved." Leave hits>0 and just
+      relabel — rejected: the status would still be unsound. The
+      DWARF-guard reconstruction DEC-015 feared (per-arm guard
+      expressions) is NOT required: the discriminant-bit model is the
+      MC/DC analogue for table dispatch.
+    tags: [v0.33, mcdc, br_table, soundness]
+    links:
+      - type: satisfies
+        target: REQ-037
+      - type: refines
+        target: DEC-015
