@@ -503,6 +503,25 @@ impl McdcReport {
                     }
                 }
             }
+            // v0.33 (DEC-041) — surface the discriminant-bit audit, the
+            // sound MC/DC evidence for table dispatch. The per-arm lines
+            // above are branch coverage; this is what backs (or refuses)
+            // the FullMcdc verdict.
+            if let Some(audit) = &d.br_table_audit {
+                out.push_str(&format!(
+                    "  br_table bit-audit ({} bit(s)): {:?}\n",
+                    audit.bit_width, audit.status
+                ));
+                for bit in &audit.bits {
+                    match &bit.pair {
+                        Some(pair) => out.push_str(&format!(
+                            "    bit {}: {:?} via discriminant rows {}+{}\n",
+                            bit.bit, bit.status, pair[0], pair[1]
+                        )),
+                        None => out.push_str(&format!("    bit {}: {:?}\n", bit.bit, bit.status)),
+                    }
+                }
+            }
         }
         out
     }
@@ -715,19 +734,28 @@ fn analyse_decision(
         let any_proved = conditions
             .iter()
             .any(|c| matches!(c.status, ConditionStatus::Proved));
-        let any_dead = conditions
-            .iter()
-            .any(|c| matches!(c.status, ConditionStatus::Dead));
-        let status = match (any_proved, any_dead) {
-            (true, false) => DecisionStatus::FullMcdc,
-            (true, true) => DecisionStatus::Partial,
-            (false, true) => DecisionStatus::Unreached,
-            (false, false) => DecisionStatus::Unreached,
-        };
         // v0.11.5 — derive the discriminant-bit audit verdict from
         // the captured `raw_brvals` per row. Skipped silently when
         // pre-v0.11.5 instrumentation produced no raw values.
         let br_table_audit = derive_br_table_audit(d);
+        // v0.33 (DEC-041) — the MC/DC verdict is the bit-level audit,
+        // never arm execution. Marking an arm Proved because hits>0 (and
+        // the decision FullMcdc when no arm is Dead) was branch coverage
+        // mislabelled as MC/DC: a single observation, or rows lacking the
+        // raw discriminant, can't demonstrate independent effect.
+        // FullMcdc now requires a Proved audit; otherwise the decision is
+        // Partial when any arm ran, else Unreached.
+        let audit_proved = matches!(
+            br_table_audit.as_ref().map(|a| &a.status),
+            Some(BrTableAuditStatus::Proved)
+        );
+        let status = if audit_proved {
+            DecisionStatus::FullMcdc
+        } else if any_proved {
+            DecisionStatus::Partial
+        } else {
+            DecisionStatus::Unreached
+        };
         // br_table-shape decisions don't have boolean MC/DC pair-
         // finding to filter per context; per_context stays empty.
         return DecisionVerdict {
@@ -1441,6 +1469,72 @@ mod tests {
             );
             assert!(bit.pair.is_some(), "bit {} missing pair", bit.bit);
         }
+    }
+
+    /// v0.33 (DEC-041) — soundness oracle. Both arms of a 2-way
+    /// br_table are hit, but the rows carry NO `raw_brvals`, so the
+    /// bit-level audit cannot run (None). The pre-v0.33 verdict marked
+    /// each arm Proved (hits>0) and the decision FullMcdc when no arm
+    /// was Dead — claiming full MC/DC with zero independent-effect
+    /// evidence. The verdict must follow the audit: with no audit there
+    /// is no proof, so the decision must NOT be FullMcdc.
+    #[test]
+    fn br_table_all_arms_hit_without_audit_is_not_full_mcdc() {
+        let mut rows: Vec<DecisionRow> = Vec::new();
+        // Both arms taken, but raw_brvals empty → no bit-audit possible.
+        for (row_id, cond_idx) in [(0u32, 0u32), (1, 1)] {
+            let mut evaluated = BTreeMap::new();
+            evaluated.insert(cond_idx, true);
+            rows.push(DecisionRow {
+                row_id,
+                evaluated,
+                outcome: None,
+                raw_brvals: BTreeMap::new(),
+                inline_context: None,
+                inline_chain: None,
+            });
+        }
+        let d = DecisionRecord {
+            id: 0,
+            source_file: Some("switch.rs".to_string()),
+            source_line: Some(10),
+            inline_context: None,
+            condition_branch_ids: vec![10, 11],
+            rows,
+        };
+        let mut record = record_with_decision(d);
+        record.branches = vec![
+            BranchHit {
+                id: 10,
+                function_index: 0,
+                function_name: None,
+                function_display: None,
+                kind: BranchKind::BrTableTarget,
+                instr_index: 0,
+                hits: 1,
+            },
+            BranchHit {
+                id: 11,
+                function_index: 0,
+                function_name: None,
+                function_display: None,
+                kind: BranchKind::BrTableDefault,
+                instr_index: 0,
+                hits: 1,
+            },
+        ];
+        let report = McdcReport::from_record(&record);
+        let dec = report.decisions.first().expect("decision");
+        assert!(
+            dec.br_table_audit.is_none(),
+            "no raw_brvals → audit should be None: {:?}",
+            dec.br_table_audit
+        );
+        assert!(
+            !matches!(dec.status, DecisionStatus::FullMcdc),
+            "both arms hit but no bit-audit proof — must not be FullMcdc, got {:?}",
+            dec.status
+        );
     }
 
     #[test]
