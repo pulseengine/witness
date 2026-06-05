@@ -23,7 +23,10 @@ jobs:
     runs-on: [self-hosted, linux, x64, light]
     steps:
       - uses: actions/checkout@v5
-      # Pinned to match rust-toolchain.toml — no moving-stable skew.
+      # Pinned (not @stable) so a moving stable can't surface rustfmt
+      # diffs a developer's stable never saw. Bump deliberately, in
+      # lockstep with the clippy job. NOT a repo-wide rust-toolchain.toml
+      # (that would also override the MSRV + wasm-target jobs).
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt
@@ -34,7 +37,9 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v5
-      # Pinned to match rust-toolchain.toml — no moving-stable skew.
+      # Pinned (not @stable) so a moving stable can't surface NEW clippy
+      # lints a developer's stable never saw — the skew that bit v0.32.
+      # Bump deliberately, in lockstep with the fmt job.
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: clippy

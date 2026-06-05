@@ -39,13 +39,15 @@ decision-granularity).
 - DESIGN.md / AGENTS.md v0.7 roadmap annotated with the measured status
   so future work doesn't re-walk the streaming-encoding dead end.
 
-### CI — pinned toolchain
+### CI — pinned lint toolchain
 
-`rust-toolchain.toml` (1.95.0) is now the single source of truth for
-local builds, and the Format + Clippy CI jobs are pinned to it. This
-ends the recurring local-vs-CI clippy/rustfmt skew (a moving `@stable`
-in CI surfacing lints an older local stable never saw — it bit v0.32).
-Test stays on `@stable`; MSRV stays `@1.92.0`.
+The Format + Clippy CI jobs are pinned to `dtolnay/rust-toolchain@1.95.0`
+(was `@stable`). This ends the recurring skew where CI's moving stable
+surfaced new clippy/rustfmt lints a developer's stable never saw (it
+bit v0.32). Pinned per-job rather than via a repo-wide
+`rust-toolchain.toml` on purpose — a repo-wide pin would also override
+the MSRV job (`@1.92.0`) and the wasm-target jobs, which must keep their
+own toolchains. Test stays on `@stable` to catch real toolchain breakage.
 
 New rivet artifact: DEC-042.
 
