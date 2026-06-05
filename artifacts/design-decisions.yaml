@@ -1340,7 +1340,7 @@ artifacts:
   - id: DEC-038
     type: design-decision
     title: Demangle once in witness-core; retain the raw symbol for attestation
-    status: proposed
+    status: implemented
     description: >
       Demangling of function symbols happens once, in a shared
       witness-core helper applied at the branch-attribution site, and
@@ -1380,7 +1380,7 @@ artifacts:
   - id: DEC-039
     type: design-decision
     title: Hit counters are i64 (wrapping), not i32 and not saturation-guarded
-    status: proposed
+    status: implemented
     description: >
       The per-branch hit counter global (`__witness_counter_<id>`) is
       an i64, incremented with i64.add. The brval/brcnt MC/DC
@@ -1421,7 +1421,7 @@ artifacts:
   - id: DEC-041
     type: design-decision
     title: br_table MC/DC verdict comes from the bit-level audit, not arm-hits
-    status: proposed
+    status: implemented
     description: >
       A br_table decision's MC/DC verdict is derived from the
       bit-level `br_table_audit` (independent-effect over the
@@ -1467,7 +1467,7 @@ artifacts:
   - id: DEC-042
     type: design-decision
     title: A reached decision with zero conditions is NoWitness, not FullMcdc
-    status: proposed
+    status: implemented
     description: >
       A decision that was reached (has rows) but carries no conditions
       is reported as NoWitness, never FullMcdc. Applies to both the

@@ -765,7 +765,7 @@ artifacts:
   - id: FEAT-035
     type: feature
     title: v0.31 — demangle function names in witness-core attribution
-    status: proposed
+    status: implemented
     phase: phase-3
     acceptance-criteria:
       - "witness-core exposes a single `demangle` helper (rustc-demangle for Rust, cpp_demangle for C++, identity passthrough otherwise) used at the attribution site."
@@ -797,7 +797,7 @@ artifacts:
   - id: FEAT-036
     type: feature
     title: v0.32 — i64 overflow-safe hit counters
-    status: proposed
+    status: implemented
     phase: phase-3
     acceptance-criteria:
       - "Each `__witness_counter_<id>` global is emitted as i64 and incremented with i64.add; brval/brcnt globals remain i32."
@@ -828,7 +828,7 @@ artifacts:
   - id: FEAT-038
     type: feature
     title: v0.33 — sound br_table MC/DC verdict (bit-audit, not arm-hits)
-    status: proposed
+    status: implemented
     phase: phase-3
     acceptance-criteria:
       - "A br_table arm is no longer reported as MC/DC-'proved' merely because hits>0; a single observed discriminant yields a non-full (Gap/Partial) verdict for that decision."
