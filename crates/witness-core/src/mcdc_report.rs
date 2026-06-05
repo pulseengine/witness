@@ -849,7 +849,10 @@ fn analyse_decision(
         (true, false) => DecisionStatus::FullMcdc,
         (true, true) => DecisionStatus::Partial,
         (false, true) => DecisionStatus::NoWitness,
-        (false, false) => DecisionStatus::FullMcdc, // 0 conditions; degenerate
+        // A reached decision with zero conditions has nothing to prove;
+        // counting it as FullMcdc overstates coverage (soundness audit
+        // 2026-06). Report NoWitness so it never inflates the numerator.
+        (false, false) => DecisionStatus::NoWitness,
     };
 
     // v0.13.0 — per-context drill-down. Filter rows by their
@@ -1018,7 +1021,9 @@ fn derive_per_context(
             (true, false) => DecisionStatus::FullMcdc,
             (true, true) => DecisionStatus::Partial,
             (false, true) => DecisionStatus::NoWitness,
-            (false, false) => DecisionStatus::FullMcdc,
+            // Per-context bucket with zero conditions proves nothing;
+            // NoWitness, not a vacuous FullMcdc (soundness audit 2026-06).
+            (false, false) => DecisionStatus::NoWitness,
         };
         let row_ids: Vec<u32> = ctx_rows.iter().map(|r| r.row_id).collect();
         // v0.16.0 — the bucket key is now the full chain
@@ -1248,6 +1253,30 @@ mod tests {
             inline_context: None,
             inline_chain: None,
         }
+    }
+
+    /// Soundness audit (2026-06): a decision that was reached (has rows)
+    /// but carries ZERO conditions must not be reported as FullMcdc — a
+    /// vacuous decision counted in the "full MC/DC" numerator overstates
+    /// coverage, the same failure class as the v0.33 br_table bug. It has
+    /// nothing to prove, so the honest status is NoWitness, not FullMcdc.
+    #[test]
+    fn conditionless_reached_decision_is_not_full_mcdc() {
+        let d = DecisionRecord {
+            id: 0,
+            source_file: Some("x.rs".to_string()),
+            source_line: Some(1),
+            inline_context: None,
+            condition_branch_ids: vec![],
+            rows: vec![row(0, &[], Some(true))],
+        };
+        let report = McdcReport::from_record(&record_with_decision(d));
+        let dec = report.decisions.first().expect("decision");
+        assert!(
+            !matches!(dec.status, DecisionStatus::FullMcdc),
+            "a 0-condition decision must not be FullMcdc, got {:?}",
+            dec.status
+        );
     }
 
     fn record_with_decision(d: DecisionRecord) -> RunRecord {

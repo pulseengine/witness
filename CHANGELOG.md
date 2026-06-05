@@ -7,6 +7,50 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-06-05
+
+Headline: **MC/DC verdict soundness audit** + roadmap/toolchain hygiene.
+
+### Fixed — conditionless decision is not FullMcdc (DEC-042)
+
+A deliberate audit of every verdict-assignment site (prompted by the
+v0.33 br_table soundness bug) confirmed the boolean MC/DC path is
+sound — a condition is `Proved` only when `find_independent_effect_pair`
+returns a genuine row pair — and the br_table path is fixed (v0.33).
+The one remaining smell: the `(no proved, no gap)` match arm mapped to
+`FullMcdc` ("0 conditions; degenerate"). That arm fires for a reached-
+but-conditionless decision, counting a vacuous decision in the "N/N
+full MC/DC" numerator — overstating coverage, the same failure class
+as the br_table bug. Both sites (headline verdict + per-context
+buckets) now map to `NoWitness`. Satisfies REQ-006 (sound
+decision-granularity).
+
+### Changed — roadmap reconciled to measured reality
+
+- rivet artifacts that shipped in v0.31–v0.33 but were still `proposed`
+  are marked `implemented` (REQ-055/FEAT-035/DEC-038, FEAT-036/DEC-039,
+  FEAT-038/DEC-041/REQ-037).
+- REQ-036 reconciled: i64 counters satisfy it; the "saturating" and
+  "streaming counter encoding for a globals cap" clauses are descoped
+  as **falsified** — no exported-globals cap exists (instrumentation
+  scales to 200k+ counters); the 50k-counter slowdown observed in the
+  spike was wasmtime compiling a pathological single-function module,
+  not witness.
+- DESIGN.md / AGENTS.md v0.7 roadmap annotated with the measured status
+  so future work doesn't re-walk the streaming-encoding dead end.
+
+### CI — pinned lint toolchain
+
+The Format + Clippy CI jobs are pinned to `dtolnay/rust-toolchain@1.95.0`
+(was `@stable`). This ends the recurring skew where CI's moving stable
+surfaced new clippy/rustfmt lints a developer's stable never saw (it
+bit v0.32). Pinned per-job rather than via a repo-wide
+`rust-toolchain.toml` on purpose — a repo-wide pin would also override
+the MSRV job (`@1.92.0`) and the wasm-target jobs, which must keep their
+own toolchains. Test stays on `@stable` to catch real toolchain breakage.
+
+New rivet artifact: DEC-042.
+
 ## [0.33.0] — 2026-06-04
 
 Headline: **Sound br_table MC/DC** — a `match`/`br_table` decision is

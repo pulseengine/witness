@@ -507,14 +507,23 @@ artifacts:
   - id: REQ-036
     type: requirement
     title: Counter overflow prevention at scale
-    status: proposed
+    status: implemented
     description: >
-      The system shall use i64 saturating counters for per-condition
-      hits and shall provide a streaming counter encoding mode for
-      modules whose decision count exceeds the host's exported-globals
-      cap. Property-based fuzz-test corpora must not be able to wrap
-      counters in seconds.
-    tags: [v0.7, scaling, instrumentation]
+      The system shall count per-condition hits with a width that
+      cannot wrap under any realistic run. Satisfied by i64 counters
+      (FEAT-036, DEC-039): the wrap bound is 2^64, unreachable by any
+      fuzz corpus.
+
+      RECONCILED (v0.33 spike, see DEC-039 and the v0.33 readback
+      falsification): the original wording also demanded "saturating"
+      counters and "a streaming counter encoding mode for modules whose
+      decision count exceeds the host's exported-globals cap." Both were
+      descoped as unnecessary, measured: there is no exported-globals
+      cap (instrumentation scales to 200k+ counters), and a per-
+      increment saturation guard would bloat the hottest path against a
+      bound i64 already makes unreachable. The residual large-module
+      cost is wasmtime compilation, outside witness.
+    tags: [v0.32, scaling, instrumentation]
     fields:
       priority: must
       category: non-functional
@@ -522,7 +531,7 @@ artifacts:
   - id: REQ-037
     type: requirement
     title: BrTable per-row MC/DC reconstruction
-    status: proposed
+    status: implemented
     description: >
       The system shall extend the per-row instrumentation to br_table
       dispatches, enabling MC/DC analysis for Rust pattern-match arms
@@ -922,7 +931,7 @@ artifacts:
   - id: REQ-055
     type: requirement
     title: Readable (demangled) function attribution in coverage evidence
-    status: proposed
+    status: implemented
     description: >
       The system shall surface a human-readable, demangled function
       name for each branch's attribution wherever witness emits
