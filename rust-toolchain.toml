@@ -1,0 +1,11 @@
+# Pinned toolchain — single source of truth for local builds, and the
+# version the CI Format + Clippy jobs are pinned to. This kills the
+# recurring local-vs-CI clippy/rustfmt skew (a moving `@stable` in CI
+# emitting lints a developer's older stable never saw — it bit v0.32).
+#
+# Bump deliberately (and in lockstep with .github/workflows/ci.yml's
+# fmt+clippy jobs), not implicitly. MSRV stays 1.92 (Cargo.toml
+# rust-version + the CI MSRV job); this pin is only the dev/lint stable.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
