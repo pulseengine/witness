@@ -215,7 +215,7 @@ jobs:
             --manifest sample.instrumented.wasm.witness.json \
             -o wasm-bytecode.lcov.info \
             --overview witness-overview.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wasm-bytecode-coverage
           path: |
@@ -251,7 +251,7 @@ jobs:
           cargo install wasm-tools --quiet || true
           wasm-tools validate crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm
           wasm-tools component wit crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm | head -25
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: witness-component-wasm
           path: crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm
@@ -349,7 +349,7 @@ jobs:
             exit 1
           fi
           echo "ok: httparse has $p proved condition(s)"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: verdict-evidence
           path: build/verdict-evidence/

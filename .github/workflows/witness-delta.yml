@@ -80,7 +80,7 @@ jobs:
 
       - name: Upload delta artifact
         if: ${{ steps.fixtures.outputs.head_manifest != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: witness-delta-pr-${{ github.event.pull_request.number }}
           path: delta-out/
@@ -179,7 +179,7 @@ jobs:
             }
 
       - name: Upload mcdc-delta artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: witness-mcdc-delta-pr-${{ github.event.pull_request.number }}
           path: delta-out/
