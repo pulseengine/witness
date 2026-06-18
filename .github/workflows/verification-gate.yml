@@ -45,7 +45,7 @@ jobs:
       RUSTFLAGS: -D warnings
       CARGO_INCREMENTAL: 0
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       # `dtolnay/rust-toolchain@stable` defaults to installing only
       # rustc + cargo + clippy. `rustfmt` and `clippy` must be named
@@ -100,7 +100,7 @@ jobs:
 
       - name: Upload results artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verification-results
           path: verification-results.json

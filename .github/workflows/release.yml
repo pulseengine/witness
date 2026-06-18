@@ -21,7 +21,7 @@ permissions:
   # asset, and attaches the .sig + .cert pair next to the asset on
   # the GitHub Release. No long-term key custody.
   id-token: write
-  # Needed by actions/attest-build-provenance@v2 (SLSA v1
+  # Needed by actions/attest-build-provenance@v4 (SLSA v1
   # provenance) in the create-github-release job. Per the org-wide
   # release-artifact standardization brief.
   attestations: write
@@ -73,7 +73,7 @@ jobs:
             os: windows-latest
             archive: zip
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -142,7 +142,7 @@ jobs:
           cd staging && 7z a "../$ARCHIVE" . && cd ..
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
@@ -159,7 +159,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           # Need the tag's commit, not the merge ref, so the timestamp
           # is the user-visible commit timestamp.
@@ -237,7 +237,7 @@ jobs:
             ls -la "${ARCHIVE_NAME}"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: compliance-evidence
           path: ${{ env.REPACKED_ARCHIVE || steps.evidence.outputs.archive-path }}
@@ -246,7 +246,7 @@ jobs:
     name: Build witness-component (real Component Model wasm) — v0.7.0+
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
@@ -275,7 +275,7 @@ jobs:
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
           echo "::notice::witness-reporter-component built ($(wc -c < $ASSET) bytes); WASI 0.2.9 reporter component, NOT an instrumentable target — see release notes"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wasm-component
           path: ${{ env.ASSET }}
@@ -298,8 +298,8 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -347,7 +347,7 @@ jobs:
       # extra asset is uploaded here (gh attestation verify downloads
       # it on demand).
       - name: Attest build provenance (SLSA v1)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "release-assets/*.tar.gz"
 
@@ -491,11 +491,11 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: compliance-evidence
           path: compliance-dl
@@ -590,7 +590,7 @@ jobs:
           echo "=== landing index (head) ===" && head -40 dist/index.html
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
