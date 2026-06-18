@@ -1011,11 +1011,21 @@ fn string_map_to_id_map(input: &HashMap<String, u32>) -> Result<HashMap<u32, u32
 /// v0.9.6 — split a `--invoke-with-args` spec into the export name
 /// and the comma-separated value list (raw strings).
 fn parse_invoke_spec(spec: &str) -> Result<(&str, Vec<&str>)> {
-    let (name, rest) = spec.split_once(':').ok_or_else(|| {
-        Error::Runtime(anyhow::anyhow!(
-            "--invoke-with-args spec must be 'name:val[,val...]', got '{spec}'"
-        ))
-    })?;
+    // v0.35 (DEC-043, issue #107) — separate name from args on '=' when
+    // present, else on ':'. A WIT / canonical-ABI export name
+    // (`namespace:package/iface@ver#func`) always contains ':', so the
+    // legacy first-':' split could not address it; '=' cannot appear in
+    // a WIT name, so it disambiguates while ':' keeps `is_leap:2024`
+    // working. No-arg WIT exports are addressable via `--invoke`.
+    let (name, rest) = spec
+        .split_once('=')
+        .or_else(|| spec.split_once(':'))
+        .ok_or_else(|| {
+            Error::Runtime(anyhow::anyhow!(
+                "--invoke-with-args spec must be 'name=val[,val...]' \
+             (or legacy 'name:val[,val...]'), got '{spec}'"
+            ))
+        })?;
     let values: Vec<&str> = if rest.is_empty() {
         Vec::new()
     } else {
@@ -1181,6 +1191,44 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use witness_core::instrument::{BranchKind, instrument_module};
+
+    /// Issue #107 (DEC-043) — `--invoke-with-args` must address WIT-style
+    /// export names, which always contain ':'. The spec separates name
+    /// from args on '=' when present (WIT-safe), else on ':' (legacy).
+    #[test]
+    fn invoke_spec_wit_name_uses_equals_separator() {
+        // A WIT/canonical-ABI export name with typed args after '='.
+        let (name, args) = parse_invoke_spec("relay:flight/cascade@1.0.0#monitor=2.0").unwrap();
+        assert_eq!(name, "relay:flight/cascade@1.0.0#monitor");
+        assert_eq!(args, vec!["2.0"]);
+    }
+
+    #[test]
+    fn invoke_spec_legacy_colon_still_works() {
+        let (name, args) = parse_invoke_spec("is_leap:2024").unwrap();
+        assert_eq!(name, "is_leap");
+        assert_eq!(args, vec!["2024"]);
+        // Multiple args, legacy form.
+        let (n2, a2) = parse_invoke_spec("parse:0,12,3.14").unwrap();
+        assert_eq!(n2, "parse");
+        assert_eq!(a2, vec!["0", "12", "3.14"]);
+    }
+
+    #[test]
+    fn invoke_spec_equals_takes_precedence_over_colon() {
+        // The '=' wins even though ':' appears earlier in the WIT name —
+        // this is the exact case the old first-':' split mangled.
+        let (name, args) = parse_invoke_spec("wasi:cli/run@0.2.0#run=1,2").unwrap();
+        assert_eq!(name, "wasi:cli/run@0.2.0#run");
+        assert_eq!(args, vec!["1", "2"]);
+    }
+
+    #[test]
+    fn invoke_spec_equals_empty_args() {
+        let (name, args) = parse_invoke_spec("ns:pkg/i@1.0.0#f=").unwrap();
+        assert_eq!(name, "ns:pkg/i@1.0.0#f");
+        assert!(args.is_empty());
+    }
 
     fn instrument_and_emit(
         wat_src: &str,

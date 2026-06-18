@@ -953,3 +953,54 @@ artifacts:
     fields:
       priority: should
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.35 — addressing WIT-style export names (issue #107)
+  # -------------------------------------------------------------------------
+  - id: REQ-056
+    type: requirement
+    title: Typed invocation shall address any export name, including WIT-style
+    status: proposed
+    description: >
+      `witness run --invoke-with-args` shall be able to target an export
+      whose name contains a colon — notably Component-Model / canonical-
+      ABI names of the form `namespace:package/iface@ver#func` (and
+      async-lift mangled names like `[async-lift]...#monitor`). The
+      legacy `name:args` spec splits on the first colon, which is part
+      of every WIT name, making such exports unaddressable (issue #107,
+      reported from relay's P3 work). No-arg invocation via `--invoke`
+      already works (it does not split).
+    tags: [v0.35, cli, component-model, issue-107]
+    fields:
+      priority: should
+      category: functional
+
+  # -------------------------------------------------------------------------
+  # FUTURE — async-lift stream export coverage (issue #107, deferred)
+  # -------------------------------------------------------------------------
+  - id: REQ-057
+    type: requirement
+    title: Drive async-lift (P3 stream) exports to completion for coverage
+    status: proposed
+    description: >
+      witness shall be able to exercise an async-lift stream export —
+      e.g. a P3 `stream<T> -> stream<U>` transformer lowered to
+      `[async-lift]...#monitor` — by feeding a bounded input stream and
+      driving the task to completion, so its instrumented branches
+      actually execute. Today such an export instruments fine (relay's
+      cascade: 2713 branches) but the run reports `invoked: []` / 0 hits
+      because an async-lift export is not call-return: invoking it
+      returns a stream handle without running the body (the body runs on
+      stream poll). The call-return `--invoke` / `--invoke-with-args`
+      model cannot drive it.
+
+      DEFERRED (issue #107, 2026-06-18): this needs a P3-async host that
+      pumps streams to completion — part of the Component-Model run-path
+      epic (cf. the syscall-heavy spike). Not scheduled; landed here so a
+      regression/again-asked re-opens the right requirement. Consumer
+      side tracked at relay#202; the call-return separator half is
+      REQ-056 (v0.35).
+    tags: [future, component-model, async, p3, issue-107]
+    fields:
+      priority: could
+      category: functional

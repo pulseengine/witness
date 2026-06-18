@@ -33,7 +33,7 @@ first, then instrument that:
 ```bash
 meld fuse mycomponent.wasm -o core.wasm   # component → single core module
 witness instrument core.wasm -o inst.wasm # witness's normal core pipeline
-witness run inst.wasm --invoke-with-args 'f:…' -o run.json
+witness run inst.wasm --invoke-with-args 'f=…' -o run.json
 witness report --input run.json
 ```
 
@@ -192,10 +192,10 @@ One note on the output:
 Edit `src/lib.rs` to widen the predicate or add another row in
 `run.sh`. The fixture's typed-args style means **no `run.sh` edit
 is needed for new test years — just add another
-`--invoke-with-args 'is_leap:1996'` line:
+`--invoke-with-args 'is_leap=1996'` line:
 
 ```bash
-# in run.sh, append --invoke-with-args 'is_leap:1996'
+# in run.sh, append --invoke-with-args 'is_leap=1996'
 ./run.sh
 ```
 
