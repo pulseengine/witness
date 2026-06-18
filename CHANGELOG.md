@@ -40,6 +40,22 @@ because an async-lift export is not call-return. Tracked as REQ-057;
 needs a P3-async stream-pumping host (part of the Component-Model
 run-path epic). Consumer side: relay#202.
 
+### Security & CI — RUSTSEC-2026-0182 + reproducible builds
+
+Surfaced while landing the above (first CI run since v0.34, deps had
+drifted):
+
+- **RUSTSEC-2026-0182** — `wasmtime-wasi` WASIp1 `fd_renumber` leak.
+  Fixed by a same-major precise bump of the wasmtime stack 44.0.2 →
+  **44.0.3** (the advisory's `>= 44.0.3, < 45.0.0` patch); no API
+  cascade. `cargo audit` clean.
+- **CI now builds `--locked`** (clippy, test, MSRV, miri, proptest,
+  wasm-component, and the release.yml artifact builds). Without it, the
+  non-locked jobs re-resolved to newer, API-incompatible gimli /
+  cpp_demangle and broke the build — the lockfile already pinned
+  working versions; `--locked` enforces them. Same reproducibility
+  lesson as the v0.34 toolchain pin.
+
 New rivet artifacts: REQ-056, DEC-043, FEAT-039 (shipped); REQ-057
 (deferred).
 
