@@ -260,7 +260,7 @@ jobs:
         # can build host-only without dragging wit-bindgen FFI symbols
         # into the host linker.
         working-directory: crates/witness-component
-        run: cargo build --release --target wasm32-wasip2
+        run: cargo build --release --locked --target wasm32-wasip2
 
       - name: Stage wasm asset
         run: |
@@ -517,7 +517,7 @@ jobs:
       # the build-binaries artifacts (different triples, different
       # archive shapes) and keeps this job self-contained.
       - name: Build witness-viz binary
-        run: cargo build --release --bin witness-viz --manifest-path crates/witness-viz/Cargo.toml
+        run: cargo build --release --locked --bin witness-viz --manifest-path crates/witness-viz/Cargo.toml
 
       # v0.26 — multi-version site (DEC-033). The current tag renders
       # under dist/<VERSION>/ from the just-built compliance evidence

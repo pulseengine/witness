@@ -15,13 +15,13 @@ verdicts/*/Cargo.lock
 verdicts/*/*.wasm
 
 # witness-component is a standalone workspace (see parent Cargo.toml).
-# Its target/ and Cargo.lock are build artefacts.
+# Its target/ is a build artefact; Cargo.lock IS committed — it ships a
+# release wasm artifact, so its dep set must be pinned/reproducible.
 crates/witness-component/target/
-crates/witness-component/Cargo.lock
 
-# witness-viz is also a standalone workspace (v0.9.0+). Same reasoning.
+# witness-viz is also a standalone workspace (v0.9.0+). Same reasoning —
+# Cargo.lock committed because it builds a released binary.
 crates/witness-viz/target/
-crates/witness-viz/Cargo.lock
 
 # Playwright outputs.
 tests/playwright/node_modules/
