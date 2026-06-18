@@ -56,13 +56,15 @@ enum Command {
         /// Ignored when `--harness` is set.
         #[arg(long = "invoke")]
         invoke: Vec<String>,
-        /// v0.9.6 — export to call with positional typed arguments,
-        /// e.g. `--invoke-with-args 'is_leap:2024'` or
-        /// `--invoke-with-args 'parse:0,12345,3.14'`. Types are taken
-        /// from the export's Wasm signature via `func.ty()`; no
-        /// type-annotation needed in the spec. May be repeated;
-        /// processed after all `--invoke` entries. Eliminates the
-        /// `core::hint::black_box` wrapper-export pattern.
+        /// v0.9.6 — export to call with positional typed arguments.
+        /// Spec is `name=val[,val...]`, e.g. `--invoke-with-args
+        /// 'is_leap=2024'` or `--invoke-with-args 'parse=0,12345,3.14'`.
+        /// v0.35 (issue #107): the separator is `=` so WIT / canonical-
+        /// ABI export names work — `'relay:flight/cascade@1.0.0#monitor=2.0'`
+        /// (those names contain ':'). Legacy `name:val` is still accepted
+        /// when the spec has no `=`. Types are taken from the export's
+        /// Wasm signature via `func.ty()`; no type-annotation needed.
+        /// May be repeated; processed after all `--invoke` entries.
         #[arg(long = "invoke-with-args")]
         invoke_with_args: Vec<String>,
         /// Call the `_start` WASI entry-point before `--invoke` targets.

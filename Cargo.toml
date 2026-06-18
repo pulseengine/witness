@@ -15,9 +15,9 @@ members = [
 # or the release.yml `wasm-component` job, which does exactly that.
 
 [workspace.package]
-version = "0.34.0"
+version = "0.35.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.93"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/pulseengine/witness"
 homepage = "https://pulseengine.eu"
@@ -71,7 +71,7 @@ wasmparser = "0.240"
 # fork pin since v0.21. crates.io publish is now unblocked.
 walrus = "0.26.3"
 wasmtime = "45"
-wasmtime-wasi = "44"
+wasmtime-wasi = "45"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"

@@ -282,6 +282,12 @@ fn build_dwarf<'a>(s: &DwarfSections<'a>) -> gimli::Dwarf<EndianSlice<'a, Little
         file_type: gimli::DwarfFileType::Main,
         sup: None,
         abbreviations_cache: gimli::AbbreviationsCache::new(),
+        // gimli 0.33 added these macro/names sections to `Dwarf`. witness
+        // reconstructs decisions from line + abbrev/info; it does not read
+        // macro info or the .debug_names index, so initialise them empty.
+        debug_macinfo: gimli::DebugMacinfo::new(&[], endian),
+        debug_macro: gimli::DebugMacro::new(&[], endian),
+        debug_names: gimli::DebugNames::new(&[], endian),
     }
 }
 
@@ -611,11 +617,20 @@ fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineM
         // a new inlined-subroutine DIE, we push it AFTER recording
         // its chain (= parents-on-stack + self).
         let mut inline_parents: Vec<(isize, InlineContext)> = Vec::new();
-        let mut current_depth: isize = 0;
 
         let mut entries = unit.entries();
-        while let Some((delta, entry)) = entries.next_dfs()? {
-            current_depth = current_depth.saturating_add(delta);
+        // gimli 0.33: `next_dfs` returns just the entry (no depth-delta
+        // tuple) and borrows the cursor mutably, so advance first, then
+        // read the absolute depth + current entry via the `&self`
+        // accessors (`.depth()` / `.current()`). The depth is absolute
+        // per-entry, so it's a fresh `let` each iteration (no carry).
+        while entries.next_dfs()?.is_some() {
+            let current_depth = entries.depth();
+            // `current()` is always Some right after a successful
+            // `next_dfs`; the else is unreachable but avoids `expect`.
+            let Some(entry) = entries.current() else {
+                continue;
+            };
             // Pop inline parents that closed (their DIE subtree is
             // behind the cursor now).
             while let Some(&(parent_depth, _)) = inline_parents.last() {
@@ -641,8 +656,10 @@ fn build_inline_map(sections: &DwarfSections<'_>) -> std::result::Result<InlineM
             let mut call_file_idx: Option<u64> = None;
             let mut call_line: Option<u64> = None;
 
-            let mut attrs = entry.attrs();
-            while let Some(attr) = attrs.next()? {
+            // gimli 0.33: `attrs()` returns an eagerly-parsed
+            // `&[Attribute]` slice (was a fallible AttrsIter), so iterate
+            // by reference — no per-attr `?`.
+            for attr in entry.attrs() {
                 match attr.name() {
                     gimli::constants::DW_AT_call_file => {
                         if let Some(idx) = attr.udata_value() {

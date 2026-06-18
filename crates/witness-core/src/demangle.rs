@@ -33,9 +33,10 @@ pub fn demangle(raw: &str) -> String {
         return format!("{sym:#}");
     }
     // Arm 2 — C++ (Itanium ABI). `Symbol::new` parses the mangling;
-    // `demangle` renders it. Default options are fine for display.
+    // `demangle` renders it. cpp_demangle 0.5 dropped the options arg
+    // (the renderer takes no DemangleOptions) — call it bare.
     if let Ok(sym) = cpp_demangle::Symbol::new(raw)
-        && let Ok(s) = sym.demangle(&cpp_demangle::DemangleOptions::default())
+        && let Ok(s) = sym.demangle()
     {
         return s;
     }

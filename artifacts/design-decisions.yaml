@@ -1496,3 +1496,38 @@ artifacts:
         target: REQ-006
       - type: refines
         target: DEC-041
+
+  # -------------------------------------------------------------------------
+  # v0.35 — invoke-with-args separator (issue #107)
+  # -------------------------------------------------------------------------
+  - id: DEC-043
+    type: design-decision
+    title: --invoke-with-args separates name from args on '=', ':' as legacy fallback
+    status: proposed
+    description: >
+      `--invoke-with-args <spec>` splits the export name from the comma-
+      separated arg list on the FIRST `=` when the spec contains one;
+      otherwise it falls back to splitting on the first `:` (the v0.9.6
+      behaviour). `=` cannot appear in a WIT export name
+      (`namespace:package/iface@ver#func`), so it unambiguously
+      addresses Component-Model names; `:` keeps simple core names like
+      `is_leap:2024` working unchanged.
+    rationale: >
+      The original spec split on the first `:` (run.rs parse_invoke_spec),
+      but a colon is part of every WIT export name, so those exports were
+      unaddressable (issue #107). Switching outright to `=` would break
+      every existing `name:args` invocation; supporting `=` with a `:`
+      fallback fixes the collision while preserving back-compat. relay
+      independently reached the same `=` choice for their mirror harness.
+      No-arg WIT exports are already addressable via `--invoke` (no
+      split), so only the typed-args path needed the change.
+    alternatives: >
+      Split on the LAST `:` — rejected: a no-arg WIT name ends in
+      `#func` not `:`, and its namespace contains colons, so last-colon
+      mis-splits (`...@1.0.0` | `monitor`). Switch to `=` only —
+      rejected: breaks existing `name:args` users. A `--export`/`--args`
+      flag pair — heavier CLI surface for the same outcome.
+    tags: [v0.35, cli, component-model, issue-107]
+    links:
+      - type: satisfies
+        target: REQ-056

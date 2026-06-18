@@ -7,6 +7,58 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-06-18
+
+Headline: **`--invoke-with-args` can address WIT export names** (issue #107).
+
+### Fixed — name/args separator collides with WIT names (PR, FEAT-039)
+
+`witness run --invoke-with-args <spec>` split the export name from its
+args on the first `:`. But a Component-Model / canonical-ABI export
+name (`namespace:package/iface@ver#func`, and async-lift mangled names)
+always contains `:`, so those exports were **unaddressable** — reported
+from relay's P3 streamification work (issue #107).
+
+- The separator is now `=` when the spec contains one (WIT-safe — `=`
+  cannot appear in a WIT name): `--invoke-with-args
+  'relay:flight/cascade@1.0.0#monitor=2.0'`. Legacy `name:val` is still
+  accepted when there is no `=`, so `is_leap:2024` is unchanged.
+- No-arg WIT exports were already addressable via `--invoke` (it does
+  not split). DEC-043 / REQ-056.
+
+Verified end-to-end: a core export named `ns:pkg/i@1.0.0#classify` is
+now invoked (and its branch hit) via `…#classify=1`; pre-fix the spec
+resolved to name `ns` and invoked nothing.
+
+### Known limitation — async-lift stream exports (issue #107, REQ-057)
+
+The other half of #107 — driving an **async-lift P3 `stream→stream`**
+export (e.g. `[async-lift]…#monitor`) to completion so its branches
+execute — is **not** addressed here. Such an export instruments fine
+(relay's cascade: 2713 branches) but `witness run` reports `invoked: []`
+because an async-lift export is not call-return. Tracked as REQ-057;
+needs a P3-async stream-pumping host (part of the Component-Model
+run-path epic). Consumer side: relay#202.
+
+### Security & CI — RUSTSEC-2026-0182 + reproducible builds
+
+Surfaced while landing the above (first CI run since v0.34, deps had
+drifted):
+
+- **RUSTSEC-2026-0182** — `wasmtime-wasi` WASIp1 `fd_renumber` leak.
+  Fixed by a same-major precise bump of the wasmtime stack 44.0.2 →
+  **44.0.3** (the advisory's `>= 44.0.3, < 45.0.0` patch); no API
+  cascade. `cargo audit` clean.
+- **CI now builds `--locked`** (clippy, test, MSRV, miri, proptest,
+  wasm-component, and the release.yml artifact builds). Without it, the
+  non-locked jobs re-resolved to newer, API-incompatible gimli /
+  cpp_demangle and broke the build — the lockfile already pinned
+  working versions; `--locked` enforces them. Same reproducibility
+  lesson as the v0.34 toolchain pin.
+
+New rivet artifacts: REQ-056, DEC-043, FEAT-039 (shipped); REQ-057
+(deferred).
+
 ## [0.34.0] — 2026-06-05
 
 Headline: **MC/DC verdict soundness audit** + roadmap/toolchain hygiene.

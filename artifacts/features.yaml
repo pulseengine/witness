@@ -850,3 +850,26 @@ artifacts:
         target: REQ-037
       - type: implements
         target: DEC-041
+
+  # -------------------------------------------------------------------------
+  # v0.35 — WIT-safe --invoke-with-args separator (issue #107)
+  # -------------------------------------------------------------------------
+  - id: FEAT-039
+    type: feature
+    title: v0.35 — WIT-safe --invoke-with-args separator ('=' with ':' fallback)
+    status: proposed
+    phase: phase-3
+    acceptance-criteria:
+      - "A spec containing '=' splits name/args on the first '='; a WIT name like 'relay:flight/cascade@1.0.0#monitor=2.0' resolves to name 'relay:flight/cascade@1.0.0#monitor', args [2.0]."
+      - "A spec with no '=' splits on the first ':' (legacy): 'is_leap:2024' still resolves to name 'is_leap', args [2024]."
+      - "Unit oracle covers: WIT-name-with-args via '=', legacy ':' simple name, and a WIT name that would mis-split under ':'."
+    description: >
+      Closes REQ-056 (DEC-043), issue #107's call-return half. parse_invoke_spec
+      now prefers '=' (WIT-name-safe) and falls back to ':'. Does not address
+      the async-lift stream-driving half (REQ-057, deferred).
+    tags: [v0.35, cli, component-model, issue-107]
+    links:
+      - type: satisfies
+        target: REQ-056
+      - type: implements
+        target: DEC-043
