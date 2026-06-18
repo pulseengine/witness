@@ -45,7 +45,7 @@ rustc-demangle = "0.1"
 # Default features (incl. `std`) are kept: wasm32-wasip2 is a std
 # target, and disabling them drops the `alloc`/`format!` support
 # cpp_demangle needs.
-cpp_demangle = "0.4"
+cpp_demangle = "0.5"
 
 [dev-dependencies]
 proptest = { workspace = true }
