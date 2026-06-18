@@ -21,7 +21,7 @@ permissions:
   # asset, and attaches the .sig + .cert pair next to the asset on
   # the GitHub Release. No long-term key custody.
   id-token: write
-  # Needed by actions/attest-build-provenance@v2 (SLSA v1
+  # Needed by actions/attest-build-provenance@v4 (SLSA v1
   # provenance) in the create-github-release job. Per the org-wide
   # release-artifact standardization brief.
   attestations: write
@@ -347,7 +347,7 @@ jobs:
       # extra asset is uploaded here (gh attestation verify downloads
       # it on demand).
       - name: Attest build provenance (SLSA v1)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "release-assets/*.tar.gz"
 
