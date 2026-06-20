@@ -1531,3 +1531,43 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-056
+
+  # -------------------------------------------------------------------------
+  # Component-Model coverage readback (issue #110) — spiked 2026-06-20
+  # -------------------------------------------------------------------------
+  - id: DEC-044
+    type: design-decision
+    title: Component-Model coverage readback via runtime introspection, not an upstream component API
+    status: proposed
+    description: >
+      witness reads its `__witness_counter_*` globals out of a
+      Component-Model run via runtime introspection, not via a new
+      wasmtime `component::Instance` accessor. Two backends: (1) a kiln
+      `--harness` (kilnd) that snapshots the inner-core globals natively
+      and emits witness-harness-v1 (primary; kiln#343, works today); (2)
+      wasmtime's existing public coredump path
+      (`coredump_on_trap` → `WasmCoreDump.instances()` →
+      `Instance::get_global`) as the differential cross-check oracle.
+    rationale: >
+      A 2026-06-20 spike verified both: kilnd round-trips the v1 snapshot
+      end-to-end; and wasmtime 45's coredump reads a component's
+      inner-core globals by name (witness counters also survive
+      `wasm-tools component new`). So the originally-planned upstream
+      request (expose inner-core globals on `component::Instance`) is
+      unnecessary as a blocker — downgraded to a nice-to-have (a non-trap
+      global snapshot would be cleaner than coredump_on_trap) and not
+      filed. Owning kiln also gives a certifiable/deterministic runtime
+      and a second, independent measurement for cross-validation
+      (REQ-058). The wasmtime backend requires instrument-in-place
+      (REQ-059); the kiln backend works on meld-fused cores now.
+    alternatives: >
+      File the upstream wasmtime ask and wait — rejected: the capability
+      already exists publicly (coredump) and kiln gives us a path we
+      control. Hand-roll a core-level WASI host in witness — rejected:
+      kiln already runs Component-Model + WASI 0.2 and we own its API.
+    tags: [component-model, readback, dual-runtime, issue-110]
+    links:
+      - type: satisfies
+        target: REQ-058
+      - type: refines
+        target: REQ-054
