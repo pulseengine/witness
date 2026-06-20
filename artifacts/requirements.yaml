@@ -1004,3 +1004,47 @@ artifacts:
     fields:
       priority: could
       category: functional
+
+  # -------------------------------------------------------------------------
+  # Component-Model run-path: dual-runtime coverage (issue #110, kiln#340)
+  # -------------------------------------------------------------------------
+  - id: REQ-058
+    type: requirement
+    title: Differential cross-runtime coverage validation
+    status: proposed
+    description: >
+      witness shall be able to collect MC/DC coverage from a single
+      instrumented artifact under more than one Wasm runtime backend and
+      compare the per-branch counter results. Backends: the embedded
+      runtime, a kiln `--harness` (kilnd, kiln#343, emits
+      witness-harness-v1), and a wasmtime-component path (coredump
+      readback). Agreement cross-validates a maturing backend (wasmtime
+      as oracle for kiln); a divergence is surfaced as a defect signal,
+      never a silent pass. Also yields coverage where only one backend
+      can run a given artifact.
+    tags: [component-model, dual-runtime, issue-110]
+    fields:
+      priority: should
+      category: functional
+
+  - id: REQ-059
+    type: requirement
+    title: Instrument-in-place for Component-Model artifacts
+    status: proposed
+    description: >
+      witness shall support instrumenting a Wasm Component by rewriting
+      its inner core module **in place** — keeping the component shell
+      and its WIT/canonical-ABI exports intact — so the real exports stay
+      callable through a runtime's component API while the
+      `__witness_counter_*` globals land in the inner core (readable
+      post-run via the kiln snapshot or wasmtime coredump). This is the
+      producer counterpart to the run-path: witness's current
+      unbundle-to-bare-core path loses the lifted exports (verified:
+      `wasm-tools component new` on a bare core does not re-lift the
+      guest export), so a real component can't be driven. Enables the
+      wasmtime-component backend and complements meld fusion (REQ-054)
+      for cases where the component must run as a component.
+    tags: [component-model, instrument, issue-110]
+    fields:
+      priority: should
+      category: functional
