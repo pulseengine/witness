@@ -197,3 +197,48 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-001
+
+  # -------------------------------------------------------------------------
+  # v0.36 — verification for the Component-Model run-path requirements.
+  # These use `verifies` (a test verifies a requirement; cf. `satisfies`
+  # which is for implementations) and name the actual test functions, so
+  # a reader can map the requirement to the exact test that exercises it.
+  # (pulseengine.eu#94 — closing the silent requirement→test gap.)
+  # -------------------------------------------------------------------------
+  - id: TEST-INPLACE
+    type: test-case
+    title: instrument --in-place keeps the component shell, counters in inner core
+    description: >
+      Oracle `instrument_in_place_emits_component_with_instrumented_core`
+      (crates/witness-core/src/instrument.rs): instrument-in-place a leaf
+      component, assert the output re-parses as a component whose inner
+      core exports `__witness_counter_*`, and that a bare-core input is
+      rejected. End-to-end (manual, recorded in #110): a real wasm32-wasip2
+      component passes `wasm-tools validate` post-splice.
+    tags: [verification, unit-tests, component-model]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core instrument_in_place_emits_component_with_instrumented_core
+    links:
+      - type: verifies
+        target: REQ-059
+
+  - id: TEST-CROSSCHECK
+    type: test-case
+    title: cross-check flags per-branch counter divergence between runtimes
+    description: >
+      Oracles in crates/witness-core/src/cross_check.rs:
+      `identical_runs_agree` (same counters ⇒ AGREE),
+      `a_counter_divergence_is_flagged` (one differing counter ⇒ DIVERGE
+      with both values), `branch_set_mismatch_is_a_divergence`
+      (differing branch sets ⇒ divergence). CLI exit-code path verified
+      manually: identical ⇒ 0, divergent ⇒ 1.
+    tags: [verification, unit-tests, dual-runtime]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core cross_check
+    links:
+      - type: verifies
+        target: REQ-058
