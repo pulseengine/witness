@@ -478,10 +478,19 @@ fn discover_source_map(
 /// or several (a preview1→p2 adapter beside the main module — the
 /// syscall-heavy case) is an honest `ComponentUnbundle` error toward
 /// wasm32-wasip1.
-fn extract_sole_core_module(component_bytes: &[u8], input: &Path) -> Result<Vec<u8>> {
+/// Extract the sole embedded core module of a component, with its byte
+/// span (`unchecked_range`) within the component. The span is the splice
+/// point for `--in-place` instrumentation (DEC-045); callers that only
+/// want the core bytes ignore it.
+/// byte span within the component (`unchecked_range`). v0.36 — the span
+/// is the splice point for `--in-place` instrumentation (DEC-045).
+fn extract_sole_core_module_with_range(
+    component_bytes: &[u8],
+    input: &Path,
+) -> Result<(Vec<u8>, core::ops::Range<usize>)> {
     use wasmparser::{Parser, Payload};
 
-    let mut cores: Vec<Vec<u8>> = Vec::new();
+    let mut cores: Vec<(Vec<u8>, core::ops::Range<usize>)> = Vec::new();
     for payload in Parser::new(0).parse_all(component_bytes) {
         let payload = payload.map_err(|e| Error::ComponentUnbundle {
             path: input.to_path_buf(),
@@ -491,8 +500,8 @@ fn extract_sole_core_module(component_bytes: &[u8], input: &Path) -> Result<Vec<
             unchecked_range, ..
         } = payload
         {
-            match component_bytes.get(unchecked_range) {
-                Some(slice) => cores.push(slice.to_vec()),
+            match component_bytes.get(unchecked_range.clone()) {
+                Some(slice) => cores.push((slice.to_vec(), unchecked_range)),
                 None => {
                     return Err(Error::ComponentUnbundle {
                         path: input.to_path_buf(),
@@ -521,10 +530,94 @@ fn extract_sole_core_module(component_bytes: &[u8], input: &Path) -> Result<Vec<
     }
 }
 
+/// v0.36 (DEC-045) — unsigned LEB128 byte length of `v`. Bounded
+/// loop over a u64; the shift/add cannot overflow.
+#[allow(clippy::arithmetic_side_effects)]
+fn uleb128_len(mut v: u64) -> usize {
+    let mut n = 1;
+    while v >= 0x80 {
+        v >>= 7;
+        n += 1;
+    }
+    n
+}
+
+/// v0.36 (DEC-045) — append `v` as unsigned LEB128 to `out`. The masked
+/// low 7 bits always fit a u8; the shift cannot overflow.
+#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+fn write_uleb128(mut v: u64, out: &mut Vec<u8>) {
+    loop {
+        let mut byte = (v & 0x7f) as u8;
+        v >>= 7;
+        if v != 0 {
+            byte |= 0x80;
+        }
+        out.push(byte);
+        if v == 0 {
+            break;
+        }
+    }
+}
+
+/// v0.36 (DEC-045) — splice an instrumented core module back into the
+/// component it came from, replacing the bytes at `range` and repairing
+/// the enclosing section's LEB128 length prefix. Every other byte of the
+/// component is copied verbatim, so the shell + lifted WIT exports are
+/// preserved. The length prefix is a standard unsigned LEB128 of the
+/// module size immediately preceding the module bytes; we verify that
+/// before rewriting and error otherwise (unexpected framing).
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::as_conversions,
+    clippy::indexing_slicing
+)]
+fn splice_core_into_component(
+    component_bytes: &[u8],
+    range: core::ops::Range<usize>,
+    new_core: &[u8],
+) -> Result<Vec<u8>> {
+    let orig_len = range.end - range.start;
+    let leb_len = uleb128_len(orig_len as u64);
+    let leb_start = range.start.checked_sub(leb_len).ok_or_else(|| {
+        Error::Instrument("core-module section length prefix underflows the component".to_string())
+    })?;
+    // The bytes immediately before the module must be the LEB128 of its
+    // length — verify the framing before trusting the splice point.
+    let mut expected = Vec::with_capacity(leb_len);
+    write_uleb128(orig_len as u64, &mut expected);
+    if component_bytes.get(leb_start..range.start) != Some(expected.as_slice()) {
+        return Err(Error::Instrument(
+            "unexpected core-module section framing; cannot instrument component in place"
+                .to_string(),
+        ));
+    }
+    let mut out = Vec::with_capacity(component_bytes.len() + new_core.len());
+    out.extend_from_slice(&component_bytes[..leb_start]); // shell up to + incl section id
+    write_uleb128(new_core.len() as u64, &mut out); // repaired length prefix
+    out.extend_from_slice(new_core); // instrumented inner core
+    out.extend_from_slice(&component_bytes[range.end..]); // rest of the component
+    Ok(out)
+}
+
 /// Instrument the Wasm module at `input`, writing the instrumented module
 /// to `output` and a branch manifest alongside it.
 pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
-    let original_bytes = std::fs::read(input).map_err(|source| Error::ReadModule {
+    instrument_file_impl(input, output, false)
+}
+
+/// v0.36 (REQ-059 / DEC-045) — instrument a Wasm **Component** in place:
+/// rewrite its sole embedded core module and re-emit the *component*
+/// (shell + lifted WIT exports intact) rather than the default
+/// unbundle-to-bare-core. Errors if the input is not a single-core
+/// component. Lets the instrumented artifact be driven through a
+/// runtime's component API (kiln / wasmtime-coredump readback, DEC-044).
+pub fn instrument_file_in_place(input: &Path, output: &Path) -> Result<()> {
+    instrument_file_impl(input, output, true)
+}
+
+fn instrument_file_impl(input: &Path, output: &Path, in_place: bool) -> Result<()> {
+    let file_bytes = std::fs::read(input).map_err(|source| Error::ReadModule {
         path: input.to_path_buf(),
         source,
     })?;
@@ -534,32 +627,54 @@ pub fn instrument_file(input: &Path, output: &Path) -> Result<()> {
     // core modules only). Wasm magic + version word:
     //   core module:  \0asm \01 \00 \00 \00
     //   component:    \0asm \0d \00 \01 \00   (DraftD, v1)
-    // Both share the first 4 bytes; bytes 4..8 disambiguate. When the
-    // input is a component, transparently extract its sole embedded
-    // core module and instrument that (DEC-036); everything
-    // downstream (source-map discovery, original_module_sha256) then
-    // operates on the core module, which is what actually ran.
-    let original_bytes = if let Some(header) = original_bytes.first_chunk::<8>()
-        && &header[0..4] == b"\0asm"
-        && (header[6] == 0x01 || header[4] >= 0x0a)
-    {
-        extract_sole_core_module(&original_bytes, input)?
+    // Both share the first 4 bytes; bytes 4..8 disambiguate.
+    let is_component = file_bytes.first_chunk::<8>().is_some_and(|header| {
+        &header[0..4] == b"\0asm" && (header[6] == 0x01 || header[4] >= 0x0a)
+    });
+
+    if in_place && !is_component {
+        return Err(Error::Instrument(
+            "--in-place requires a Wasm Component input (got a core module)".to_string(),
+        ));
+    }
+
+    // `core_bytes` is what walrus instruments and what the manifest /
+    // DWARF reconstruction operate on (the code that actually runs);
+    // `core_range` is its span within the component, needed only to
+    // splice the instrumented core back for `--in-place`.
+    let (core_bytes, core_range) = if is_component {
+        let (core, range) = extract_sole_core_module_with_range(&file_bytes, input)?;
+        (core, Some(range))
     } else {
-        original_bytes
+        (file_bytes.clone(), None)
     };
 
-    let mut module = Module::from_buffer(&original_bytes).map_err(|source| Error::ParseModule {
+    let mut module = Module::from_buffer(&core_bytes).map_err(|source| Error::ParseModule {
         path: input.to_path_buf(),
         source,
     })?;
 
     let entries = instrument_module(&mut module, input.to_string_lossy().as_ref())?;
 
-    let wasm = module.emit_wasm();
-    std::fs::write(output, wasm).map_err(|source| Error::EmitModule {
+    let new_core = module.emit_wasm();
+    // Default: write the bare instrumented core. `--in-place`: splice the
+    // instrumented core back into the component and write that.
+    let output_bytes = if in_place {
+        let range = core_range
+            .clone()
+            .ok_or_else(|| Error::Instrument("in-place set but no component range".to_string()))?;
+        splice_core_into_component(&file_bytes, range, &new_core)?
+    } else {
+        new_core
+    };
+    std::fs::write(output, &output_bytes).map_err(|source| Error::EmitModule {
         path: output.to_path_buf(),
         source,
     })?;
+    // The manifest describes the instrumented *core* (where the branches
+    // and counter globals live), so the reconstruction below runs on
+    // `core_bytes` regardless of output shape.
+    let original_bytes = core_bytes;
 
     // v0.2: attempt DWARF-grounded decision reconstruction. v0.2.0 ships
     // the stub (always empty); v0.2.1 fills in the algorithm. Empty list
@@ -2489,11 +2604,65 @@ mod tests {
     fn extract_sole_core_module_yields_valid_core() {
         let comp = wat::parse_str(r#"(component (core module (func (export "f"))))"#).unwrap();
         assert_eq!(comp[6], 0x01, "fixture should be a component");
-        let core =
-            extract_sole_core_module(&comp, std::path::Path::new("t")).expect("extract core");
+        let (core, _) = extract_sole_core_module_with_range(&comp, std::path::Path::new("t"))
+            .expect("extract core");
         assert_eq!(&core[0..4], b"\0asm");
         assert_eq!(core[4], 0x01, "extracted bytes should be a core module");
         walrus::Module::from_buffer(&core).expect("extracted core re-parses under walrus");
+    }
+
+    /// v0.36 (REQ-059 / DEC-045) — `--in-place` rewrites a component's
+    /// inner core and re-emits the *component*: output is still a valid
+    /// component, and its inner core carries the witness counter globals.
+    #[test]
+    fn instrument_in_place_emits_component_with_instrumented_core() {
+        let comp_wat = r#"
+            (component
+              (core module $m
+                (func (export "f") (param i32) (result i32)
+                  local.get 0
+                  if (result i32) i32.const 1 else i32.const 0 end))
+              (core instance $i (instantiate $m))
+              (func (export "f") (param "n" s32) (result s32)
+                (canon lift (core func $i "f")))
+            )
+        "#;
+        let comp_bytes = wat::parse_str(comp_wat).expect("valid component wat");
+        assert_eq!(comp_bytes[6], 0x01, "fixture should be a component");
+
+        let dir = tempfile::tempdir().unwrap();
+        let inp = dir.path().join("c.wasm");
+        let out = dir.path().join("c-inst.wasm");
+        std::fs::write(&inp, &comp_bytes).unwrap();
+        instrument_file_in_place(&inp, &out).expect("in-place instrument");
+        let out_bytes = std::fs::read(&out).unwrap();
+
+        // (a) output is still a Component.
+        assert_eq!(&out_bytes[0..4], b"\0asm");
+        assert_eq!(out_bytes[6], 0x01, "output must still be a component");
+
+        // (b) the spliced component re-parses cleanly.
+        for p in wasmparser::Parser::new(0).parse_all(&out_bytes) {
+            p.expect("spliced component must re-parse");
+        }
+
+        // (c) the inner core now exports witness counter globals.
+        let (core, _) =
+            extract_sole_core_module_with_range(&out_bytes, &out).expect("inner core present");
+        let m = Module::from_buffer(&core).expect("inner core re-parses under walrus");
+        assert!(
+            m.exports
+                .iter()
+                .any(|e| e.name.starts_with(COUNTER_EXPORT_PREFIX)),
+            "inner core must export __witness_counter_* globals after in-place instrument"
+        );
+
+        // (d) --in-place on a bare core module is rejected.
+        let bare = wat::parse_str(r#"(module (func (export "f")))"#).unwrap();
+        let bin = dir.path().join("bare.wasm");
+        std::fs::write(&bin, &bare).unwrap();
+        let err = instrument_file_in_place(&bin, &out).expect_err("bare core must be rejected");
+        assert!(format!("{err}").contains("--in-place requires a Wasm Component"));
     }
 
     /// v0.28 — a single-module component auto-unbundles and instruments
@@ -2532,7 +2701,7 @@ mod tests {
             (core module (func (export "a")))
             (core module (func (export "b"))))"#;
         let comp = wat::parse_str(comp_wat).unwrap();
-        match extract_sole_core_module(&comp, std::path::Path::new("t")) {
+        match extract_sole_core_module_with_range(&comp, std::path::Path::new("t")) {
             Err(crate::error::Error::ComponentUnbundle { detail, .. }) => {
                 assert!(
                     detail.contains("2 embedded core modules"),

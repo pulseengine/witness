@@ -7,6 +7,35 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-06-21
+
+Headline: **Component-Model coverage run-path — instrument in place + cross-runtime check** (issue #110).
+
+Two features that turn the dual-runtime coverage strategy (DEC-044) from
+plan into tooling:
+
+### Added
+- `witness instrument --in-place <component>` — rewrites a single-core
+  Component's **inner core** and re-emits the *component* (shell + lifted
+  WIT exports intact) instead of unbundling to a bare core, so the
+  instrumented artifact stays runnable through a runtime's component API
+  (kiln harness / wasmtime-coredump readback). Mechanism (DEC-045):
+  locate the inner core via `ModuleSection.unchecked_range`, instrument
+  it, splice it back with an LEB128 length-prefix repair; every other
+  byte copied verbatim. Verified on a real wasip2 component:
+  `wasm-tools validate` passes, counters land in the inner core.
+  (FEAT-040, REQ-059)
+- `witness cross-check a.json b.json` — differential cross-runtime
+  coverage compare. The same instrumented artifact must produce
+  identical per-branch counters under every backend (embedded / kiln
+  `--harness` / wasmtime); divergences (and branch-set mismatches) are
+  listed and the command exits non-zero — a CI gate, never a silent
+  pass. wasmtime is the oracle that cross-validates kiln as it matures.
+  (FEAT-041, REQ-058)
+
+### Fixed
+- Stale `clippy.toml` MSRV (1.92 → 1.93), unsynced since the v0.35 bump.
+
 ## [0.35.0] — 2026-06-18
 
 Headline: **`--invoke-with-args` can address WIT export names** (issue #107).

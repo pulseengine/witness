@@ -17,6 +17,7 @@
 //! `witness` binary crate.
 
 pub mod attest;
+pub mod cross_check;
 pub mod decisions;
 pub mod demangle;
 pub mod diff;

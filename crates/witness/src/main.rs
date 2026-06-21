@@ -34,6 +34,13 @@ enum Command {
         /// Path to write the instrumented module.
         #[arg(short, long)]
         output: PathBuf,
+        /// v0.36 (REQ-059) — instrument a Component in place: rewrite its
+        /// inner core and re-emit the *component* (shell + WIT exports
+        /// kept callable), instead of unbundling to a bare core. Requires
+        /// a single-core Component input. Lets the instrumented artifact
+        /// run through a runtime's component API (kiln / wasmtime).
+        #[arg(long = "in-place")]
+        in_place: bool,
     },
 
     /// Execute an instrumented module and collect counters.
@@ -97,6 +104,29 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
         format: ReportFormat,
+    },
+
+    /// v0.36 (REQ-058) — cross-check two run JSON files from different
+    /// runtime backends. The same instrumented artifact must produce
+    /// identical per-branch counters under every backend; this prints any
+    /// divergence and exits non-zero (a CI gate). Run the artifact under
+    /// each backend first — e.g. embedded `witness run … -o a.json`, then
+    /// `witness run … --harness 'kilnd …' -o b.json` — then
+    /// `witness cross-check a.json b.json`.
+    CrossCheck {
+        /// First run JSON (the reference / oracle, e.g. the embedded run).
+        a: PathBuf,
+        /// Second run JSON (the backend under test, e.g. a kiln harness).
+        b: PathBuf,
+        /// Label for the A run in the report.
+        #[arg(long = "label-a", default_value = "a")]
+        label_a: String,
+        /// Label for the B run.
+        #[arg(long = "label-b", default_value = "b")]
+        label_b: String,
+        /// Emit JSON instead of text.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Merge multiple run JSON files into one by summing per-branch counters.
@@ -504,8 +534,16 @@ fn main() -> Result<()> {
     init_tracing(cli.verbose);
 
     match cli.command {
-        Command::Instrument { input, output } => {
-            witness_core::instrument::instrument_file(&input, &output)?;
+        Command::Instrument {
+            input,
+            output,
+            in_place,
+        } => {
+            if in_place {
+                witness_core::instrument::instrument_file_in_place(&input, &output)?;
+            } else {
+                witness_core::instrument::instrument_file(&input, &output)?;
+            }
             // v0.9.11 — chatty success. Tester review found instrument /
             // run / predicate / attest were silent on success while
             // keygen / verify were chatty; the asymmetry made users
@@ -584,6 +622,30 @@ fn main() -> Result<()> {
                     output.display(),
                     std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0)
                 );
+            }
+        }
+        Command::CrossCheck {
+            a,
+            b,
+            label_a,
+            label_b,
+            json,
+        } => {
+            let ra = witness_core::run_record::RunRecord::load(&a)?;
+            let rb = witness_core::run_record::RunRecord::load(&b)?;
+            let report = witness_core::cross_check::cross_check(&ra, &rb, &label_a, &label_b);
+            // SAFETY-REVIEW: CLI output channel.
+            #[allow(clippy::print_stdout)]
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.to_text());
+            }
+            if !report.agree() {
+                // Cross-runtime divergence is a defect signal, not a
+                // coverage delta — exit non-zero so CI gates on it.
+                #[allow(clippy::exit)]
+                std::process::exit(1);
             }
         }
         Command::Report { input, format } => {

@@ -1571,3 +1571,47 @@ artifacts:
         target: REQ-058
       - type: refines
         target: REQ-054
+
+  # -------------------------------------------------------------------------
+  # v0.36 — instrument-in-place mechanism (REQ-059)
+  # -------------------------------------------------------------------------
+  - id: DEC-045
+    type: design-decision
+    title: Instrument a component in place via inner-core byte-splice with LEB length repair
+    status: proposed
+    description: >
+      `witness instrument --in-place` rewrites a single-core component's
+      inner core module and re-emits the COMPONENT (shell + WIT exports
+      intact), instead of the default unbundle-to-bare-core. Mechanism:
+      locate the embedded core via wasmparser `Payload::ModuleSection`
+      `unchecked_range` (already used by extract), instrument those bytes
+      with the existing walrus pipeline, then splice the instrumented
+      core back at that range — repairing the section's LEB128 length
+      prefix to the new (larger) size and copying every other byte of
+      the component verbatim. No re-encode of the component, no new
+      wasm-encoder dependency.
+    rationale: >
+      The default path discards the component shell (and its lifted WIT
+      exports), so the instrumented core can't be driven through a
+      runtime's component API (REQ-059; verified: `wasm-tools component
+      new` on a bare core does not re-lift the guest export). Splicing in
+      place keeps the real exports callable while the `__witness_counter_*`
+      globals land in the inner core, readable post-run via the kiln
+      snapshot or wasmtime coredump (DEC-044). A pure byte-splice is
+      robust for the leaf single-core case and avoids depending on
+      wasm-encoder's component re-encoder; the section length prefix is a
+      standard unsigned LEB128 immediately preceding the module bytes,
+      verified before rewrite (else error). Multi-core components
+      (adapter present) keep the existing unbundle error.
+    alternatives: >
+      Full component re-encode via wasm-encoder (copy every section,
+      substitute the module) — heavier, new dependency, and parse_all
+      flattens nested-module sections complicating top-level copy.
+      Re-componentize a bare instrumented core with `wasm-tools component
+      new` — rejected: drops the lifted exports. Keep only the meld +
+      kiln-harness path — rejected: the wasmtime-component backend
+      (cross-check oracle, REQ-058) needs a runnable component.
+    tags: [v0.36, component-model, instrument, issue-110]
+    links:
+      - type: satisfies
+        target: REQ-059
