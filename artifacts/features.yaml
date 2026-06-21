@@ -880,7 +880,7 @@ artifacts:
   - id: FEAT-040
     type: feature
     title: v0.36 — instrument-in-place mode (--in-place keeps the component shell)
-    status: proposed
+    status: implemented
     phase: phase-3
     acceptance-criteria:
       - "`witness instrument --in-place <component> -o out.wasm` emits a valid Component (not a bare core); re-parsing out.wasm succeeds and it is a component."
@@ -908,7 +908,7 @@ artifacts:
   - id: FEAT-041
     type: feature
     title: v0.36 — cross-check subcommand (differential cross-runtime coverage)
-    status: proposed
+    status: implemented
     phase: phase-3
     acceptance-criteria:
       - "`witness cross-check a.json b.json` compares two run records' per-branch hit counts; identical runs report AGREE and exit 0."

@@ -1538,7 +1538,7 @@ artifacts:
   - id: DEC-044
     type: design-decision
     title: Component-Model coverage readback via runtime introspection, not an upstream component API
-    status: proposed
+    status: implemented
     description: >
       witness reads its `__witness_counter_*` globals out of a
       Component-Model run via runtime introspection, not via a new
@@ -1578,7 +1578,7 @@ artifacts:
   - id: DEC-045
     type: design-decision
     title: Instrument a component in place via inner-core byte-splice with LEB length repair
-    status: proposed
+    status: implemented
     description: >
       `witness instrument --in-place` rewrites a single-core component's
       inner core module and re-emits the COMPONENT (shell + WIT exports
