@@ -873,3 +873,31 @@ artifacts:
         target: REQ-056
       - type: implements
         target: DEC-043
+
+  # -------------------------------------------------------------------------
+  # v0.36 — instrument-in-place (REQ-059)
+  # -------------------------------------------------------------------------
+  - id: FEAT-040
+    type: feature
+    title: v0.36 — instrument-in-place mode (--in-place keeps the component shell)
+    status: proposed
+    phase: phase-3
+    acceptance-criteria:
+      - "`witness instrument --in-place <component> -o out.wasm` emits a valid Component (not a bare core); re-parsing out.wasm succeeds and it is a component."
+      - "The component's lifted/WIT exports are preserved (byte-identical outside the spliced core), and the inner core gains `__witness_counter_*` globals."
+      - "Default behaviour (no --in-place) is unchanged: components still unbundle to a bare instrumented core."
+      - "Oracle: round-trip — instrument-in-place a leaf component, the output re-parses as a component whose inner core exports the counter globals."
+    description: >
+      Closes REQ-059 (DEC-045). Adds `--in-place` to `witness instrument`:
+      for a single-core component it splices the instrumented inner core
+      back into the component (LEB length-prefix repair), keeping the
+      shell + exports callable. The producer counterpart to the
+      Component-Model run-path; pairs with the kiln harness / wasmtime
+      coredump readback (DEC-044) and the differential cross-check
+      (REQ-058).
+    tags: [v0.36, component-model, instrument, issue-110]
+    links:
+      - type: satisfies
+        target: REQ-059
+      - type: implements
+        target: DEC-045
