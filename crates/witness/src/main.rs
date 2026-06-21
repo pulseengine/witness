@@ -34,6 +34,13 @@ enum Command {
         /// Path to write the instrumented module.
         #[arg(short, long)]
         output: PathBuf,
+        /// v0.36 (REQ-059) — instrument a Component in place: rewrite its
+        /// inner core and re-emit the *component* (shell + WIT exports
+        /// kept callable), instead of unbundling to a bare core. Requires
+        /// a single-core Component input. Lets the instrumented artifact
+        /// run through a runtime's component API (kiln / wasmtime).
+        #[arg(long = "in-place")]
+        in_place: bool,
     },
 
     /// Execute an instrumented module and collect counters.
@@ -504,8 +511,16 @@ fn main() -> Result<()> {
     init_tracing(cli.verbose);
 
     match cli.command {
-        Command::Instrument { input, output } => {
-            witness_core::instrument::instrument_file(&input, &output)?;
+        Command::Instrument {
+            input,
+            output,
+            in_place,
+        } => {
+            if in_place {
+                witness_core::instrument::instrument_file_in_place(&input, &output)?;
+            } else {
+                witness_core::instrument::instrument_file(&input, &output)?;
+            }
             // v0.9.11 — chatty success. Tester review found instrument /
             // run / predicate / attest were silent on success while
             // keygen / verify were chatty; the asymmetry made users
