@@ -901,3 +901,26 @@ artifacts:
         target: REQ-059
       - type: implements
         target: DEC-045
+
+  # -------------------------------------------------------------------------
+  # v0.36 — differential cross-runtime compare (REQ-058)
+  # -------------------------------------------------------------------------
+  - id: FEAT-041
+    type: feature
+    title: v0.36 — cross-check subcommand (differential cross-runtime coverage)
+    status: proposed
+    phase: phase-3
+    acceptance-criteria:
+      - "`witness cross-check a.json b.json` compares two run records' per-branch hit counts; identical runs report AGREE and exit 0."
+      - "Any per-branch counter divergence is listed (branch id, both values, function) and the command exits non-zero; branch-set mismatches are also divergences."
+      - "Composes with the existing backends: embedded `witness run`, `--harness kilnd`, and (via REQ-059) a wasmtime-component run."
+    description: >
+      Closes REQ-058 (DEC-044). A pure-data `cross_check` module +
+      `cross-check` CLI: the same instrumented artifact must produce
+      identical counters under every runtime backend; divergence is a
+      defect signal surfaced explicitly (CI gates on the non-zero exit),
+      with wasmtime as the oracle that cross-validates kiln (witness#110).
+    tags: [v0.36, dual-runtime, cross-check, issue-110]
+    links:
+      - type: satisfies
+        target: REQ-058
