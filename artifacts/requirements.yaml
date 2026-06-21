@@ -1011,7 +1011,7 @@ artifacts:
   - id: REQ-058
     type: requirement
     title: Differential cross-runtime coverage validation
-    status: proposed
+    status: implemented
     description: >
       witness shall be able to collect MC/DC coverage from a single
       instrumented artifact under more than one Wasm runtime backend and
@@ -1030,7 +1030,7 @@ artifacts:
   - id: REQ-059
     type: requirement
     title: Instrument-in-place for Component-Model artifacts
-    status: proposed
+    status: implemented
     description: >
       witness shall support instrumenting a Wasm Component by rewriting
       its inner core module **in place** — keeping the component shell
