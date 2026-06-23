@@ -7,6 +7,26 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-06-23
+
+Headline: **test-level verification traceability** — `verifies` coverage 2/55 → 30/55 (issue #115 Track E).
+
+A traceability / compliance release (no runtime behaviour change).
+
+### Added
+- 28 `verifies` test-cases (`TEST-REQ-001..056`) mapping each implemented,
+  testable requirement to the **specific test function(s)** that verify it —
+  using the `verifies` predicate (a test *verifies* a requirement; cf.
+  `satisfies` for implementations) and naming the actual `fn`s, not just the
+  crate. Cross-crate requirements emit one `run:` step per crate. Closes the
+  silent requirement→test gap (rivet#555); raises verifies-coverage from
+  **2/55 to 30/55**. The 25 still-unmapped requirements are aspirational /
+  process / release-artifact items with no unit test, recorded as such.
+
+### Notes
+- crates.io is already current (the four crates were published at 0.36.0 with
+  identical runtime code); the npm CLI wrapper (#115 Track B) is deferred.
+
 ## [0.36.0] — 2026-06-21
 
 Headline: **Component-Model coverage run-path — instrument in place + cross-runtime check** (issue #110).
