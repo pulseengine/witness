@@ -242,3 +242,375 @@ artifacts:
     links:
       - type: verifies
         target: REQ-058
+
+  # -------------------------------------------------------------------------
+  # v0.37 (#115 Track E) — test-level verification: one `verifies` test-case per
+  # implemented requirement, naming the actual test fns (rivet#555 pattern).
+  # witness-viz is a separate workspace → run via --manifest-path.
+  # -------------------------------------------------------------------------
+  - id: TEST-REQ-001
+    type: test-case
+    title: Instrument Wasm modules with branch counters
+    description: >
+      Verifies REQ-001 (Instrument Wasm modules with branch counters). Tests: `enumerates_if_else_as_two_branches`, `enumerates_br_if_as_one_branch`, `enumerates_br_table_as_per_target_plus_default`, `exports_one_counter_per_branch`, `fixture_instruments_and_records_branches`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+        - run: cargo test -p witness-mcdc fixture_instruments_and_records_branches
+    links:
+      - type: verifies
+        target: REQ-001
+  - id: TEST-REQ-002
+    type: test-case
+    title: Execute instrumented module and collect counters
+    description: >
+      Verifies REQ-002 (Execute instrumented module and collect counters). Tests: `round_trip_if_else_then_arm`, `round_trip_br_if_taken`, `run_then_arm_fires_then_counter`, `run_else_arm_fires_else_counter`, `run_match_arm_0_fires_target_0`, `run_match_default_fires_default_counter`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc
+    links:
+      - type: verifies
+        target: REQ-002
+  - id: TEST-REQ-003
+    type: test-case
+    title: Emit branch-coverage report
+    description: >
+      Verifies REQ-003 (Emit branch-coverage report). Tests: `aggregates_per_function`, `lists_uncovered_deterministically`, `coverage_ratio_handles_empty_module`, `text_format_contains_headline_ratio`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-003
+  - id: TEST-REQ-005
+    type: test-case
+    title: MC/DC condition decomposition when DWARF is present
+    description: >
+      Verifies REQ-005 (MC/DC condition decomposition when DWARF is present). Tests: `group_into_decisions_merges_same_line`, `group_into_decisions_skips_singletons`, `group_into_decisions_separates_by_function`, `group_into_decisions_clusters_adjacent_lines`, `group_into_decisions_splits_on_large_gap`, `extract_dwarf_returns_none_on_dwarf_free_module`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-005
+  - id: TEST-REQ-006
+    type: test-case
+    title: Decision-granularity algorithm shall be documented and sound
+    description: >
+      Verifies REQ-006 (Decision-granularity algorithm shall be documented and sound). Tests: `returned_pair_satisfies_criteria`, `order_independence_of_pair_existence`, `idempotent`, `leap_year_three_conditions_full_pair_set`, `masking_interpretation_when_short_circuit`, `unique_cause_preferred_over_masking`, `no_pair_when_outcomes_match`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-checker
+    links:
+      - type: verifies
+        target: REQ-006
+  - id: TEST-REQ-007
+    type: test-case
+    title: Emit coverage as rivet-compatible evidence
+    description: >
+      Verifies REQ-007 (Emit coverage as rivet-compatible evidence). Tests: `build_evidence_groups_by_artifact`, `build_evidence_rejects_unknown_branch_in_map`, `evidence_file_round_trips_via_yaml`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-007
+  - id: TEST-REQ-008
+    type: test-case
+    title: Emit coverage as in-toto predicate for sigil
+    description: >
+      Verifies REQ-008 (Emit coverage as in-toto predicate for sigil). Tests: `statement_builds_with_sha256_subject`, `statement_includes_original_module_when_supplied`, `statement_round_trips_via_serde_json`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-008
+  - id: TEST-REQ-013
+    type: test-case
+    title: Per-target br_table counting
+    description: >
+      Verifies REQ-013 (Per-target br_table counting). Tests: `enumerates_br_table_as_per_target_plus_default`, `br_table_records_brval_and_brcnt_per_arm`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core enumerates_br_table_as_per_target_plus_default
+        - run: cargo test -p witness-mcdc br_table_records_brval_and_brcnt_per_arm
+    links:
+      - type: verifies
+        target: REQ-013
+  - id: TEST-REQ-014
+    type: test-case
+    title: Subprocess harness mode (--harness)
+    description: >
+      Verifies REQ-014 (Subprocess harness mode (--harness)). Tests: `harness_subprocess_round_trip`, `harness_unknown_schema_is_rejected`, `harness_subprocess_failure_propagates`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc
+    links:
+      - type: verifies
+        target: REQ-014
+  - id: TEST-REQ-017
+    type: test-case
+    title: Cross-run coverage aggregation (`witness merge`)
+    description: >
+      Verifies REQ-017 (Cross-run coverage aggregation (`witness merge`)). Tests: `merge_sums_counters`, `merge_rejects_module_mismatch`, `merge_rejects_branch_count_mismatch`, `merge_files_round_trip`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-017
+  - id: TEST-REQ-018
+    type: test-case
+    title: In-toto coverage predicate emission for sigil
+    description: >
+      Verifies REQ-018 (In-toto coverage predicate emission for sigil). Tests: `mcdc_predicate_round_trips_truth_tables_and_gaps`, `original_module_from_manifest_produces_second_subject`, `mcdc_predicate_emits_two_subjects_when_original_supplied`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-018
+  - id: TEST-REQ-020
+    type: test-case
+    title: Branch-set / coverage delta subcommand
+    description: >
+      Verifies REQ-020 (Branch-set / coverage delta subcommand). Tests: `manifest_diff_added_removed_changed`, `run_diff_produces_coverage_delta`, `delta_to_text_renders_summary`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-020
+  - id: TEST-REQ-027
+    type: test-case
+    title: Per-decision MC/DC truth-table emission
+    description: >
+      Verifies REQ-027 (Per-decision MC/DC truth-table emission). Tests: `leap_year_full_mcdc`, `incomplete_suite_emits_gap`, `unreached_decision_marked`, `dead_condition_when_never_evaluated`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-027
+  - id: TEST-REQ-028
+    type: test-case
+    title: Independent-effect citation per condition
+    description: >
+      Verifies REQ-028 (Independent-effect citation per condition). Tests: `leap_year_full_mcdc`, `range_overlap_proves_with_two_pairs`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-028
+  - id: TEST-REQ-029
+    type: test-case
+    title: MC/DC gap analysis with row-closure recommendations
+    description: >
+      Verifies REQ-029 (MC/DC gap analysis with row-closure recommendations). Tests: `incomplete_suite_emits_gap`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core incomplete_suite_emits_gap
+    links:
+      - type: verifies
+        target: REQ-029
+  - id: TEST-REQ-036
+    type: test-case
+    title: Counter overflow prevention at scale
+    description: >
+      Verifies REQ-036 (Counter overflow prevention at scale). Tests: `hit_counter_global_is_i64_brval_brcnt_stay_i32`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core hit_counter_global_is_i64_brval_brcnt_stay_i32
+    links:
+      - type: verifies
+        target: REQ-036
+  - id: TEST-REQ-037
+    type: test-case
+    title: BrTable per-row MC/DC reconstruction
+    description: >
+      Verifies REQ-037 (BrTable per-row MC/DC reconstruction). Tests: `br_table_audit_proves_each_observed_bit`, `br_table_all_arms_hit_without_audit_is_not_full_mcdc`, `br_table_audit_absent_when_pre_v0_11_5_run`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-037
+  - id: TEST-REQ-039
+    type: test-case
+    title: MCP server for MC/DC truth-table queries
+    description: >
+      Verifies REQ-039 (MCP server for MC/DC truth-table queries). Tests: `tools_list_returns_three_tools`, `get_decision_truth_table_returns_decision_fields`, `find_missing_witness_gap_returns_needed_row`, `list_uncovered_conditions_returns_array`, `unknown_tool_returns_jsonrpc_error`, `initialize_handshake_returns_server_info`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --manifest-path crates/witness-viz/Cargo.toml
+    links:
+      - type: verifies
+        target: REQ-039
+  - id: TEST-REQ-044
+    type: test-case
+    title: Zero-infrastructure PR-time MC/DC viewing
+    description: >
+      Verifies REQ-044 (Zero-infrastructure PR-time MC/DC viewing). Tests: `export_writes_self_contained_static_site`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --manifest-path crates/witness-viz/Cargo.toml export_writes_self_contained_static_site
+    links:
+      - type: verifies
+        target: REQ-044
+  - id: TEST-REQ-045
+    type: test-case
+    title: Source visibility in MC/DC reports
+    description: >
+      Verifies REQ-045 (Source visibility in MC/DC reports). Tests: `export_with_source_root_emits_inline_snippets`, `export_with_missing_source_file_degrades_gracefully`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --manifest-path crates/witness-viz/Cargo.toml
+    links:
+      - type: verifies
+        target: REQ-045
+  - id: TEST-REQ-048
+    type: test-case
+    title: Source attribution for DWARF-less languages
+    description: >
+      Verifies REQ-048 (Source attribution for DWARF-less languages). Tests: `export_with_source_root_emits_inline_snippets`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --manifest-path crates/witness-viz/Cargo.toml export_with_source_root_emits_inline_snippets
+    links:
+      - type: verifies
+        target: REQ-048
+  - id: TEST-REQ-049
+    type: test-case
+    title: PR-time MC/DC coverage delta comment
+    description: >
+      Verifies REQ-049 (PR-time MC/DC coverage delta comment). Tests: `regression_is_surfaced`, `improvement_is_surfaced`, `no_change_says_so`, `added_and_removed_verdicts_are_flagged`, `gap_to_dead_is_other_not_regression`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --manifest-path crates/witness-viz/Cargo.toml
+    links:
+      - type: verifies
+        target: REQ-049
+  - id: TEST-REQ-050
+    type: test-case
+    title: Multi-version dashboard hosting with cross-version summary
+    description: >
+      Verifies REQ-050 (Multi-version dashboard hosting with cross-version summary). Tests: `renders_table_newest_first_with_deltas`, `load_scans_versioned_dirs_and_skips_others`, `empty_site_reports_no_versions`, `pre_v026_summary_without_aggregates_loads_as_zero`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --manifest-path crates/witness-viz/Cargo.toml
+    links:
+      - type: verifies
+        target: REQ-050
+  - id: TEST-REQ-052
+    type: test-case
+    title: Per-condition provenance visibility
+    description: >
+      Verifies REQ-052 (Per-condition provenance visibility). Tests: `decision_page_renders_provenance`, `loader_joins_branches_and_chains_and_demangles`, `repeated_brtable_provenance_is_grouped_into_one_summary`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --manifest-path crates/witness-viz/Cargo.toml
+    links:
+      - type: verifies
+        target: REQ-052
+  - id: TEST-REQ-053
+    type: test-case
+    title: Instrument wasip2 components without a manual unbundle step
+    description: >
+      Verifies REQ-053 (Instrument wasip2 components without a manual unbundle step). Tests: `single_module_component_auto_unbundles_and_instruments`, `degenerate_component_returns_unbundle_error`, `extract_sole_core_module_yields_valid_core`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-053
+  - id: TEST-REQ-054
+    type: test-case
+    title: MC/DC on Component-Model wasm via meld fusion
+    description: >
+      Verifies REQ-054 (MC/DC on Component-Model wasm via meld fusion). Tests: `multi_module_component_errors_toward_wasip1`, `single_module_component_auto_unbundles_and_instruments`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-054
+  - id: TEST-REQ-055
+    type: test-case
+    title: Readable (demangled) function attribution in coverage evidence
+    description: >
+      Verifies REQ-055 (Readable (demangled) function attribution in coverage evidence). Tests: `rust_legacy_symbol_demangles_and_drops_hash`, `rust_v0_symbol_demangles`, `cpp_symbol_demangles`, `mcdc_decision_arms_reachable_rows`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core
+    links:
+      - type: verifies
+        target: REQ-055
+  - id: TEST-REQ-056
+    type: test-case
+    title: Typed invocation shall address any export name, including WIT-style
+    description: >
+      Verifies REQ-056 (Typed invocation shall address any export name, including WIT-style). Tests: `invoke_spec_wit_name_uses_equals_separator`, `invoke_spec_legacy_colon_still_works`, `invoke_spec_equals_takes_precedence_over_colon`, `invoke_spec_equals_empty_args`.
+    tags: [verification, unit-tests]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc
+    links:
+      - type: verifies
+        target: REQ-056

@@ -924,3 +924,29 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-058
+
+  # -------------------------------------------------------------------------
+  # v0.37 — test-level verification extraction (#115 Track E)
+  # -------------------------------------------------------------------------
+  - id: FEAT-042
+    type: feature
+    title: v0.37 — test-level verification extraction (verifies coverage 2/55 → 30/55)
+    status: proposed
+    phase: phase-3
+    acceptance-criteria:
+      - "Every implemented, testable requirement carries a `verifies` test-case naming the actual test fn(s) (not `satisfies`, not crate-granular)."
+      - "`rivet validate` PASS; verifies-coverage rises from 2/55 to 30/55 of requirements."
+      - "Each test-case's `run:` resolves to real passing tests in the named crate."
+    description: >
+      Closes #115 Track E (rivet#555 pattern). Adds 28 `verifies` test-cases
+      (TEST-REQ-001..056) mapping each implemented requirement to the specific
+      test functions that verify it, with per-fn crate resolution (cross-crate
+      requirements get one run-step per crate). The 25 still-unmapped
+      requirements are aspirational / process / release-artifact items with no
+      unit test, recorded as such. Traceability/compliance release — no runtime
+      behaviour change; crates.io already current at the prior version; npm
+      wrapper (Track B) deferred.
+    tags: [v0.37, verification, traceability, issue-115]
+    links:
+      - type: satisfies
+        target: REQ-032
