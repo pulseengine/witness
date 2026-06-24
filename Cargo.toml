@@ -64,14 +64,14 @@ anyhow = "1"
 thiserror = "2"
 sha2 = "0.11"
 gimli = { version = "0.33", default-features = false, features = ["read", "std"] }
-wasmparser = "0.240"
+wasmparser = "0.252"
 # v0.23.0 unpin: walrus 0.26.3 (released 2026-05-26) ships the
 # upstream legacy try/catch multi-value-handler panic fix
 # (wasm-bindgen/walrus PR #316 / issue #315) we'd been carrying as a
 # fork pin since v0.21. crates.io publish is now unblocked.
 walrus = "0.26.3"
 wasmtime = "45"
-wasmtime-wasi = "45"
+wasmtime-wasi = "46"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"

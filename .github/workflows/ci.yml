@@ -22,12 +22,12 @@ jobs:
     name: Format
     runs-on: [self-hosted, linux, x64, light]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Pinned (not @stable) so a moving stable can't surface rustfmt
       # diffs a developer's stable never saw. Bump deliberately, in
       # lockstep with the clippy job. NOT a repo-wide rust-toolchain.toml
       # (that would also override the MSRV + wasm-target jobs).
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
@@ -36,11 +36,11 @@ jobs:
     name: Clippy
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Pinned (not @stable) so a moving stable can't surface NEW clippy
       # lints a developer's stable never saw — the skew that bit v0.32.
       # Bump deliberately, in lockstep with the fmt job.
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -58,7 +58,7 @@ jobs:
           - os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets --locked
@@ -67,8 +67,8 @@ jobs:
     name: MSRV (1.93)
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.93.0
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.100.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-targets --locked
 
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
@@ -106,7 +106,7 @@ jobs:
     name: Cargo Deny
     runs-on: [self-hosted, linux, x64, light]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       # Smithy workaround: EmbarkStudios/cargo-deny-action launches a
       # rootless container which fails under our hardened runner unit
@@ -125,7 +125,7 @@ jobs:
     # 0.22.1+.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: |
@@ -137,7 +137,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --test properties --locked
@@ -150,7 +150,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: |
@@ -162,7 +162,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -183,7 +183,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -235,7 +235,7 @@ jobs:
     name: Build witness-component (Component Model wasm) — v0.7.0+
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
@@ -268,7 +268,7 @@ jobs:
     needs: verdict-suite
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install jsonschema
         run: |
           python3 -m pip install jsonschema --quiet
@@ -306,7 +306,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
