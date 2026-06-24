@@ -94,6 +94,13 @@ enum Command {
         /// snapshot to WITNESS_OUTPUT before exiting.
         #[arg(long)]
         harness: Option<String>,
+        /// v0.38 (#110) — run an instrumented **component** through
+        /// wasmtime's component model, reading counters back via a
+        /// coredump (the trap-snapshot backend). Requires an
+        /// `--in-place` instrumented component; counters-only (branch
+        /// coverage). The second runtime for `cross-check` vs kiln.
+        #[arg(long = "backend-wasmtime-component")]
+        backend_wasmtime_component: bool,
     },
 
     /// Produce a coverage report from collected counter data.
@@ -600,6 +607,7 @@ fn main() -> Result<()> {
             call_start,
             invoke_all,
             harness,
+            backend_wasmtime_component,
         } => {
             let manifest =
                 manifest.unwrap_or_else(|| witness_core::instrument::Manifest::path_for(&module));
@@ -612,6 +620,7 @@ fn main() -> Result<()> {
                 call_start,
                 invoke_all,
                 harness,
+                component_backend: backend_wasmtime_component,
             };
             run::run_module(&options)?;
             // v0.9.11 — chatty success.
@@ -1587,6 +1596,7 @@ fn run_all(
         call_start: false,
         invoke_all,
         harness: None,
+        component_backend: false,
     })?;
     #[allow(clippy::print_stderr)]
     {

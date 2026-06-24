@@ -950,3 +950,28 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-032
+
+  # -------------------------------------------------------------------------
+  # v0.38 — wasmtime-component trap-snapshot backend (REQ-060)
+  # -------------------------------------------------------------------------
+  - id: FEAT-043
+    type: feature
+    title: v0.38 — wasmtime-component trap-snapshot run backend
+    status: implemented
+    phase: phase-3
+    acceptance-criteria:
+      - "`witness run --backend-wasmtime-component <component> --invoke <export>` runs an --in-place instrumented component and writes a RunRecord with per-branch hits read via a coredump."
+      - "inject_export_traps appends `unreachable` to lifted exports (skipping __witness_* helpers), keeping the component valid and counters intact."
+      - "Counters-only (v1, branch coverage), no-arg exports; the second runtime for cross-check (REQ-058) vs kiln."
+    description: >
+      Closes REQ-060 (DEC-046). Producer `inject_export_traps` + backend
+      `run_via_wasmtime_component` (component Linker + coredump_on_trap +
+      WasmCoreDump.instances() + get_global). Oracle: e2e test instruments
+      a leaf component in place, runs it through the backend, asserts the
+      taken arm's counter fired.
+    tags: [v0.38, component-model, dual-runtime, issue-110]
+    links:
+      - type: satisfies
+        target: REQ-060
+      - type: implements
+        target: DEC-046

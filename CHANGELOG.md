@@ -7,6 +7,31 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-06-24
+
+Headline: **wasmtime-component coverage backend** — a second, independent runtime for the differential cross-check (issue #110).
+
+### Added
+- `witness run --backend-wasmtime-component <component> --invoke <export>` —
+  runs an `--in-place` instrumented Component through wasmtime's component
+  model and reads the `__witness_counter_*` globals back from a
+  `WasmCoreDump`, writing a counters-only (v1, branch-coverage) RunRecord.
+  This is the **second runtime** for `witness cross-check` (REQ-058),
+  alongside the kiln harness — diff the two to catch backend/instrumentation
+  bugs. (FEAT-043, REQ-060)
+- `witness_core::instrument::inject_export_traps` — appends `unreachable`
+  to the end of a component's lifted-export inner-core functions (skipping
+  `__witness_*` helpers) so a call fires the branch counters and then traps;
+  the trap is what produces the coredump (wasmtime 45 exposes no
+  `component::Instance` global accessor, and a normal return yields no trap).
+  Applied in memory by the backend; the artifact stays an ordinary
+  `--in-place` component. (DEC-046)
+
+### Notes
+- v1 backend is no-arg exports, counters-only. wasi-p2 imports (syscall-heavy
+  components) and per-row MC/DC are follow-ups. kiln's harness reads globals
+  natively (no trap), keeping the two backends genuinely independent.
+
 ## [0.37.0] — 2026-06-23
 
 Headline: **test-level verification traceability** — `verifies` coverage 2/55 → 30/55 (issue #115 Track E).

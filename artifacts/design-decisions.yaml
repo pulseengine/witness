@@ -1615,3 +1615,38 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-059
+
+  # -------------------------------------------------------------------------
+  # v0.38 — coredump readback via end-of-export trap injection (REQ-060)
+  # -------------------------------------------------------------------------
+  - id: DEC-046
+    type: design-decision
+    title: Read component counters via end-of-export trap injection + coredump
+    status: implemented
+    description: >
+      The wasmtime-component backend injects `unreachable` at the end of
+      every lifted export's inner-core function (`inject_export_traps`),
+      runs the export under `coredump_on_trap`, and reads the counter
+      globals from `WasmCoreDump.instances()`.
+    rationale: >
+      wasmtime 45 exposes no `component::Instance` global accessor, and a
+      normally-returning export yields no trap — so the injected end-of-run
+      trap is what makes the coredump (hence the readback) possible.
+      Verified by spike (coredump reads inner-core globals by name) and an
+      e2e test. The host cannot force a clean end-of-run trap (fuel/epoch
+      interrupt at arbitrary points). The injection destroys normal
+      returns, so it is applied in memory only on the coredump backend
+      path, never for embedded/kiln runs. kiln's harness reads globals
+      natively (no trap), so the two backends are genuinely independent
+      for the cross-check.
+    alternatives: >
+      Upstream `component::Instance` global accessor (downgraded to
+      nice-to-have, DEC-044); fuel/epoch host trap (arbitrary timing —
+      rejected); run the bare inner core under preview1 (can't satisfy p2
+      imports — the original wall).
+    tags: [v0.38, component-model, issue-110]
+    links:
+      - type: satisfies
+        target: REQ-060
+      - type: refines
+        target: DEC-044

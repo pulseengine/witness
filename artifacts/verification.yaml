@@ -614,3 +614,22 @@ artifacts:
     links:
       - type: verifies
         target: REQ-056
+
+  - id: TEST-REQ-060
+    type: test-case
+    title: wasmtime-component coverage backend (second runtime)
+    description: >
+      Verifies REQ-060. Tests:
+      `wasmtime_component_backend_reads_counters_via_coredump` (witness-mcdc,
+      e2e: instrument --in-place → run via backend → counters via coredump),
+      `inject_export_traps_appends_unreachable_to_exports` (witness-mcdc-core,
+      producer).
+    tags: [verification, component-model]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc wasmtime_component_backend_reads_counters_via_coredump
+        - run: cargo test -p witness-mcdc-core inject_export_traps_appends_unreachable_to_exports
+    links:
+      - type: verifies
+        target: REQ-060

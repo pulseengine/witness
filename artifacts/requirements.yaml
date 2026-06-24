@@ -1048,3 +1048,22 @@ artifacts:
     fields:
       priority: should
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.38 — wasmtime-component coverage backend (issue #110)
+  # -------------------------------------------------------------------------
+  - id: REQ-060
+    type: requirement
+    title: wasmtime-component coverage backend (second runtime)
+    status: implemented
+    description: >
+      witness shall measure branch coverage of an instrumented Component by
+      running it through wasmtime's component model and reading the
+      `__witness_counter_*` globals back from a `WasmCoreDump` — a second,
+      independent runtime (alongside the kiln harness) for the differential
+      cross-check (REQ-058). v1 is counters-only (branch coverage), no-arg
+      exports.
+    tags: [v0.38, component-model, dual-runtime, issue-110]
+    fields:
+      priority: should
+      category: functional

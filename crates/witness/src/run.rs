@@ -60,6 +60,13 @@ pub struct RunOptions<'a> {
     /// Subprocess harness command. When set, witness spawns this command
     /// instead of running the module via embedded wasmtime.
     pub harness: Option<String>,
+    /// v0.38 (#110) — run an instrumented **component** through wasmtime's
+    /// component model and read counters back via a coredump (the
+    /// trap-snapshot backend). The artifact must be an `--in-place`
+    /// instrumented component; witness injects end-of-export traps in
+    /// memory. Counters-only (v1, branch coverage). The second runtime
+    /// for the differential `cross-check` (REQ-058) alongside kiln.
+    pub component_backend: bool,
 }
 
 /// Run the instrumented `module`, writing a `RunRecord` to `options.output`.
@@ -67,7 +74,114 @@ pub fn run_module(options: &RunOptions<'_>) -> Result<()> {
     if let Some(cmd) = options.harness.as_deref() {
         return run_via_harness(options, cmd);
     }
+    if options.component_backend {
+        return run_via_wasmtime_component(options);
+    }
     run_via_embedded(options)
+}
+
+/// v0.38 (#110, DEC-044) — run an instrumented **component** through
+/// wasmtime's component model and read branch counters back from a
+/// `WasmCoreDump`.
+///
+/// witness injects an end-of-export trap ([`inject_export_traps`]) so each
+/// invoked export runs its body (firing the counters) and then traps; the
+/// trap yields a coredump whose inner-core instance still holds the
+/// `__witness_counter_*` globals — the only public way to read them from a
+/// component run (wasmtime 45 exposes no `component::Instance` global
+/// accessor). v1 is counters-only (branch coverage), no-arg exports. This
+/// is the second runtime for the differential `cross-check` (REQ-058),
+/// alongside the kiln harness.
+fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
+    let manifest = Manifest::load(&options.manifest)?;
+    let comp_bytes = std::fs::read(options.module).map_err(Error::Io)?;
+    let trapped = witness_core::instrument::inject_export_traps(&comp_bytes, options.module)
+        .map_err(|e| Error::Runtime(anyhow::anyhow!("inject export traps: {e}")))?;
+
+    let mut config = Config::new();
+    config.coredump_on_trap(true);
+    let engine = Engine::new(&config).map_err(|e| Error::Runtime(e.into()))?;
+    let component = wasmtime::component::Component::from_binary(&engine, &trapped)
+        .map_err(|e| Error::Runtime(e.into()))?;
+
+    // Untyped component calls need an exactly-sized results buffer, and the
+    // injected trap fires *after* the body computes its result — so size the
+    // buffer per export from the component type.
+    let mut result_counts: HashMap<String, usize> = HashMap::new();
+    for (name, item) in component.component_type().exports(&engine) {
+        if let wasmtime::component::types::ComponentItem::ComponentFunc(ft) = item {
+            result_counts.insert(name.to_string(), ft.results().len());
+        }
+    }
+
+    let mut store: Store<()> = Store::new(&engine, ());
+    let linker: wasmtime::component::Linker<()> = wasmtime::component::Linker::new(&engine);
+    let instance = linker
+        .instantiate(&mut store, &component)
+        .map_err(|e| Error::Runtime(e.into()))?;
+
+    if options.invoke.is_empty() {
+        return Err(Error::Runtime(anyhow::anyhow!(
+            "--backend wasmtime-component needs at least one --invoke <export> \
+             (v1 is no-arg, counters-only)"
+        )));
+    }
+
+    let mut invoked: Vec<String> = Vec::new();
+    let mut counter_values: HashMap<u32, u64> = HashMap::new();
+    for name in &options.invoke {
+        let func = instance
+            .get_func(&mut store, name.as_str())
+            .ok_or_else(|| Error::Runtime(anyhow::anyhow!("export `{name}` not found")))?;
+        let n_res = result_counts.get(name).copied().unwrap_or(0);
+        let mut results = vec![wasmtime::component::Val::Bool(false); n_res];
+        let err = match func.call(&mut store, &[], &mut results) {
+            Ok(()) => {
+                return Err(Error::Runtime(anyhow::anyhow!(
+                    "export `{name}` returned without trapping — the coredump backend \
+                     needs the injected end-of-export trap (is `{}` an --in-place artifact?)",
+                    options.module.display()
+                )));
+            }
+            Err(e) => e,
+        };
+        let dump = err
+            .downcast_ref::<wasmtime::WasmCoreDump>()
+            .ok_or_else(|| {
+                Error::Runtime(anyhow::anyhow!("trap from `{name}` carried no coredump"))
+            })?;
+        // `Instance` is Copy; collect to release the borrow on `err`/`dump`.
+        let insts: Vec<wasmtime::Instance> = dump.instances().to_vec();
+        invoked.push(name.clone());
+        // Counters are cumulative globals; read after each call (last wins).
+        for branch in &manifest.branches {
+            let gname = format!("{COUNTER_EXPORT_PREFIX}{}", branch.id);
+            for inst in &insts {
+                let Some(g) = inst.get_global(&mut store, &gname) else {
+                    continue;
+                };
+                // SAFETY-REVIEW: counters are i64 by construction (v0.32),
+                // initialised to 0; reinterpreting the signed value as
+                // unsigned preserves magnitude for any non-wrapped counter.
+                // Mirrors the embedded path's counter read.
+                #[allow(
+                    clippy::wildcard_enum_match_arm,
+                    clippy::cast_sign_loss,
+                    clippy::as_conversions
+                )]
+                let v = match g.get(&mut store) {
+                    Val::I64(v) => v as u64,
+                    Val::I32(v) => u64::from(v as u32),
+                    _ => continue,
+                };
+                counter_values.insert(branch.id, v);
+                break;
+            }
+        }
+    }
+
+    let record = build_run_record(&manifest, &counter_values, options.module, invoked);
+    record.save(options.output)
 }
 
 fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
@@ -1192,6 +1306,54 @@ mod tests {
     use tempfile::tempdir;
     use witness_core::instrument::{BranchKind, instrument_module};
 
+    /// v0.38 (#110, DEC-044) — end-to-end: instrument a leaf component
+    /// in place, run it through the wasmtime-component backend, and read
+    /// the branch counter back via the coredump trap-snapshot path.
+    #[test]
+    fn wasmtime_component_backend_reads_counters_via_coredump() {
+        let comp_wat = r#"
+            (component
+              (core module $m
+                (global $g (mut i32) (i32.const 1))
+                (func (export "run") (result i32)
+                  global.get $g
+                  if (result i32) i32.const 10 else i32.const 20 end))
+              (core instance $i (instantiate $m))
+              (func (export "run") (result s32) (canon lift (core func $i "run")))
+            )
+        "#;
+        let comp = wat::parse_str(comp_wat).expect("valid component wat");
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("c.wasm");
+        let inst = dir.path().join("c-inst.wasm");
+        let out = dir.path().join("run.json");
+        std::fs::write(&src, &comp).unwrap();
+        witness_core::instrument::instrument_file_in_place(&src, &inst)
+            .expect("instrument --in-place");
+
+        let manifest = witness_core::instrument::Manifest::path_for(&inst);
+        let options = RunOptions {
+            module: &inst,
+            manifest,
+            output: &out,
+            invoke: vec!["run".to_string()],
+            invoke_with_args: vec![],
+            call_start: false,
+            invoke_all: false,
+            harness: None,
+            component_backend: true,
+        };
+        run_module(&options).expect("wasmtime-component backend run");
+
+        let record = RunRecord::load(&out).unwrap();
+        assert!(!record.branches.is_empty(), "manifest had branches");
+        let total: u64 = record.branches.iter().map(|b| b.hits).sum();
+        assert!(
+            total >= 1,
+            "the taken branch arm must register a hit via the coredump (got {total})"
+        );
+    }
+
     /// Issue #107 (DEC-043) — `--invoke-with-args` must address WIT-style
     /// export names, which always contain ':'. The spec separates name
     /// from args on '=' when present (WIT-safe), else on ':' (legacy).
@@ -1287,6 +1449,7 @@ mod tests {
             invoke_with_args: vec![],
             invoke_all: false,
             harness: None,
+            component_backend: false,
         };
         run_module(&options).unwrap();
 
@@ -1344,6 +1507,7 @@ mod tests {
             invoke_with_args: vec![],
             invoke_all: false,
             harness: None,
+            component_backend: false,
         };
         run_module(&options).unwrap();
         let record = RunRecord::load(&run_path).unwrap();
@@ -1400,6 +1564,7 @@ EOF"#;
             invoke_with_args: vec![],
             invoke_all: false,
             harness: Some(harness_cmd.to_string()),
+            component_backend: false,
         };
         run_module(&options).unwrap();
         let record = RunRecord::load(&run_path).unwrap();
@@ -1454,6 +1619,7 @@ EOF"#;
             call_start: false,
             invoke_all: false,
             harness: None,
+            component_backend: false,
         };
         run_module(&options).unwrap();
         let record = RunRecord::load(&run_path).unwrap();
@@ -1508,6 +1674,7 @@ EOF"#;
             call_start: false,
             invoke_all: false,
             harness: None,
+            component_backend: false,
         };
         let err = run_module(&options).expect_err("arity mismatch must error");
         let msg = format!("{err}");
@@ -1591,6 +1758,7 @@ EOF"#
             invoke_with_args: vec![],
             invoke_all: false,
             harness: Some(harness_cmd),
+            component_backend: false,
         };
         run_module(&options).unwrap();
 
@@ -1649,6 +1817,7 @@ EOF"#;
             invoke_with_args: vec![],
             invoke_all: false,
             harness: Some(harness_cmd.to_string()),
+            component_backend: false,
         };
         let err = run_module(&options).expect_err("unknown schema must error");
         let msg = format!("{err}");
@@ -1713,6 +1882,7 @@ EOF"#;
             invoke_with_args: vec![],
             invoke_all: true,
             harness: None,
+            component_backend: false,
         };
         run_module(&options).unwrap();
 
@@ -1813,6 +1983,7 @@ EOF"#;
             call_start: false,
             invoke_all: false,
             harness: None,
+            component_backend: false,
         };
         run_module(&options).unwrap();
 
@@ -1905,6 +2076,7 @@ EOF"#;
             invoke_with_args: vec![],
             invoke_all: true,
             harness: None,
+            component_backend: false,
         };
         let err = run_module(&options).expect_err("--invoke-all with nothing to invoke must error");
         let msg = format!("{err}");
@@ -1943,6 +2115,7 @@ EOF"#;
             invoke_with_args: vec![],
             invoke_all: false,
             harness: Some("exit 1".to_string()),
+            component_backend: false,
         };
         let result = run_module(&options);
         assert!(matches!(result, Err(Error::Harness { .. })));
