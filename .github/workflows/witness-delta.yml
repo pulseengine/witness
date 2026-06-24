@@ -28,11 +28,11 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: head
           fetch-depth: 0
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: base
           ref: ${{ github.event.pull_request.base.sha }}
@@ -96,11 +96,11 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: head
           fetch-depth: 0
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: base
           ref: ${{ github.event.pull_request.base.sha }}
