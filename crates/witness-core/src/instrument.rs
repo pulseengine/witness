@@ -48,10 +48,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use walrus::ir::{
     BinaryOp, Binop, BrIf, Const, GlobalGet, GlobalSet, IfElse, Instr, InstrSeqId, InstrSeqType,
-    LoadKind, LocalGet, LocalTee, MemArg, Store, StoreKind, Value,
+    LoadKind, LocalGet, LocalTee, MemArg, Store, StoreKind, Unreachable, Value,
 };
 use walrus::{
-    ConstExpr, FunctionBuilder, FunctionId, GlobalId, LocalId, MemoryId, Module, ValType,
+    ConstExpr, ExportItem, FunctionBuilder, FunctionId, GlobalId, LocalId, MemoryId, Module,
+    ValType,
 };
 
 /// Lowercase-hex SHA-256 of `bytes`. v0.10.0 — used to capture the
@@ -598,6 +599,55 @@ fn splice_core_into_component(
     out.extend_from_slice(new_core); // instrumented inner core
     out.extend_from_slice(&component_bytes[range.end..]); // rest of the component
     Ok(out)
+}
+
+/// v0.38 (#110) — append `unreachable` to the end of every exported
+/// function (skipping `__witness_*` helpers) so that calling a lifted
+/// component export runs its body (firing the branch counters) and then
+/// **traps**. The wasmtime-component run backend needs that trap to
+/// capture a `WasmCoreDump` and read the counter globals back —
+/// wasmtime 45 exposes no other way to read an inner core instance's
+/// globals from a component run (DEC-044). A normally-returning export
+/// yields no trap, hence no readback; this injection is what closes that
+/// gap. Destroys normal returns, so it is only applied on the path that
+/// runs under the coredump backend, never for the embedded/kiln runs.
+fn append_export_traps(module: &mut Module) {
+    let targets: Vec<FunctionId> = module
+        .exports
+        .iter()
+        .filter_map(|e| {
+            if let ExportItem::Function(fid) = e.item {
+                (!e.name.starts_with("__witness_")).then_some(fid)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for fid in targets {
+        if let walrus::FunctionKind::Local(lf) = &mut module.funcs.get_mut(fid).kind {
+            let entry = lf.entry_block();
+            lf.block_mut(entry)
+                .instrs
+                .push((Instr::Unreachable(Unreachable {}), Default::default()));
+        }
+    }
+}
+
+/// v0.38 (#110) — given an instrumented **component**, rewrite its inner
+/// core so every lifted export traps at end-of-run (see
+/// [`append_export_traps`]), and return the new component bytes. Reuses
+/// the same extract → walrus → splice path as `--in-place` instrumentation
+/// (DEC-045). The wasmtime-component backend calls this in memory before
+/// instantiating, so the user runs an ordinary `--in-place` artifact.
+pub fn inject_export_traps(component_bytes: &[u8], input: &Path) -> Result<Vec<u8>> {
+    let (core_bytes, range) = extract_sole_core_module_with_range(component_bytes, input)?;
+    let mut module = Module::from_buffer(&core_bytes).map_err(|source| Error::ParseModule {
+        path: input.to_path_buf(),
+        source,
+    })?;
+    append_export_traps(&mut module);
+    let new_core = module.emit_wasm();
+    splice_core_into_component(component_bytes, range, &new_core)
 }
 
 /// Instrument the Wasm module at `input`, writing the instrumented module
@@ -2663,6 +2713,76 @@ mod tests {
         std::fs::write(&bin, &bare).unwrap();
         let err = instrument_file_in_place(&bin, &out).expect_err("bare core must be rejected");
         assert!(format!("{err}").contains("--in-place requires a Wasm Component"));
+    }
+
+    /// v0.38 (#110) — `inject_export_traps` makes every lifted export trap
+    /// at end-of-run (so the wasmtime-component backend can coredump), while
+    /// leaving the component valid and the witness counter globals intact.
+    #[test]
+    fn inject_export_traps_appends_unreachable_to_exports() {
+        let comp_wat = r#"
+            (component
+              (core module $m
+                (func (export "f") (param i32) (result i32)
+                  local.get 0
+                  if (result i32) i32.const 1 else i32.const 0 end))
+              (core instance $i (instantiate $m))
+              (func (export "f") (param "n" s32) (result s32)
+                (canon lift (core func $i "f")))
+            )
+        "#;
+        let comp = wat::parse_str(comp_wat).expect("valid component wat");
+        let dir = tempfile::tempdir().unwrap();
+        let inp = dir.path().join("c.wasm");
+        let inst = dir.path().join("c-inst.wasm");
+        std::fs::write(&inp, &comp).unwrap();
+        instrument_file_in_place(&inp, &inst).expect("in-place instrument");
+        let inst_bytes = std::fs::read(&inst).unwrap();
+
+        let trapped = inject_export_traps(&inst_bytes, &inst).expect("inject traps");
+
+        // (a) still a valid-parsing component.
+        assert_eq!(trapped[6], 0x01, "output must still be a component");
+        for p in wasmparser::Parser::new(0).parse_all(&trapped) {
+            p.expect("trapped component re-parses");
+        }
+
+        // (b) the inner core's exported `f` now ends in `unreachable`, and
+        //     the witness counter globals survived.
+        let (core, _) = extract_sole_core_module_with_range(&trapped, &inst).expect("inner core");
+        let m = Module::from_buffer(&core).expect("inner core re-parses");
+        assert!(
+            m.exports
+                .iter()
+                .any(|e| e.name.starts_with(COUNTER_EXPORT_PREFIX)),
+            "counter globals must survive trap injection"
+        );
+        let f_id = m
+            .exports
+            .iter()
+            .find_map(|e| {
+                if let ExportItem::Function(id) = e.item {
+                    (e.name == "f").then_some(id)
+                } else {
+                    None
+                }
+            })
+            .expect("export f present");
+        let walrus::FunctionKind::Local(lf) = &m.funcs.get(f_id).kind else {
+            panic!("f should be a local function");
+        };
+        let entry = lf.entry_block();
+        let last = lf
+            .block(entry)
+            .instrs
+            .last()
+            .map(|(i, _)| matches!(i, Instr::Unreachable(_)))
+            .unwrap_or(false);
+        assert!(last, "exported f must end in `unreachable` after injection");
+
+        // (c) `__witness_*` helper exports are NOT trapped (skipped).
+        // (the counter globals are globals, not funcs, so nothing to check
+        //  beyond (b); reset helpers, if present, keep returning.)
     }
 
     /// v0.28 — a single-module component auto-unbundles and instruments
