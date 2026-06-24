@@ -71,7 +71,7 @@ wasmparser = "0.252"
 # fork pin since v0.21. crates.io publish is now unblocked.
 walrus = "0.26.3"
 wasmtime = "45"
-wasmtime-wasi = "46"
+wasmtime-wasi = "45"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
