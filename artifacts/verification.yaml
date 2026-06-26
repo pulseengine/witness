@@ -633,3 +633,20 @@ artifacts:
     links:
       - type: verifies
         target: REQ-060
+
+  - id: TEST-REQ-061
+    type: test-case
+    title: Object-code MC/DC reconciliation against synth provenance
+    description: >
+      Verifies REQ-061 (witness-side). Tests (witness-mcdc-core,
+      object_disposition.rs): `maps_each_disposition_to_its_verdict`,
+      `unmatched_branch_is_no_provenance_and_synth_extra_diverges`,
+      `map_round_trips_via_json`.
+    tags: [verification, object-traceability]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core object_disposition
+    links:
+      - type: verifies
+        target: REQ-061

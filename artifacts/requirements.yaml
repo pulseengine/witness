@@ -1067,3 +1067,26 @@ artifacts:
     fields:
       priority: should
       category: functional
+
+  # -------------------------------------------------------------------------
+  # v0.39 — object-code MC/DC reconciliation (issue #109, synth #396)
+  # -------------------------------------------------------------------------
+  - id: REQ-061
+    type: requirement
+    title: Object-code MC/DC reconciliation against synth's decision-provenance map
+    status: implemented
+    description: >
+      witness shall reconcile its WASM-level MC/DC truth table against synth's
+      decision-provenance map (WASM→object lowering) to produce an
+      object-code-traceable disposition per branch — folds keep the WASM
+      obligation, eliminated-constant arms are justified-infeasible (scry
+      evidence), splits flag new object obligations — closing the
+      source→(rustc)→WASM→(synth)→object MC/DC chain (DO-178C §6.4.4.2 /
+      ISO 26262). Joins by the WASM `(func_index, byte_offset)` each manifest
+      branch already carries. The witness-side consumer is implemented and
+      tested against synth-shaped fixtures; the live end-to-end awaits synth
+      shipping the map (synth#396).
+    tags: [v0.39, object-traceability, dual-lowering, issue-109]
+    fields:
+      priority: should
+      category: functional

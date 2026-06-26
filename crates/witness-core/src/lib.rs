@@ -25,6 +25,7 @@ pub mod error;
 pub mod instrument;
 pub mod lcov;
 pub mod mcdc_report;
+pub mod object_disposition;
 pub mod predicate;
 pub mod report;
 pub mod rivet_evidence;

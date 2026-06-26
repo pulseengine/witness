@@ -136,6 +136,24 @@ enum Command {
         json: bool,
     },
 
+    /// v0.39 (#109) — reconcile a witness manifest against synth's
+    /// decision-provenance map to produce an object-code-traceable
+    /// disposition per branch (the WASM→object source-to-object step).
+    /// Joins by the WASM `(func_index, byte_offset)` each manifest branch
+    /// already carries. Splits flag new object obligations; eliminated
+    /// arms are justified-infeasible; folds keep the WASM obligation.
+    ObjectDisposition {
+        /// Path to the witness manifest (`*.witness.json`).
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Path to synth's `synth-provenance-v1` JSON map.
+        #[arg(long)]
+        provenance: PathBuf,
+        /// Emit JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Merge multiple run JSON files into one by summing per-branch counters.
     ///
     /// Inputs must share the same instrumented module (same `module_path`,
@@ -655,6 +673,24 @@ fn main() -> Result<()> {
                 // coverage delta — exit non-zero so CI gates on it.
                 #[allow(clippy::exit)]
                 std::process::exit(1);
+            }
+        }
+        Command::ObjectDisposition {
+            manifest,
+            provenance,
+            json,
+        } => {
+            let manifest = witness_core::instrument::Manifest::load(&manifest)?;
+            let map_bytes = std::fs::read(&provenance)?;
+            let map: witness_core::object_disposition::SynthProvenanceMap =
+                serde_json::from_slice(&map_bytes)?;
+            let report = witness_core::object_disposition::reconcile(&manifest.branches, &map);
+            // SAFETY-REVIEW: CLI output channel.
+            #[allow(clippy::print_stdout)]
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.to_text());
             }
         }
         Command::Report { input, format } => {

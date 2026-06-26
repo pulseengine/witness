@@ -1650,3 +1650,39 @@ artifacts:
         target: REQ-060
       - type: refines
         target: DEC-044
+
+  # -------------------------------------------------------------------------
+  # v0.39 — synth-provenance schema + join key (REQ-061)
+  # -------------------------------------------------------------------------
+  - id: DEC-047
+    type: design-decision
+    title: synth-provenance-v1 schema, (func_index, byte_offset) join key, object-disposition vocabulary
+    status: implemented
+    description: >
+      The witness↔synth contract: synth emits `synth-provenance-v1` — a list
+      of `{func_index, instruction_offset, kind}` entries where kind is one of
+      preserved | folded-predication | eliminated-constant(+scry_evidence) |
+      split-into-object-branches(count). witness joins it to its manifest
+      branches by `(function_index, byte_offset)` and emits
+      `witness-object-disposition-v1` (per branch: obligation-stands |
+      justified-infeasible | needs-object-coverage | no-provenance; plus
+      only-in-synth divergences).
+    rationale: >
+      The join key already exists in every BranchEntry (`function_index` +
+      `byte_offset` from walrus `InstrLocId`), so no fragile index-matching —
+      synth's explicit ask is satisfied with zero manifest change. Validated:
+      an if/else's two branch-arms share one WASM instruction byte_offset, so a
+      single synth entry maps to both arms — the join is correctly many-to-one.
+      The reconciler is witness-side (witness owns the truth table +
+      rivet-evidence); scry supplies the eliminated-constant justification as
+      an opaque evidence reference (the map carries the reference, not the
+      analysis). Schema proposed on #109/#396 for synth to build toward.
+    alternatives: >
+      synth-side reconciler (rejected — witness owns the truth table); a new
+      manifest field for the join key (unnecessary — byte_offset already
+      present); index-matching witness branch ids to synth (fragile, rejected
+      by the issue).
+    tags: [v0.39, object-traceability, issue-109]
+    links:
+      - type: satisfies
+        target: REQ-061
