@@ -975,3 +975,29 @@ artifacts:
         target: REQ-060
       - type: implements
         target: DEC-046
+
+  # -------------------------------------------------------------------------
+  # v0.39 — object-disposition reconciler (REQ-061)
+  # -------------------------------------------------------------------------
+  - id: FEAT-044
+    type: feature
+    title: v0.39 — object-disposition reconciler + CLI (synth-provenance consumer)
+    status: implemented
+    phase: phase-3
+    acceptance-criteria:
+      - "`witness_core::object_disposition::reconcile(branches, map)` joins by (func_index, byte_offset) and maps each disposition to its object verdict."
+      - "`witness object-disposition --manifest m.witness.json --provenance synth-map.json` emits the per-branch object-disposition report (text/json)."
+      - "Splits flag needs-object-coverage; eliminated-constant → justified-infeasible(+scry); fold/preserved → obligation-stands; unmatched → no-provenance; synth-only → divergence."
+    description: >
+      Closes the witness-side half of REQ-061 (DEC-047). Pure-data
+      `object_disposition` module (schema + reconcile + report) + the
+      `object-disposition` CLI. Consumer-ready ahead of synth#396; the schema
+      is the proposed contract. Oracle: 3 fixture tests covering every
+      disposition→verdict, the no-provenance/divergence cases, and JSON
+      round-trip. CLI smoke-tested end-to-end on a real instrumented manifest.
+    tags: [v0.39, object-traceability, issue-109]
+    links:
+      - type: satisfies
+        target: REQ-061
+      - type: implements
+        target: DEC-047
