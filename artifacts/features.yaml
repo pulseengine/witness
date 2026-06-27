@@ -878,9 +878,10 @@ artifacts:
   # v0.36 — instrument-in-place (REQ-059)
   # -------------------------------------------------------------------------
   - id: FEAT-040
+    release: v0.36.0
     type: feature
     title: v0.36 — instrument-in-place mode (--in-place keeps the component shell)
-    status: implemented
+    status: verified
     phase: phase-3
     acceptance-criteria:
       - "`witness instrument --in-place <component> -o out.wasm` emits a valid Component (not a bare core); re-parsing out.wasm succeeds and it is a component."
@@ -906,9 +907,10 @@ artifacts:
   # v0.36 — differential cross-runtime compare (REQ-058)
   # -------------------------------------------------------------------------
   - id: FEAT-041
+    release: v0.36.0
     type: feature
     title: v0.36 — cross-check subcommand (differential cross-runtime coverage)
-    status: implemented
+    status: verified
     phase: phase-3
     acceptance-criteria:
       - "`witness cross-check a.json b.json` compares two run records' per-branch hit counts; identical runs report AGREE and exit 0."
@@ -929,9 +931,10 @@ artifacts:
   # v0.37 — test-level verification extraction (#115 Track E)
   # -------------------------------------------------------------------------
   - id: FEAT-042
+    release: v0.37.0
     type: feature
     title: v0.37 — test-level verification extraction (verifies coverage 2/55 → 30/55)
-    status: proposed
+    status: verified
     phase: phase-3
     acceptance-criteria:
       - "Every implemented, testable requirement carries a `verifies` test-case naming the actual test fn(s) (not `satisfies`, not crate-granular)."
@@ -955,9 +958,10 @@ artifacts:
   # v0.38 — wasmtime-component trap-snapshot backend (REQ-060)
   # -------------------------------------------------------------------------
   - id: FEAT-043
+    release: v0.38.0
     type: feature
     title: v0.38 — wasmtime-component trap-snapshot run backend
-    status: implemented
+    status: verified
     phase: phase-3
     acceptance-criteria:
       - "`witness run --backend-wasmtime-component <component> --invoke <export>` runs an --in-place instrumented component and writes a RunRecord with per-branch hits read via a coredump."
@@ -980,6 +984,7 @@ artifacts:
   # v0.39 — object-disposition reconciler (REQ-061)
   # -------------------------------------------------------------------------
   - id: FEAT-044
+    release: v0.39.0
     type: feature
     title: v0.39 — object-disposition reconciler + CLI (synth-provenance consumer)
     status: implemented

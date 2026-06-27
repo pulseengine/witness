@@ -1009,9 +1009,10 @@ artifacts:
   # Component-Model run-path: dual-runtime coverage (issue #110, kiln#340)
   # -------------------------------------------------------------------------
   - id: REQ-058
+    release: v0.36.0
     type: requirement
     title: Differential cross-runtime coverage validation
-    status: implemented
+    status: verified
     description: >
       witness shall be able to collect MC/DC coverage from a single
       instrumented artifact under more than one Wasm runtime backend and
@@ -1028,9 +1029,10 @@ artifacts:
       category: functional
 
   - id: REQ-059
+    release: v0.36.0
     type: requirement
     title: Instrument-in-place for Component-Model artifacts
-    status: implemented
+    status: verified
     description: >
       witness shall support instrumenting a Wasm Component by rewriting
       its inner core module **in place** — keeping the component shell
@@ -1053,9 +1055,10 @@ artifacts:
   # v0.38 — wasmtime-component coverage backend (issue #110)
   # -------------------------------------------------------------------------
   - id: REQ-060
+    release: v0.38.0
     type: requirement
     title: wasmtime-component coverage backend (second runtime)
-    status: implemented
+    status: verified
     description: >
       witness shall measure branch coverage of an instrumented Component by
       running it through wasmtime's component model and reading the
@@ -1072,6 +1075,7 @@ artifacts:
   # v0.39 — object-code MC/DC reconciliation (issue #109, synth #396)
   # -------------------------------------------------------------------------
   - id: REQ-061
+    release: v0.39.0
     type: requirement
     title: Object-code MC/DC reconciliation against synth's decision-provenance map
     status: implemented
