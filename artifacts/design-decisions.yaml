@@ -1536,9 +1536,10 @@ artifacts:
   # Component-Model coverage readback (issue #110) — spiked 2026-06-20
   # -------------------------------------------------------------------------
   - id: DEC-044
+    release: v0.36.0
     type: design-decision
     title: Component-Model coverage readback via runtime introspection, not an upstream component API
-    status: implemented
+    status: accepted
     description: >
       witness reads its `__witness_counter_*` globals out of a
       Component-Model run via runtime introspection, not via a new
@@ -1576,9 +1577,10 @@ artifacts:
   # v0.36 — instrument-in-place mechanism (REQ-059)
   # -------------------------------------------------------------------------
   - id: DEC-045
+    release: v0.36.0
     type: design-decision
     title: Instrument a component in place via inner-core byte-splice with LEB length repair
-    status: implemented
+    status: accepted
     description: >
       `witness instrument --in-place` rewrites a single-core component's
       inner core module and re-emits the COMPONENT (shell + WIT exports
@@ -1620,9 +1622,10 @@ artifacts:
   # v0.38 — coredump readback via end-of-export trap injection (REQ-060)
   # -------------------------------------------------------------------------
   - id: DEC-046
+    release: v0.38.0
     type: design-decision
     title: Read component counters via end-of-export trap injection + coredump
-    status: implemented
+    status: accepted
     description: >
       The wasmtime-component backend injects `unreachable` at the end of
       every lifted export's inner-core function (`inject_export_traps`),
@@ -1655,9 +1658,10 @@ artifacts:
   # v0.39 — synth-provenance schema + join key (REQ-061)
   # -------------------------------------------------------------------------
   - id: DEC-047
+    release: v0.39.0
     type: design-decision
     title: synth-provenance-v1 schema, (func_index, byte_offset) join key, object-disposition vocabulary
-    status: implemented
+    status: accepted
     description: >
       The witness↔synth contract: synth emits `synth-provenance-v1` — a list
       of `{func_index, instruction_offset, kind}` entries where kind is one of
