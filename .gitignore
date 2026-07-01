@@ -33,3 +33,4 @@ tests/playwright/.last-run.json
 verification-results.json
 
 *.wasm.map
+crates/*/target

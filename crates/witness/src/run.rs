@@ -109,7 +109,9 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
     // buffer per export from the component type.
     let mut result_counts: HashMap<String, usize> = HashMap::new();
     for (name, item) in component.component_type().exports(&engine) {
-        if let wasmtime::component::types::ComponentItem::ComponentFunc(ft) = item {
+        // wasmtime 46 — `exports()` yields `ComponentExtern`; the item type
+        // moved to its `.ty` field.
+        if let wasmtime::component::types::ComponentItem::ComponentFunc(ft) = item.ty {
             result_counts.insert(name.to_string(), ft.results().len());
         }
     }

@@ -6,12 +6,29 @@ updates:
       interval: weekly
     labels:
       - dependencies
+    ignore:
+      # dtolnay/rust-toolchain's "version" ref is the **Rust toolchain
+      # version** we pin deliberately (fmt/clippy @1.95.0, MSRV @1.93.0),
+      # NOT an action release. Dependabot bumping it to a nonexistent Rust
+      # version (1.100.0) repeatedly breaks every CI job at toolchain
+      # install (#129, and again via #132). Never auto-bump it — the pin is
+      # changed by hand, in lockstep, when we move the toolchain.
+      - dependency-name: "dtolnay/rust-toolchain"
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
     labels:
       - dependencies
+    groups:
+      # wasmtime + wasmtime-wasi MUST move together — a lone bump of one
+      # (e.g. wasmtime-wasi 46 while wasmtime stays 45, #140) is an
+      # incompatible pair that breaks the build and needs a code migration.
+      # Grouping forces one PR with both, which we migrate + gate together.
+      wasmtime:
+        patterns:
+          - "wasmtime"
+          - "wasmtime-*"
   - package-ecosystem: cargo
     directory: /crates/witness-component
     schedule:
