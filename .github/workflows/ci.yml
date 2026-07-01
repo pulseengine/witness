@@ -170,7 +170,7 @@ jobs:
       - run: |
           cargo install cargo-llvm-cov --locked
           cargo llvm-cov --lcov --output-path lcov.info --all-targets
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           flags: rust-source
@@ -223,7 +223,7 @@ jobs:
             witness-overview.txt
             witness-run.json
             sample.instrumented.wasm.witness.json
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v7
         with:
           files: wasm-bytecode.lcov.info
           flags: wasm-bytecode
