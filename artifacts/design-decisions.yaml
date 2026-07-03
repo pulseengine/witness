@@ -1573,6 +1573,8 @@ artifacts:
       - type: refines
         target: REQ-054
 
+      - type: produced-by
+        target: AS-001
   # -------------------------------------------------------------------------
   # v0.36 — instrument-in-place mechanism (REQ-059)
   # -------------------------------------------------------------------------
@@ -1618,6 +1620,8 @@ artifacts:
       - type: satisfies
         target: REQ-059
 
+      - type: produced-by
+        target: AS-001
   # -------------------------------------------------------------------------
   # v0.38 — coredump readback via end-of-export trap injection (REQ-060)
   # -------------------------------------------------------------------------
@@ -1654,6 +1658,8 @@ artifacts:
       - type: refines
         target: DEC-044
 
+      - type: produced-by
+        target: AS-001
   # -------------------------------------------------------------------------
   # v0.39 — synth-provenance schema + join key (REQ-061)
   # -------------------------------------------------------------------------
@@ -1690,3 +1696,40 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-061
+
+      - type: produced-by
+        target: AS-001
+  # -------------------------------------------------------------------------
+  # Agent provenance convention (REQ-062)
+  # -------------------------------------------------------------------------
+  - id: DEC-048
+    type: design-decision
+    title: Agent provenance via commit trailers + rivet ai-session / produced-by
+    status: accepted
+    description: >
+      Agents self-identify at two layers. (1) Git — every agent commit and
+      PR carries the trailer block: `Created-By: <tool>` / `Model: <model-id>`
+      / `Session-Id: <session>` / `Operator: <human-in-the-loop>`, so
+      `git log --grep 'Session-Id:'` separates human vs each agent. (2) rivet
+      — each run is an `ai-session` artifact and agent-authored artifacts link
+      `produced-by` to it (the audit-side authorship record). The trailer's
+      Session-Id resolves to the ai-session, joining the git and rivet views.
+    rationale: >
+      One GitHub identity (avrabe) is shared by the operator, their agents,
+      and Claude Code, so GitHub's author field can't reveal origin. rivet
+      provides `ai-session` (authorship unit) + `produced-by` (audit-side
+      Co-Authored-By) precisely for this; the trailer makes it visible in
+      plain `git log`/`blame` at zero infra. A distinct `Created-By`/`Session-Id`
+      trailer is preferred over `Co-Authored-By` (banned by some projects for
+      AI, and it carries no session). `ai-session.invoker` is personal data,
+      so a GDPR lawful-basis is recorded (Art. 6(1)(f)); a `dpia` link is
+      available if scope grows.
+    alternatives: >
+      Co-Authored-By only (no session; banned by some); a GitHub App/bot per
+      agent (heavier, deferred); status quo (origin ambiguous — rejected).
+    tags: [provenance, ai-session, issue-129]
+    links:
+      - type: satisfies
+        target: REQ-062
+      - type: produced-by
+        target: AS-001

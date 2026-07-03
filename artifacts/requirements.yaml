@@ -1027,6 +1027,9 @@ artifacts:
     fields:
       priority: should
       category: functional
+    links:
+      - type: produced-by
+        target: AS-001
 
   - id: REQ-059
     release: v0.36.0
@@ -1050,6 +1053,9 @@ artifacts:
     fields:
       priority: should
       category: functional
+    links:
+      - type: produced-by
+        target: AS-001
 
   # -------------------------------------------------------------------------
   # v0.38 — wasmtime-component coverage backend (issue #110)
@@ -1070,6 +1076,9 @@ artifacts:
     fields:
       priority: should
       category: functional
+    links:
+      - type: produced-by
+        target: AS-001
 
   # -------------------------------------------------------------------------
   # v0.39 — object-code MC/DC reconciliation (issue #109, synth #396)
@@ -1094,3 +1103,29 @@ artifacts:
     fields:
       priority: should
       category: functional
+    links:
+      - type: produced-by
+        target: AS-001
+
+  # -------------------------------------------------------------------------
+  # Agent provenance (single-identity disambiguation)
+  # -------------------------------------------------------------------------
+  - id: REQ-062
+    type: requirement
+    title: AI-authorship provenance — every agent change traceable to its ai-session
+    status: implemented
+    description: >
+      Because the human operator, their agents, and Claude Code all act
+      through the single `avrabe` GitHub identity, every agent-produced
+      commit and rivet artifact shall carry provenance that resolves to a
+      specific `ai-session` — so the origin of a change (human vs which agent
+      vs which model/session) is queryable, not ambiguous. Mechanisms: a
+      structured commit/PR trailer (Created-By / Model / Session-Id /
+      Operator) plus rivet `produced-by` links from agent-authored artifacts.
+    tags: [provenance, traceability, ai-session]
+    fields:
+      priority: should
+      category: process
+    links:
+      - type: produced-by
+        target: AS-001

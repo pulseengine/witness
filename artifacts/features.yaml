@@ -903,6 +903,8 @@ artifacts:
       - type: implements
         target: DEC-045
 
+      - type: produced-by
+        target: AS-001
   # -------------------------------------------------------------------------
   # v0.36 — differential cross-runtime compare (REQ-058)
   # -------------------------------------------------------------------------
@@ -927,6 +929,8 @@ artifacts:
       - type: satisfies
         target: REQ-058
 
+      - type: produced-by
+        target: AS-001
   # -------------------------------------------------------------------------
   # v0.37 — test-level verification extraction (#115 Track E)
   # -------------------------------------------------------------------------
@@ -954,6 +958,8 @@ artifacts:
       - type: satisfies
         target: REQ-032
 
+      - type: produced-by
+        target: AS-001
   # -------------------------------------------------------------------------
   # v0.38 — wasmtime-component trap-snapshot backend (REQ-060)
   # -------------------------------------------------------------------------
@@ -980,6 +986,8 @@ artifacts:
       - type: implements
         target: DEC-046
 
+      - type: produced-by
+        target: AS-001
   # -------------------------------------------------------------------------
   # v0.39 — object-disposition reconciler (REQ-061)
   # -------------------------------------------------------------------------
@@ -1006,3 +1014,5 @@ artifacts:
         target: REQ-061
       - type: implements
         target: DEC-047
+      - type: produced-by
+        target: AS-001
