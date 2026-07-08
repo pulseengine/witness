@@ -116,8 +116,32 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
         }
     }
 
-    let mut store: Store<()> = Store::new(&engine, ());
-    let linker: wasmtime::component::Linker<()> = wasmtime::component::Linker::new(&engine);
+    // v0.39 (#109/#110) — supply WASI-p2 so components with `wasi:*` imports
+    // instantiate and run. A bare linker fails on the first wasi import — the
+    // wall for syscall-heavy / real WASI components (the embedded runtime is
+    // preview1-only). wasmtime-wasi is the mature p2 host.
+    struct WasiComp {
+        ctx: wasmtime_wasi::WasiCtx,
+        table: wasmtime_wasi::ResourceTable,
+    }
+    impl wasmtime_wasi::WasiView for WasiComp {
+        fn ctx(&mut self) -> wasmtime_wasi::WasiCtxView<'_> {
+            wasmtime_wasi::WasiCtxView {
+                ctx: &mut self.ctx,
+                table: &mut self.table,
+            }
+        }
+    }
+    let mut store: Store<WasiComp> = Store::new(
+        &engine,
+        WasiComp {
+            ctx: WasiCtxBuilder::new().inherit_stdio().build(),
+            table: wasmtime_wasi::ResourceTable::new(),
+        },
+    );
+    let mut linker: wasmtime::component::Linker<WasiComp> =
+        wasmtime::component::Linker::new(&engine);
+    wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(|e| Error::Runtime(e.into()))?;
     let instance = linker
         .instantiate(&mut store, &component)
         .map_err(|e| Error::Runtime(e.into()))?;
