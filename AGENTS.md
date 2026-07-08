@@ -248,3 +248,27 @@ Prior posts in the pulseengine.eu arc that set up this work:
 - **Rust edition**: 2024 (MSRV 1.85).
 - **No emojis in code or commits unless explicitly requested.**
 
+## Agent provenance (REQ-062 / DEC-048)
+
+The operator, their agents, and Claude Code all act through the single
+`avrabe` GitHub identity, so **every agent must self-identify** — origin is
+otherwise unrecoverable. Two mechanisms:
+
+1. **Commit / PR trailer** — end every agent-authored commit and PR body with:
+   ```
+   Created-By: <tool, e.g. claude-code>
+   Model: <model-id, e.g. claude-opus-4-8>
+   Session-Id: <session id>
+   Operator: <human-in-the-loop, e.g. avrabe>
+   ```
+   Then `git log --grep 'Session-Id:'` (or `--grep 'Created-By: <tool>'`)
+   separates human vs each agent. A distinct `Created-By` trailer is used
+   rather than `Co-Authored-By` (which some upstreams ban for AI and which
+   carries no session); the harness's `Co-Authored-By` line may also be kept.
+2. **rivet `ai-session` + `produced-by`** — each run is an `ai-session`
+   artifact in `artifacts/ai-sessions.yaml` (`model-id`, `session-id`,
+   `invoker`, GDPR `lawful-basis`); artifacts an agent authors link
+   `produced-by` to it. The trailer's `Session-Id` resolves to that session,
+   joining the git and rivet views. Query with
+   `rivet list` filtered on the `produced-by` target.
+

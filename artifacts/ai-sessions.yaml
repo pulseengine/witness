@@ -1,0 +1,27 @@
+artifacts:
+  # AI-authorship provenance (REQ-062 / DEC-048). Every agent-produced
+  # commit and rivet artifact resolves back to an `ai-session` here via the
+  # `Session-Id` commit trailer and `produced-by` links — so under the single
+  # `avrabe` GitHub account, the origin of a change (human vs which agent vs
+  # this Claude Code session) is queryable rather than ambiguous.
+  - id: AS-001
+    type: ai-session
+    title: Claude Code — witness release + issue-hunt campaign (v0.30→v0.39, #109/#110/#129)
+    status: accepted
+    description: >
+      Autonomous Claude Code session driving the witness release campaign:
+      shipped v0.30–v0.38, built v0.39's witness-side synth-provenance
+      reconciler, ran the issue-hunt loop (fixed the recurring red-main
+      Dependabot breakage: wasmtime 46 migration, toolchain-pin restore,
+      Dependabot guard, branch-protection required checks), adopted rivet
+      release handling, and set up this provenance convention. Operator is
+      human-in-the-loop (approves scope + irreversible publishes).
+    tags: [provenance, ai-session]
+    fields:
+      session-id: 574d41f6-62c5-43b5-93de-a372b64394ff
+      model-id: claude-opus-4-8
+      tool-version: claude-code (1M context)
+      started-at: "2026-06-18"
+      invoker: avrabe
+      lawful-basis: art-6-1-f-legitimate-interest
+      retention-period: repo-lifetime (audit trail; no separate PII store)
