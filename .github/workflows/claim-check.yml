@@ -1,0 +1,22 @@
+name: Claim check (docs ↔ evidence)
+
+# claim-verification skill: witness's load-bearing DOC CLAIMS (its scope hedges —
+# "does not prove correctness", "MC/DC-style", "qualifiable") are gated against the
+# actual docs, so the public claims cannot silently drift into overclaims. The same
+# discipline witness applies to the artifacts it measures, turned on its own prose.
+# See claims.yaml. Drift = red.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  claim-check:
+    name: Claim check (README/SECURITY ↔ evidence)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Gate load-bearing doc claims against source
+        run: python3 tools/claim-check.py claims.yaml

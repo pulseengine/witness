@@ -1,0 +1,63 @@
+# claims.yaml — witness's own load-bearing DOC CLAIMS, gated against evidence.
+# Run: python3 tools/claim-check.py claims.yaml   (also wired into CI)
+#
+# claim-verification skill (mark → bind → gate): witness holds ITSELF to the
+# honesty bar it just applied to kiln (pulseengine/kiln#423) and ordeal
+# (pulseengine/ordeal#69). Witness is a COVERAGE tool, not a correctness prover —
+# its integrity is entirely in its scope HEDGES. These claims lock in the exact
+# hedges a formal-methods skeptic would attack if they silently drifted into
+# overclaims. Per the skill's boundary, example/demo scoreboard numbers are
+# NARRATIVE (illustrative output) and are deliberately NOT gated here.
+#
+# Predicate note: `count-max: 0` over a doc glob is a FORBID predicate — the file
+# is measured (so it isn't a silent no-op) and any hit fails the build.
+claims:
+  # Witness measures whether a test suite DISTINGUISHES each condition — it does
+  # not prove the code correct. This disclaimer is witness's core honesty. Gate
+  # that it stays, and that no flat correctness / "formally verified" overclaim
+  # ever creeps into the README.
+  - id: WITNESS-NOT-A-CORRECTNESS-PROOF
+    doc: README.md
+    text: "does **not** prove"
+    evidence:
+      - kind: count-max
+        pattern: '(?i)formally verified'
+        glob: ['README.md']
+        max: 0
+      - kind: count-max
+        pattern: '(?i)proves? correctness|proven correct'
+        glob: ['README.md']
+        max: 0
+
+  # Witness is "MC/DC-STYLE" coverage measured on lowered Wasm — not a certified
+  # MC/DC / DO-178C qualified tool. Keep the hedge; forbid flat certification claims.
+  - id: WITNESS-MCDC-STYLE-NOT-CERTIFIED
+    doc: README.md
+    text: "MC/DC-style"
+    evidence:
+      - kind: count-max
+        pattern: '(?i)(MC/DC|DO-178C)[ -]cert(ified)?|DO-178C[ -]compliant'
+        glob: ['README.md']
+        max: 0
+
+  # The witness-mcdc-checker kernel is QUALIFIABLE (a v1.0 DO-330 target), not
+  # presently qualified. Keep the "qualifiable" hedge; forbid present-tense
+  # "is/already/fully qualified" claims before the qualification artifact ships.
+  - id: WITNESS-CHECKER-QUALIFIABLE-NOT-QUALIFIED
+    doc: README.md
+    text: "qualifiable kernel"
+    evidence:
+      - kind: count-max
+        pattern: '(?i)(is|already|fully) qualified|qualification complete'
+        glob: ['README.md']
+        max: 0
+
+  # SECURITY.md must keep enumerating what a witness signature does NOT prove
+  # (source authenticity, test-input honesty, rustc/LLVM semantics preservation).
+  # If that scoping section is deleted, the security claim has outrun its evidence.
+  - id: WITNESS-SIGNATURE-SCOPE
+    doc: SECURITY.md
+    text: "what witness signatures prove and what they do not"
+    evidence:
+      - kind: verbatim
+        text: "does not prove"
