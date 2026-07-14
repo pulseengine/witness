@@ -197,7 +197,7 @@ json_lite            165       29        2/29      26      31    33     28
 TOTAL                716       115       21/115    90      91    146
 ```
 
-**90 conditions proved across 715 br_ifs in real Rust code**, 21 full
+**90 conditions proved across 716 br_ifs in real Rust code**, 21 full
 MC/DC decisions, 146 dead conditions flagged with row-closure
 recommendations the report emits inline. The four real-application
 fixtures (httparse, nom_numbers, state_machine, json_lite) account
