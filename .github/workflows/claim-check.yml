@@ -15,7 +15,7 @@ jobs:
     name: Claim check (README/SECURITY ↔ evidence)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install PyYAML
         run: pip install --quiet pyyaml
       - name: Gate load-bearing doc claims against source
