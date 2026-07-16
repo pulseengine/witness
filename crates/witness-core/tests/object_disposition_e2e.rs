@@ -14,10 +14,12 @@
 //! of the offset-domain question (VCR-DEC-003) — witness's walrus `InstrLocId` and
 //! synth's absolute WASM byte offset are the same domain.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::path::Path;
 
-use witness_core::instrument::{instrument_file, Manifest};
-use witness_core::object_disposition::{reconcile, ObjectVerdict, SynthProvenanceMap};
+use witness_core::instrument::{Manifest, instrument_file};
+use witness_core::object_disposition::{ObjectVerdict, SynthProvenanceMap, reconcile};
 
 #[test]
 fn reconciles_real_synth_v045_provenance() {
@@ -56,7 +58,10 @@ fn reconciles_real_synth_v045_provenance() {
         .iter()
         .filter(|b| matches!(b.verdict, ObjectVerdict::ObligationStands))
         .count();
-    assert_eq!(stands, 1, "the preserved br_if should keep its WASM obligation");
+    assert_eq!(
+        stands, 1,
+        "the preserved br_if should keep its WASM obligation"
+    );
 
     // (3) br_table@81 is `split-into-object-branches` → each of its witness branches
     // flags new object coverage (synth introduced object branches).
