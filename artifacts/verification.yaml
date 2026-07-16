@@ -714,3 +714,30 @@ artifacts:
         target: REQ-061
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-061-E2E
+    type: test-case
+    title: Object-disposition reconciliation against REAL synth v0.45.0 provenance
+    description: >
+      End-to-end verification of REQ-061 / FEAT-044 against a REAL synth v0.45.0
+      `synth-provenance-v1` sidecar
+      (crates/witness-core/tests/object_disposition_e2e.rs,
+      `reconciles_real_synth_v045_provenance`). Instruments the fixture wasm each
+      run to RE-DERIVE the manifest, so the (func_index, byte_offset) join is
+      continuously re-verified: 0 no-provenance proves witness `byte_offset` ==
+      synth `instruction_offset` (settles VCR-DEC-003 empirically). Asserts
+      preserved -> obligation-stands, split -> needs-object-coverage,
+      folded/unconditional -> only-in-synth divergence. Falsification-verified
+      (shifting synth's offset breaks the join -> fails). Fixture emitted by synth
+      v0.45.0 `compile --emit-provenance` (synth#774).
+    tags: [verification, object-traceability, e2e, v0.39]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --test object_disposition_e2e
+    links:
+      - type: verifies
+        target: REQ-061
+      - type: verifies
+        target: FEAT-044
+      - type: produced-by
+        target: AS-001

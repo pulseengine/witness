@@ -7,6 +7,44 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-07-16
+
+Headline: **object-code MC/DC reconciliation** — witness now reconciles its WASM-level
+MC/DC obligations against synth's `synth-provenance-v1` map, producing an
+object-code-traceable disposition per branch. Closes the
+source→(rustc)→WASM→(synth)→object MC/DC chain (#109, REQ-061, FEAT-044).
+
+### Added
+
+- `witness object-disposition --manifest <m.witness.json> --provenance <synth-map.json>`
+  reconciles a manifest against synth's decision-provenance map by the
+  `(func_index, byte_offset)` join key: `preserved` / `folded-predication` keep the
+  WASM obligation (obligation-stands); `split-into-object-branches` flags new object
+  obligations (needs-object-coverage); `eliminated-constant` is justified-infeasible
+  (scry evidence); unmatched branches are surfaced (no-provenance) and synth-only
+  entries as divergence (only-in-synth) — never hidden.
+- `witness_core::object_disposition` consumes synth v0.45.0's **shipped**
+  `synth-provenance-v1` wire format (nested `{schema, module, functions[]}`), matching
+  what `synth compile --emit-provenance` emits (synth#774, VCR-DEC-003).
+
+### Verification
+
+- End-to-end test against a **real** synth v0.45.0 provenance sidecar
+  (`crates/witness-core/tests/object_disposition_e2e.rs`): it re-derives the witness
+  manifest each run, so the join is continuously re-verified. **0 no-provenance**
+  empirically settles the offset-domain question (VCR-DEC-003) — witness `byte_offset`
+  == synth `instruction_offset`. rivet `TEST-REQ-061-E2E` verifies REQ-061 + FEAT-044.
+
+### Fixed
+
+- Bump `crossbeam-epoch` 0.9.18 → 0.9.20 (RUSTSEC-2026-0204).
+
+**Falsification statement.** The reconciler's join is non-vacuous: shifting any synth
+`instruction_offset` in the fixture demonstrably breaks the join and fails the e2e's
+`0 no-provenance` invariant (verified in this cycle). The verdict logic is exercised on
+a real synth emission carrying all four disposition kinds (preserved, folded, split,
+and the reachability-only fields), not a hand-authored map.
+
 ## [0.38.0] — 2026-06-24
 
 Headline: **wasmtime-component coverage backend** — a second, independent runtime for the differential cross-check (issue #110).
