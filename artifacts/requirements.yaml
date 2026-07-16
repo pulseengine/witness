@@ -1087,7 +1087,7 @@ artifacts:
     release: v0.39.0
     type: requirement
     title: Object-code MC/DC reconciliation against synth's decision-provenance map
-    status: implemented
+    status: verified
     description: >
       witness shall reconcile its WASM-level MC/DC truth table against synth's
       decision-provenance map (WASM→object lowering) to produce an

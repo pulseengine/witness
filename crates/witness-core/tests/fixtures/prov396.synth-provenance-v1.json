@@ -1,0 +1,71 @@
+{
+  "schema": "synth-provenance-v1",
+  "module": "provenance_branches_396.wat",
+  "functions": [
+    {
+      "func_index": 0,
+      "name": "decide",
+      "entries": [
+        {
+          "instruction_offset": 47,
+          "wasm_op_index": 4,
+          "op": "BrIf",
+          "kind": "preserved",
+          "object_pcs": [
+            18
+          ]
+        },
+        {
+          "instruction_offset": 70,
+          "wasm_op_index": 17,
+          "op": "Select",
+          "kind": "folded-predication",
+          "object_pcs": [
+            50
+          ]
+        },
+        {
+          "instruction_offset": 81,
+          "wasm_op_index": 23,
+          "op": "BrTable",
+          "kind": "split-into-object-branches",
+          "object_pcs": [
+            60,
+            64,
+            66
+          ],
+          "count": 2
+        },
+        {
+          "instruction_offset": 95,
+          "wasm_op_index": 29,
+          "op": "Br",
+          "kind": "preserved",
+          "object_pcs": [
+            80
+          ]
+        }
+      ],
+      "object_cond_branches": [
+        {
+          "pc": 18,
+          "wasm_op_index": 4,
+          "instruction_offset": 47,
+          "resolved": true
+        },
+        {
+          "pc": 60,
+          "wasm_op_index": 23,
+          "instruction_offset": 81,
+          "resolved": true
+        },
+        {
+          "pc": 64,
+          "wasm_op_index": 23,
+          "instruction_offset": 81,
+          "resolved": true
+        }
+      ]
+    }
+  ]
+}
