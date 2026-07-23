@@ -2371,6 +2371,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmparser"
+version = "0.254.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5769a29f799fbab136aaf65b4fe5384cd7d93fe6fc9ba0dcb6c8382a1f16e27"
+dependencies = [
+ "bitflags",
+ "hashbrown 0.17.1",
+ "indexmap",
+ "semver",
+ "serde",
+]
+
+[[package]]
 name = "wasmprinter"
 version = "0.252.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2999,7 +3012,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "walrus",
- "wasmparser 0.252.0",
+ "wasmparser 0.254.0",
  "wat",
  "witness-mcdc-checker",
  "wsc-attestation",
