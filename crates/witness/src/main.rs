@@ -585,34 +585,64 @@ fn main() -> Result<()> {
                 );
                 println!("wrote {} (manifest)", manifest_path.display());
             }
-            // Profile-strip heuristic: post-instrumentation manifests
-            // with zero branches almost always mean the build profile
-            // (`opt-level = "z"` / `"s"`) dead-stripped the branches
-            // before witness saw them, not that the program had no
-            // branches. Sigil's PoC hit this with a `--release` build
-            // and got a silent zero-decision result. Warn the user
-            // before they conclude witness "doesn't work."
+            // Silent-degradation diagnostics (#178): output that looks fine and
+            // exits 0 but is quietly unusable for MC/DC. Detection lives in
+            // witness-core (`Manifest::warnings`, unit-tested); the CLI renders
+            // each. Covers the profile-strip 0-branches case (a --release build
+            // dead-strips branches before witness sees them — Sigil's PoC hit
+            // this), the no-name-section case, and the adapter-only-DWARF case.
             if let Ok(bytes) = std::fs::read(&manifest_path)
                 && let Ok(m) = serde_json::from_slice::<witness_core::instrument::Manifest>(&bytes)
-                && m.branches.is_empty()
             {
-                // SAFETY-REVIEW: hint diagnostic on stderr; the CLI's
+                use witness_core::instrument::ManifestWarning;
+                // SAFETY-REVIEW: hint diagnostics on stderr; the CLI's
                 // print-stderr lint targets unconditional logs, not
                 // user-facing warnings.
                 #[allow(clippy::print_stderr)]
                 {
-                    eprintln!();
-                    eprintln!(
-                        "warning: instrumented module has 0 branches. This usually means the"
-                    );
-                    eprintln!("         build profile dead-stripped them before witness saw them.");
-                    eprintln!(
-                        "         Try `cargo build --target wasm32-wasip1` (dev profile) or set"
-                    );
-                    eprintln!("         `[profile.release] opt-level = 1` in Cargo.toml. See");
-                    eprintln!(
-                        "         docs/quickstart.md \"Two things to get right before you start\"."
-                    );
+                    for w in m.warnings() {
+                        eprintln!();
+                        match w {
+                            ManifestWarning::NoBranches => {
+                                eprintln!(
+                                    "warning: instrumented module has 0 branches. This usually means the"
+                                );
+                                eprintln!(
+                                    "         build profile dead-stripped them before witness saw them."
+                                );
+                                eprintln!(
+                                    "         Try `cargo build --target wasm32-wasip1` (dev profile) or set"
+                                );
+                                eprintln!(
+                                    "         `[profile.release] opt-level = 1` in Cargo.toml. See"
+                                );
+                                eprintln!(
+                                    "         docs/quickstart.md \"Two things to get right before you start\"."
+                                );
+                            }
+                            ManifestWarning::NoNameSection => {
+                                eprintln!(
+                                    "warning: no name section — every function is (anon), so gap rows"
+                                );
+                                eprintln!(
+                                    "         cannot be attributed. If this came from `meld fuse`, re-fuse"
+                                );
+                                eprintln!("         with `meld --preserve-names`.");
+                            }
+                            ManifestWarning::AdapterOnlyDwarf => {
+                                eprintln!(
+                                    "warning: DWARF present but 0 decisions attributed to user code — every"
+                                );
+                                eprintln!(
+                                    "         decision is meld's synthetic <meld-adapter> unit. Was the input"
+                                );
+                                eprintln!(
+                                    "         built with debuginfo=2? Rebuild with debug info for real"
+                                );
+                                eprintln!("         source attribution.");
+                            }
+                        }
+                    }
                 }
             }
         }

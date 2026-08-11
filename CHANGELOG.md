@@ -7,6 +7,37 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-08-11
+
+Headline: **honest report output + silent-degradation warnings** — two safety fixes
+from dogfooding witness on gale's isolation-core drivers, where the tool's own output
+could have led to a false MC/DC claim.
+
+### Changed
+
+- The default `witness report` text output no longer labels itself `coverage:`. It
+  counts branches *reached* (≥1 hit), which is neither both-outcome branch coverage
+  nor MC/DC. It now reads `branches reached: N/M (X%) — reached at least once, NOT
+  MC/DC. Run --format mcdc-rollup for the MC/DC verdict`; the section `uncovered
+  branches` is renamed `branches never reached`; and a footer points at the MC/DC
+  verdict. (A user had 30.6%-reached vs 3/22-full-MC/DC and nearly published the
+  former as a DO-178C claim.) (#177, REQ-063.)
+
+### Added
+
+- Instrument-time warnings for silent MC/DC-degradation (`Manifest::warnings`): **no
+  name section** (every function `(anon)`, gap rows unattributable — re-fuse with
+  `meld --preserve-names`); and **adapter-only DWARF** (`attribution_source: dwarf`
+  but every decision is meld's synthetic `<meld-adapter>` unit, i.e. 0 user decisions
+  — build with `debuginfo=2`). The existing 0-branches profile-strip hint folds into
+  the same path. (#178, REQ-064.)
+
+**Falsification statement.** The report change is asserted by a test that fails if the
+default output ever again emits a bare `coverage:` line or drops the `NOT MC/DC`
+label. Each warning is asserted to fire on the degraded manifest and clear on a
+healthy one (a named function; one real user decision) — so a warning that never
+fires, or fires spuriously, fails the build.
+
 ## [0.39.0] — 2026-07-16
 
 Headline: **object-code MC/DC reconciliation** — witness now reconciles its WASM-level

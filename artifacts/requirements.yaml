@@ -1129,3 +1129,82 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+  - id: REQ-063
+    release: v0.40.0
+    type: requirement
+    title: Default report output must not read as an MC/DC verdict
+    status: verified
+    description: >
+      `witness report`'s default text output counts branches *reached* (>=1 hit),
+      which is neither both-outcome branch coverage nor MC/DC. Labelling it
+      `coverage: N/M (X%)` with a section `uncovered branches` led a user to nearly
+      publish a false DO-178C claim (30.6% reached vs 3/22 full MC/DC). The default
+      output shall name the metric ("branches reached ... NOT MC/DC"), rename the
+      section ("branches never reached"), and always point at `--format mcdc-rollup`.
+      (Issue #177.)
+    tags: [report, honesty, safety, dogfooding]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001
+  - id: REQ-064
+    release: v0.40.0
+    type: requirement
+    title: Warn on silent MC/DC-degradation at instrument time
+    status: verified
+    description: >
+      Instrumentation shall warn (not silently exit 0) when the manifest is
+      structurally fine but MC/DC-useless: (a) no name section — every function is
+      (anon) so gap rows are unattributable (re-fuse with `meld --preserve-names`);
+      (b) adapter-only DWARF — attribution_source=dwarf but every decision is meld's
+      synthetic <meld-adapter> unit, i.e. 0 decisions from user code (input built
+      without debuginfo=2). Detection is Manifest::warnings. (Issue #178.)
+    tags: [instrument, diagnostics, safety, dogfooding]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001
+  - id: REQ-065
+    release: v0.41.0
+    type: requirement
+    title: Attribute decisions to the outermost inline frame (user code)
+    status: approved
+    description: >
+      The per-file rollup books a decision to the innermost inlined frame — for
+      no_std driver code almost always a stdlib/generated file (option.rs,
+      wit_bindgen_cabi_realloc.rs) rather than the user's crate — systematically
+      under-reporting the code under test. The manifest already carries
+      branch_inline_chains. Attribute to the outermost frame (or outermost outside a
+      configurable library-prefix set); keep the innermost as inlined_from; a
+      `--attribution innermost|outermost` flag preserves today's behaviour. (Issue
+      #179.) Needs a gale manifest fixture to verify against real chains.
+    tags: [report, attribution, dwarf, dogfooding]
+    fields:
+      priority: should
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001
+  - id: REQ-066
+    release: v0.41.0
+    type: requirement
+    title: Synthesise stub implementations for unsatisfied component imports
+    status: approved
+    description: >
+      `witness run --stub-imports` shall synthesise zero-returning implementations for
+      any unsatisfied component import from its WIT signature (0 / false / empty),
+      removing the per-driver hand-built stub crate + WIT copy (which rots). Stubbed
+      imports shall be recorded in the manifest/run JSON (stubbed_imports) because a
+      result against stubbed seams is a materially weaker claim; a `--stub-imports=trap`
+      variant proves a seam is not reached. (Issue #180.)
+    tags: [run, component, wasi, ergonomics, dogfooding]
+    fields:
+      priority: should
+      category: feature
+    links:
+      - type: produced-by
+        target: AS-001

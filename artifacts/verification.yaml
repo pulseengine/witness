@@ -741,3 +741,40 @@ artifacts:
         target: FEAT-044
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-063
+    type: test-case
+    title: Default report output is labelled branches-reached, not MC/DC
+    description: >
+      report::tests::text_format_contains_headline_ratio asserts the default to_text()
+      output says "branches reached: N/M", contains "NOT MC/DC", names the section
+      "branches never reached", carries no bare "coverage:" line, and points at
+      `--format mcdc-rollup`. (REQ-063 / #177.)
+    tags: [verification, report, honesty]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --lib report::tests::text_format_contains_headline_ratio
+    links:
+      - type: verifies
+        target: REQ-063
+      - type: produced-by
+        target: AS-001
+  - id: TEST-REQ-064
+    type: test-case
+    title: Manifest::warnings detects no-name-section and adapter-only DWARF
+    description: >
+      instrument::tests::{warns_no_branches, warns_no_name_section_when_all_anon,
+      warns_adapter_only_dwarf} verify Manifest::warnings fires NoNameSection when all
+      function_name are None (clears on one named fn) and AdapterOnlyDwarf when
+      attribution is dwarf with every decision a <meld-adapter> unit (clears on one real
+      user decision; only under dwarf attribution). (REQ-064 / #178.)
+    tags: [verification, instrument, diagnostics]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --lib warns_
+    links:
+      - type: verifies
+        target: REQ-064
+      - type: produced-by
+        target: AS-001
