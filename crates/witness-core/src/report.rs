@@ -112,8 +112,13 @@ impl Report {
     pub fn to_text(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("module: {}\n", self.module));
+        // #177: the default output is branches-*reached* (≥1 hit), NOT MC/DC and
+        // NOT both-outcome branch coverage. Labelling it `coverage:` led a user to
+        // nearly publish a false DO-178C claim (30.6% reached vs 3/22 full MC/DC).
+        // Name it for what it is and point at the MC/DC verdict.
         out.push_str(&format!(
-            "coverage: {}/{} ({:.1}%)\n",
+            "branches reached: {}/{} ({:.1}%) — reached at least once, NOT MC/DC. \
+             Run `--format mcdc-rollup` for the MC/DC verdict.\n",
             self.covered_branches,
             self.total_branches,
             self.coverage_ratio() * 100.0,
@@ -138,8 +143,11 @@ impl Report {
             }
         }
         if !self.uncovered.is_empty() {
+            // #177: "uncovered" over-claims — these are branches never *reached*,
+            // which says nothing about both-outcome or MC/DC coverage of the ones
+            // that were.
             out.push_str(&format!(
-                "\nuncovered branches ({}):\n",
+                "\nbranches never reached ({}):\n",
                 self.uncovered.len()
             ));
             for b in &self.uncovered {
@@ -150,6 +158,13 @@ impl Report {
                 ));
             }
         }
+        // #177: a footer so the MC/DC verdict is never more than one line away —
+        // the tool is `witness-mcdc`; its default output must not be mistaken for
+        // the MC/DC result.
+        out.push_str(
+            "\nnote: branches-reached is not MC/DC. `witness report --format mcdc-rollup` \
+             gives the per-decision MC/DC verdict (proved / gap / dead) with gap-closing hints.\n",
+        );
         out
     }
 }
@@ -244,7 +259,13 @@ mod tests {
     fn text_format_contains_headline_ratio() {
         let report = Report::from_record(&sample_record());
         let text = report.to_text();
-        assert!(text.contains("coverage: 2/4"));
-        assert!(text.contains("uncovered branches (2)"));
+        // #177: honest label — branches-reached, not "coverage"/MC-DC.
+        assert!(text.contains("branches reached: 2/4"));
+        assert!(text.contains("NOT MC/DC"));
+        assert!(text.contains("branches never reached (2)"));
+        // the default output must never present itself as a bare "coverage:" verdict.
+        assert!(!text.contains("\ncoverage: "));
+        // and the MC/DC verdict is always one line away.
+        assert!(text.contains("--format mcdc-rollup"));
     }
 }

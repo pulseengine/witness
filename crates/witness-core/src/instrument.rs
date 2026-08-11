@@ -428,6 +428,56 @@ impl Manifest {
             source,
         })
     }
+
+    /// Diagnose silent-degradation conditions (#178): output that looks fine and
+    /// exits 0 but is quietly unusable for MC/DC. Empty when the manifest is
+    /// healthy. The CLI renders each into a user-facing warning; keeping the
+    /// detection here makes it unit-testable.
+    pub fn warnings(&self) -> Vec<ManifestWarning> {
+        if self.branches.is_empty() {
+            // The other conditions are moot with no branches; the profile-strip
+            // hint is the actionable one.
+            return vec![ManifestWarning::NoBranches];
+        }
+        let mut w = Vec::new();
+        // No name section: every function is `(anon)`, so gap rows can't be
+        // triaged. `meld fuse` drops it without `--preserve-names`.
+        if self.branches.iter().all(|b| b.function_name.is_none()) {
+            w.push(ManifestWarning::NoNameSection);
+        }
+        // Adapter-only DWARF: `attribution_source` is `dwarf`, decisions exist,
+        // yet none names a real user file — every one is meld's synthetic
+        // `<meld-adapter>` unit. meld emits that unit even when no input carried
+        // DWARF, so the field is literally true while conveying nothing about the
+        // user's code (the input was almost certainly built without debuginfo=2).
+        let has_user_decision = self.decisions.iter().any(|d| {
+            d.source_file
+                .as_deref()
+                .is_some_and(|f| !f.contains("meld-adapter"))
+        });
+        if matches!(
+            self.attribution_source,
+            crate::decisions::AttributionSource::Dwarf
+        ) && !self.decisions.is_empty()
+            && !has_user_decision
+        {
+            w.push(ManifestWarning::AdapterOnlyDwarf);
+        }
+        w
+    }
+}
+
+/// A silent-degradation condition on an instrumented manifest (#178): output that
+/// looks fine and exits 0 but is quietly unusable for an MC/DC argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManifestWarning {
+    /// No branches at all — usually the build profile dead-stripped them.
+    NoBranches,
+    /// No name section: every function is `(anon)`; gap rows are unattributable.
+    NoNameSection,
+    /// `attribution_source == dwarf`, but no decision is attributed to real user
+    /// code — every one is meld's synthetic `<meld-adapter>` unit.
+    AdapterOnlyDwarf,
 }
 
 /// Locate a V3 source-map for `input` and return its bytes if any.
@@ -2310,6 +2360,103 @@ mod tests {
     fn wat_to_module(wat_src: &str) -> Module {
         let wasm = wat::parse_str(wat_src).expect("valid wat");
         Module::from_buffer(&wasm).expect("walrus parse")
+    }
+
+    // --- #178 silent-degradation warnings ------------------------------------
+    fn wbr(id: u32, name: Option<&str>) -> BranchEntry {
+        BranchEntry {
+            id,
+            function_index: 0,
+            function_name: name.map(String::from),
+            function_display: None,
+            kind: BranchKind::BrIf,
+            instr_index: id,
+            target_index: None,
+            byte_offset: Some(id),
+            seq_debug: String::new(),
+        }
+    }
+    fn wdec(id: u32, file: Option<&str>) -> Decision {
+        Decision {
+            id,
+            conditions: vec![id],
+            source_file: file.map(String::from),
+            source_line: Some(1),
+            chain_kind: ChainKind::default(),
+            inline_context: None,
+        }
+    }
+    fn wmanifest(
+        branches: Vec<BranchEntry>,
+        decisions: Vec<Decision>,
+        attr: crate::decisions::AttributionSource,
+    ) -> Manifest {
+        Manifest {
+            schema_version: "test".into(),
+            witness_version: "test".into(),
+            module_source: "m.wasm".into(),
+            original_module_sha256: None,
+            branches,
+            decisions,
+            branch_inline_contexts: Default::default(),
+            branch_inline_chains: Default::default(),
+            attribution_source: attr,
+        }
+    }
+
+    #[test]
+    fn warns_no_branches() {
+        use crate::decisions::AttributionSource;
+        let m = wmanifest(vec![], vec![], AttributionSource::None);
+        assert_eq!(m.warnings(), vec![ManifestWarning::NoBranches]);
+    }
+
+    #[test]
+    fn warns_no_name_section_when_all_anon() {
+        use crate::decisions::AttributionSource;
+        // every function_name None → gap rows unattributable.
+        let m = wmanifest(
+            vec![wbr(0, None), wbr(1, None)],
+            vec![],
+            AttributionSource::None,
+        );
+        assert!(m.warnings().contains(&ManifestWarning::NoNameSection));
+        // a single named function clears it.
+        let ok = wmanifest(
+            vec![wbr(0, None), wbr(1, Some("lib::f"))],
+            vec![],
+            AttributionSource::None,
+        );
+        assert!(!ok.warnings().contains(&ManifestWarning::NoNameSection));
+    }
+
+    #[test]
+    fn warns_adapter_only_dwarf() {
+        use crate::decisions::AttributionSource;
+        // DWARF claimed, but every decision is meld's synthetic <meld-adapter> unit.
+        let m = wmanifest(
+            vec![wbr(0, Some("f"))],
+            vec![
+                wdec(0, Some("<meld-adapter>")),
+                wdec(1, Some("<meld-adapter>")),
+            ],
+            AttributionSource::Dwarf,
+        );
+        assert!(m.warnings().contains(&ManifestWarning::AdapterOnlyDwarf));
+        // one real user decision clears it.
+        let ok = wmanifest(
+            vec![wbr(0, Some("f"))],
+            vec![wdec(0, Some("<meld-adapter>")), wdec(1, Some("lib.rs"))],
+            AttributionSource::Dwarf,
+        );
+        assert!(!ok.warnings().contains(&ManifestWarning::AdapterOnlyDwarf));
+        // only fires for dwarf attribution, not none.
+        let none = wmanifest(
+            vec![wbr(0, Some("f"))],
+            vec![wdec(0, Some("<meld-adapter>"))],
+            AttributionSource::None,
+        );
+        assert!(!none.warnings().contains(&ManifestWarning::AdapterOnlyDwarf));
     }
 
     #[test]
