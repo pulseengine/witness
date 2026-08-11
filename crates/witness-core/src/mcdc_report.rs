@@ -106,6 +106,13 @@ pub struct DecisionVerdict {
     /// inlining info.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inline_context: Option<crate::instrument::InlineContext>,
+    /// #179 — the full inlined call chain (outermost→innermost) for this
+    /// decision, taken from its rows. `inline_context` above is the leaf
+    /// (innermost); this preserves the *outermost* frame (the user's own call
+    /// site) so the per-file rollup can book the decision to user code, not the
+    /// stdlib frame it was inlined into. Absent when no row carried a chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_chain: Option<Vec<crate::instrument::InlineContext>>,
     pub conditions: Vec<ConditionVerdict>,
     /// Read-only view of `DecisionRow` for downstream renderers.
     pub truth_table: Vec<RowView>,
@@ -561,14 +568,43 @@ pub struct FileRollup {
     pub conditions_dead: u32,
 }
 
+/// Which frame of a decision's inline chain the per-file rollup attributes it to
+/// (#179). `Outermost` books a decision to the user's own code (the outermost call
+/// frame — e.g. `lib.rs`), not the innermost inlined stdlib frame (`option.rs`),
+/// which systematically under-reports the code under test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Attribution {
+    /// Book to the outermost inline frame (user code). The default from v0.41.
+    #[default]
+    Outermost,
+    /// Book to the innermost inlined frame (pre-v0.41 behaviour) — the leaf
+    /// `source_file`, usually a stdlib/generated file.
+    Innermost,
+}
+
+/// The file a decision is attributed to under `attribution`. `Outermost` uses the
+/// first (outermost) frame of the inline chain — the user's own call site —
+/// falling back to `source_file` when no chain is present; `Innermost` keeps the
+/// leaf `source_file`. The innermost frame is never lost: it stays on the
+/// decision's `source_file` and full `inline_chain` in the detailed report.
+fn attribution_file(d: &DecisionVerdict, attribution: Attribution) -> String {
+    let file = match attribution {
+        Attribution::Innermost => d.source_file.clone(),
+        Attribution::Outermost => d
+            .inline_chain
+            .as_ref()
+            .and_then(|chain| chain.first())
+            .and_then(|frame| frame.call_file.clone())
+            .or_else(|| d.source_file.clone()),
+    };
+    file.unwrap_or_else(|| "(no source-file)".to_string())
+}
+
 impl McdcRollup {
-    pub fn from_report(r: &McdcReport) -> Self {
+    pub fn from_report(r: &McdcReport, attribution: Attribution) -> Self {
         let mut by_file_map: BTreeMap<String, FileRollup> = BTreeMap::new();
         for d in &r.decisions {
-            let key = d
-                .source_file
-                .clone()
-                .unwrap_or_else(|| "(no source-file)".to_string());
+            let key = attribution_file(d, attribution);
             let entry = by_file_map.entry(key.clone()).or_insert(FileRollup {
                 source_file: key,
                 decisions_total: 0,
@@ -664,9 +700,9 @@ fn truncate_left(s: &str, max: usize) -> String {
     }
 }
 
-pub fn rollup_from_run_file(path: &Path) -> Result<McdcRollup> {
+pub fn rollup_from_run_file(path: &Path, attribution: Attribution) -> Result<McdcRollup> {
     let report = from_run_file(path)?;
-    Ok(McdcRollup::from_report(&report))
+    Ok(McdcRollup::from_report(&report, attribution))
 }
 
 fn analyse_decision(
@@ -684,6 +720,11 @@ fn analyse_decision(
             inline_chain: r.inline_chain.clone(),
         })
         .collect();
+
+    // #179: preserve the outermost inline frame (user code) for rollup
+    // attribution. All rows of one decision share the same source call chain;
+    // take the first row that carries one.
+    let inline_chain = d.rows.iter().find_map(|r| r.inline_chain.clone());
 
     // v0.9.7 — br_table-shape decision. All conditions are
     // BrTableTarget / BrTableDefault entries that share a
@@ -763,6 +804,7 @@ fn analyse_decision(
             source_file: d.source_file.clone(),
             source_line: d.source_line,
             inline_context: d.inline_context.clone(),
+            inline_chain: inline_chain.clone(),
             conditions,
             truth_table,
             status,
@@ -777,6 +819,7 @@ fn analyse_decision(
             source_file: d.source_file.clone(),
             source_line: d.source_line,
             inline_context: d.inline_context.clone(),
+            inline_chain: inline_chain.clone(),
             conditions: d
                 .condition_branch_ids
                 .iter()
@@ -866,6 +909,7 @@ fn analyse_decision(
         source_file: d.source_file.clone(),
         source_line: d.source_line,
         inline_context: d.inline_context.clone(),
+        inline_chain,
         conditions,
         truth_table,
         status,
@@ -1243,6 +1287,46 @@ mod tests {
     use super::*;
     use crate::instrument::BranchKind;
     use crate::run_record::{BranchHit, DecisionRecord, DecisionRow, RunRecord, TraceHealth};
+
+    // #179 / REQ-065 — a decision inlined from user code into a stdlib frame must
+    // attribute to the OUTERMOST frame (the user's own file), not the innermost.
+    // Chain data is the real gale switch-thin branch 9: lib.rs:256 → option.rs:682.
+    #[test]
+    fn attributes_decision_to_outermost_inline_frame() {
+        use crate::instrument::InlineContext;
+        let outer = InlineContext {
+            call_file: Some("lib.rs".to_string()),
+            call_line: 256,
+        };
+        let inner = InlineContext {
+            call_file: Some("option.rs".to_string()),
+            call_line: 682,
+        };
+        let d = DecisionVerdict {
+            id: 9,
+            // today's (wrong) attribution: the innermost leaf file.
+            source_file: Some("option.rs".to_string()),
+            source_line: Some(682),
+            inline_context: Some(inner.clone()),
+            // chain is outermost → innermost.
+            inline_chain: Some(vec![outer, inner]),
+            conditions: vec![],
+            truth_table: vec![],
+            status: DecisionStatus::Partial,
+            br_table_audit: None,
+            per_context: vec![],
+        };
+        // Outermost (v0.41 default) books the decision to the user's own file.
+        assert_eq!(attribution_file(&d, Attribution::Outermost), "lib.rs");
+        // Innermost preserves the pre-v0.41 leaf-frame behaviour.
+        assert_eq!(attribution_file(&d, Attribution::Innermost), "option.rs");
+        // With no chain, both fall back to source_file (nothing to attribute up).
+        let d2 = DecisionVerdict {
+            inline_chain: None,
+            ..d.clone()
+        };
+        assert_eq!(attribution_file(&d2, Attribution::Outermost), "option.rs");
+    }
 
     fn row(id: u32, evaluated: &[(u32, bool)], outcome: Option<bool>) -> DecisionRow {
         DecisionRow {

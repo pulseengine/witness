@@ -111,6 +111,12 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
         format: ReportFormat,
+        /// Which inline frame the per-file mcdc-rollup attributes a decision to
+        /// (#179). `outermost` (default) books it to the user's own code (the
+        /// outermost call frame); `innermost` keeps the pre-v0.41 leaf-frame
+        /// behaviour (usually a stdlib/generated file).
+        #[arg(long, value_enum, default_value_t = AttributionArg::Outermost)]
+        attribution: AttributionArg,
     },
 
     /// v0.36 (REQ-058) — cross-check two run JSON files from different
@@ -508,6 +514,24 @@ enum ReportFormat {
     McdcRollupJson,
 }
 
+/// #179 — which inline frame the per-file rollup attributes a decision to.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum AttributionArg {
+    /// Book decisions to the outermost inline frame (user code). Default.
+    Outermost,
+    /// Book decisions to the innermost inlined frame (pre-v0.41 behaviour).
+    Innermost,
+}
+
+impl From<AttributionArg> for witness_core::mcdc_report::Attribution {
+    fn from(a: AttributionArg) -> Self {
+        match a {
+            AttributionArg::Outermost => witness_core::mcdc_report::Attribution::Outermost,
+            AttributionArg::Innermost => witness_core::mcdc_report::Attribution::Innermost,
+        }
+    }
+}
+
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum DiffFormat {
     /// Machine-readable JSON.
@@ -723,7 +747,11 @@ fn main() -> Result<()> {
                 print!("{}", report.to_text());
             }
         }
-        Command::Report { input, format } => {
+        Command::Report {
+            input,
+            format,
+            attribution,
+        } => {
             // SAFETY-REVIEW: CLI's job is to write the report to stdout;
             // `println!` is the intended output channel for end users.
             #[allow(clippy::print_stdout)]
@@ -745,11 +773,17 @@ fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 }
                 ReportFormat::McdcRollup => {
-                    let rollup = witness_core::mcdc_report::rollup_from_run_file(&input)?;
+                    let rollup = witness_core::mcdc_report::rollup_from_run_file(
+                        &input,
+                        attribution.into(),
+                    )?;
                     println!("{}", rollup.to_text());
                 }
                 ReportFormat::McdcRollupJson => {
-                    let rollup = witness_core::mcdc_report::rollup_from_run_file(&input)?;
+                    let rollup = witness_core::mcdc_report::rollup_from_run_file(
+                        &input,
+                        attribution.into(),
+                    )?;
                     println!("{}", serde_json::to_string_pretty(&rollup)?);
                 }
             }

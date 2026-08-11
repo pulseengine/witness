@@ -778,3 +778,23 @@ artifacts:
         target: REQ-064
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-065
+    type: test-case
+    title: Per-file rollup attributes decisions to the outermost inline frame
+    description: >
+      mcdc_report::tests::attributes_decision_to_outermost_inline_frame verifies
+      attribution_file: with a real gale switch-thin chain (lib.rs:256 → option.rs:682),
+      Attribution::Outermost books the decision to lib.rs (user code) and
+      Attribution::Innermost to option.rs (pre-v0.41 leaf); with no chain, both fall
+      back to source_file. The rollup default is Outermost; `witness report
+      --attribution innermost` restores the old behaviour. (REQ-065 / #179.)
+    tags: [verification, report, attribution, dwarf]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --lib mcdc_report::tests::attributes_decision_to_outermost_inline_frame
+    links:
+      - type: verifies
+        target: REQ-065
+      - type: produced-by
+        target: AS-001
