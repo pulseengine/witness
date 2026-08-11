@@ -1172,7 +1172,7 @@ artifacts:
     release: v0.41.0
     type: requirement
     title: Attribute decisions to the outermost inline frame (user code)
-    status: approved
+    status: verified
     description: >
       The per-file rollup books a decision to the innermost inlined frame — for
       no_std driver code almost always a stdlib/generated file (option.rs,
