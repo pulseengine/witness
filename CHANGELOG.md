@@ -7,6 +7,39 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-08-12
+
+Headline: **gale MC/DC evidence, part 2** — attribute decisions to the user's own
+code, and run drivers whose hardware seams are unsatisfiable component imports.
+
+### Changed
+
+- **Per-file mcdc-rollup attributes decisions to the outermost inline frame**
+  (`witness report --attribution outermost|innermost`, default `outermost`). Decisions
+  inlined from user code into a stdlib frame were booked to the *innermost* file
+  (`option.rs`, `wit_bindgen_cabi_realloc.rs`) rather than the user's crate,
+  under-reporting the code under test. `DecisionVerdict` now carries the full
+  `inline_chain`; the innermost leaf is preserved. Verified against gale's real
+  `switch-thin` manifest (a decision `if SW.is_none()` in `lib.rs` was booked to
+  `option.rs`). (#179, REQ-065.)
+
+### Added
+
+- **`witness run --stub-imports`** synthesises implementations for unsatisfied
+  component imports (hardware seams that can't exist under wasmtime) from the
+  component's own type section, so a driver runs to completion without a hand-built
+  per-driver stub crate. Bare `--stub-imports` returns the zero value of each result
+  type; `--stub-imports=trap` traps on first call. Stubbed imports are recorded in the
+  run JSON as `stubbed_imports` with a loud warning — coverage against stubbed seams is
+  a materially weaker claim. (#180, REQ-066.)
+
+**Falsification statement.** The attribution change is asserted on the real gale
+branch-9 chain: `outermost` → `lib.rs`, `innermost` → `option.rs`, no-chain → the leaf
+`source_file`. `--stub-imports` is proven by a live e2e — an importing component that
+*fails to instantiate* without the flag runs to completion with it and records the
+stubbed import; the zero-value builder is unit-tested per primitive type. Where DWARF
+captured no user frame at all, no frame selection can invent one — stated, not hidden.
+
 ## [0.40.0] — 2026-08-11
 
 Headline: **honest report output + silent-degradation warnings** — two safety fixes
