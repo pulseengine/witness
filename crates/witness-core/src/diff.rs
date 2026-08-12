@@ -384,6 +384,7 @@ mod tests {
             branches,
             decisions: vec![],
             trace_health: Default::default(),
+            stubbed_imports: Vec::new(),
         };
         std::fs::write(path, serde_json::to_string(&r).unwrap()).unwrap();
     }

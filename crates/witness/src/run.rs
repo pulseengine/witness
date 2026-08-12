@@ -67,6 +67,22 @@ pub struct RunOptions<'a> {
     /// memory. Counters-only (v1, branch coverage). The second runtime
     /// for the differential `cross-check` (REQ-058) alongside kiln.
     pub component_backend: bool,
+    /// v0.41 (#180) — synthesise implementations for unsatisfied component
+    /// imports (hardware seams that can't exist under wasmtime) so a driver can
+    /// run to completion. `Some(Zero)` returns the zero value of each result
+    /// type; `Some(Trap)` traps on first call (to prove a seam is not reached).
+    /// `None` leaves imports unsatisfied (instantiation fails, as before).
+    /// Only applies to the `--backend wasmtime-component` path.
+    pub stub_imports: Option<StubImports>,
+}
+
+/// How to synthesise unsatisfied component imports (#180).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StubImports {
+    /// Return the zero value of each result type (0 / false / "" / empty / None).
+    Zero,
+    /// Trap on first call — proves the seam is not reached on a given path.
+    Trap,
 }
 
 /// Run the instrumented `module`, writing a `RunRecord` to `options.output`.
@@ -92,6 +108,81 @@ pub fn run_module(options: &RunOptions<'_>) -> Result<()> {
 /// accessor). v1 is counters-only (branch coverage), no-arg exports. This
 /// is the second runtime for the differential `cross-check` (REQ-058),
 /// alongside the kiln harness.
+/// The zero value of a component `Type` (#180) — the synthesised return of a
+/// stubbed import. Primitives → 0/false/''/empty; aggregates → recurse; option →
+/// none; result → ok(zero); enum/variant → first case. Resource / future / stream
+/// results have no zero value; those bail with a clear message at call time.
+fn zero_val(ty: &wasmtime::component::types::Type) -> anyhow::Result<wasmtime::component::Val> {
+    use wasmtime::component::Val;
+    use wasmtime::component::types::Type as T;
+    Ok(match ty {
+        T::Bool => Val::Bool(false),
+        T::S8 => Val::S8(0),
+        T::U8 => Val::U8(0),
+        T::S16 => Val::S16(0),
+        T::U16 => Val::U16(0),
+        T::S32 => Val::S32(0),
+        T::U32 => Val::U32(0),
+        T::S64 => Val::S64(0),
+        T::U64 => Val::U64(0),
+        T::Float32 => Val::Float32(0.0),
+        T::Float64 => Val::Float64(0.0),
+        T::Char => Val::Char('\0'),
+        T::String => Val::String(String::new()),
+        T::List(_) => Val::List(Vec::new()),
+        T::Map(_) => Val::Map(Vec::new()),
+        T::Flags(_) => Val::Flags(Vec::new()),
+        T::Option(_) => Val::Option(None),
+        T::Tuple(t) => {
+            let mut vs = Vec::new();
+            for et in t.types() {
+                vs.push(zero_val(&et)?);
+            }
+            Val::Tuple(vs)
+        }
+        T::Record(r) => {
+            let mut vs = Vec::new();
+            for f in r.fields() {
+                vs.push((f.name.to_string(), zero_val(&f.ty)?));
+            }
+            Val::Record(vs)
+        }
+        T::Enum(e) => {
+            let first = e
+                .names()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("cannot zero an empty enum"))?;
+            Val::Enum(first.to_string())
+        }
+        T::Variant(v) => {
+            let case = v
+                .cases()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("cannot zero an empty variant"))?;
+            let payload = match case.ty {
+                Some(pt) => Some(Box::new(zero_val(&pt)?)),
+                None => None,
+            };
+            Val::Variant(case.name.to_string(), payload)
+        }
+        T::Result(r) => {
+            // The zero of a result is `ok`, with a zero payload if `ok` has a type.
+            let payload = match r.ok() {
+                Some(okt) => Some(Box::new(zero_val(&okt)?)),
+                None => None,
+            };
+            Val::Result(Ok(payload))
+        }
+        T::Own(_) | T::Borrow(_) => anyhow::bail!(
+            "--stub-imports cannot synthesise a zero value for a resource-typed result; \
+             use --stub-imports=trap for this seam"
+        ),
+        T::Future(_) | T::Stream(_) | T::ErrorContext => anyhow::bail!(
+            "--stub-imports cannot synthesise a zero value for an async (future/stream) result"
+        ),
+    })
+}
+
 fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
     let manifest = Manifest::load(&options.manifest)?;
     let comp_bytes = std::fs::read(options.module).map_err(Error::Io)?;
@@ -142,6 +233,88 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
     let mut linker: wasmtime::component::Linker<WasiComp> =
         wasmtime::component::Linker::new(&engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(|e| Error::Runtime(e.into()))?;
+
+    // #180 — synthesise unsatisfied component imports (hardware seams that can't
+    // exist under wasmtime) so a driver runs to completion. WASI is provided for
+    // real above and never stubbed; only the remaining non-wasi imports are.
+    let mut stubbed_imports: Vec<String> = Vec::new();
+    if let Some(mode) = options.stub_imports {
+        use wasmtime::component::types::ComponentItem;
+        // Collect first — defining stubs borrows the linker mutably.
+        let import_instances: Vec<(String, wasmtime::component::types::ComponentInstance)> =
+            component
+                .component_type()
+                .imports(&engine)
+                .filter(|(name, _)| !name.starts_with("wasi:"))
+                .filter_map(|(name, ext)| {
+                    // Only instance imports carry stubbable functions (bare-func /
+                    // resource / type imports aren't the hardware-seam case #180 is
+                    // about); leave anything else unsatisfied so it fails loudly.
+                    if let ComponentItem::ComponentInstance(inst) = ext.ty {
+                        Some((name.to_string(), inst))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+        for (iname, inst) in import_instances {
+            let funcs: Vec<String> = inst
+                .exports(&engine)
+                .filter(|(_, e)| matches!(e.ty, ComponentItem::ComponentFunc(_)))
+                .map(|(fname, _)| fname.to_string())
+                .collect();
+            if funcs.is_empty() {
+                continue;
+            }
+            let mut li = linker
+                .instance(&iname)
+                .map_err(|e| Error::Runtime(e.into()))?;
+            for fname in funcs {
+                let qualified = format!("{iname}#{fname}");
+                match mode {
+                    StubImports::Zero => li
+                        .func_new(&fname, move |_store, ft, _params, results| {
+                            for (slot, ty) in results.iter_mut().zip(ft.results()) {
+                                *slot = zero_val(&ty).map_err(wasmtime::Error::from_anyhow)?;
+                            }
+                            Ok(())
+                        })
+                        .map_err(|e| Error::Runtime(e.into()))?,
+                    StubImports::Trap => {
+                        let q = qualified.clone();
+                        li.func_new(&fname, move |_store, _ft, _params, _results| {
+                            Err(wasmtime::Error::msg(format!(
+                                "stubbed import `{q}` was called (--stub-imports=trap)"
+                            )))
+                        })
+                        .map_err(|e| Error::Runtime(e.into()))?
+                    }
+                }
+                stubbed_imports.push(qualified);
+            }
+        }
+        if !stubbed_imports.is_empty() {
+            // Loud: a coverage result measured against stubbed seams is a weaker
+            // claim than one against the real seams. Say so on stderr; the run
+            // JSON records `stubbed_imports` as durable evidence.
+            #[allow(clippy::print_stderr)]
+            {
+                let kind = match mode {
+                    StubImports::Zero => "zero-returning",
+                    StubImports::Trap => "trapping",
+                };
+                eprintln!(
+                    "warning: --stub-imports synthesised {} unsatisfied import(s) as {kind} stubs;",
+                    stubbed_imports.len(),
+                );
+                eprintln!(
+                    "         coverage measured against stubbed seams is a weaker claim. Recorded"
+                );
+                eprintln!("         in the run JSON as `stubbed_imports`.");
+            }
+        }
+    }
+
     let instance = linker
         .instantiate(&mut store, &component)
         .map_err(|e| Error::Runtime(e.into()))?;
@@ -206,7 +379,13 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
         }
     }
 
-    let record = build_run_record(&manifest, &counter_values, options.module, invoked);
+    let record = build_run_record(
+        &manifest,
+        &counter_values,
+        options.module,
+        invoked,
+        stubbed_imports,
+    );
     record.save(options.output)
 }
 
@@ -536,7 +715,13 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     }
 
     let counter_values = read_counter_globals(&mut store, &instance)?;
-    let mut record = build_run_record(&manifest, &counter_values, options.module, invoked);
+    let mut record = build_run_record(
+        &manifest,
+        &counter_values,
+        options.module,
+        invoked,
+        Vec::new(),
+    );
 
     // v0.6.1: attach per-decision row tables and trace health.
     // v0.12.0: also propagate `inline_context` from the manifest so
@@ -901,7 +1086,13 @@ fn run_via_harness(options: &RunOptions<'_>, harness_cmd: &str) -> Result<()> {
             // Counters only — branch coverage, no MC/DC. Existing
             // pre-v0.9.5 behaviour, kept verbatim for compatibility.
             let counter_values = snapshot.into_id_map()?;
-            let record = build_run_record(&manifest, &counter_values, options.module, vec![]);
+            let record = build_run_record(
+                &manifest,
+                &counter_values,
+                options.module,
+                vec![],
+                Vec::new(),
+            );
             record.save(options.output)
         }
         s if s == HarnessSnapshot::SCHEMA_V2 => {
@@ -1098,7 +1289,7 @@ fn harness_v2_to_run_record(
         }
     }
 
-    let mut record = build_run_record(manifest, &counter_values, module_path, invoked);
+    let mut record = build_run_record(manifest, &counter_values, module_path, invoked, Vec::new());
 
     let mut decisions: Vec<DecisionRecord> = Vec::with_capacity(manifest.decisions.len());
     for d in &manifest.decisions {
@@ -1242,6 +1433,7 @@ fn build_run_record(
     counter_values: &HashMap<u32, u64>,
     module_path: &Path,
     invoked: Vec<String>,
+    stubbed_imports: Vec<String>,
 ) -> RunRecord {
     let entries_by_id: HashMap<u32, &witness_core::instrument::BranchEntry> =
         manifest.branches.iter().map(|b| (b.id, b)).collect();
@@ -1275,6 +1467,7 @@ fn build_run_record(
         branches,
         decisions: vec![],
         trace_health: TraceHealth::default(),
+        stubbed_imports,
     }
 }
 
@@ -1332,6 +1525,22 @@ mod tests {
     use tempfile::tempdir;
     use witness_core::instrument::{BranchKind, instrument_module};
 
+    // #180 — the synthesised return for a stubbed import is the zero value of each
+    // result type. Primitive `Type` variants are unit-constructible; aggregates come
+    // from a real component so are exercised by the live path.
+    #[test]
+    fn zero_val_of_primitives() {
+        use wasmtime::component::Val;
+        use wasmtime::component::types::Type as T;
+        assert!(matches!(zero_val(&T::Bool).unwrap(), Val::Bool(false)));
+        assert!(matches!(zero_val(&T::U8).unwrap(), Val::U8(0)));
+        assert!(matches!(zero_val(&T::S32).unwrap(), Val::S32(0)));
+        assert!(matches!(zero_val(&T::U64).unwrap(), Val::U64(0)));
+        assert!(matches!(zero_val(&T::Float64).unwrap(), Val::Float64(f) if f == 0.0));
+        assert!(matches!(zero_val(&T::Char).unwrap(), Val::Char('\0')));
+        assert!(matches!(zero_val(&T::String).unwrap(), Val::String(s) if s.is_empty()));
+    }
+
     /// v0.38 (#110, DEC-044) — end-to-end: instrument a leaf component
     /// in place, run it through the wasmtime-component backend, and read
     /// the branch counter back via the coredump trap-snapshot path.
@@ -1368,6 +1577,7 @@ mod tests {
             invoke_all: false,
             harness: None,
             component_backend: true,
+            stub_imports: None,
         };
         run_module(&options).expect("wasmtime-component backend run");
 
@@ -1476,6 +1686,7 @@ mod tests {
             invoke_all: false,
             harness: None,
             component_backend: false,
+            stub_imports: None,
         };
         run_module(&options).unwrap();
 
@@ -1534,6 +1745,7 @@ mod tests {
             invoke_all: false,
             harness: None,
             component_backend: false,
+            stub_imports: None,
         };
         run_module(&options).unwrap();
         let record = RunRecord::load(&run_path).unwrap();
@@ -1591,6 +1803,7 @@ EOF"#;
             invoke_all: false,
             harness: Some(harness_cmd.to_string()),
             component_backend: false,
+            stub_imports: None,
         };
         run_module(&options).unwrap();
         let record = RunRecord::load(&run_path).unwrap();
@@ -1646,6 +1859,7 @@ EOF"#;
             invoke_all: false,
             harness: None,
             component_backend: false,
+            stub_imports: None,
         };
         run_module(&options).unwrap();
         let record = RunRecord::load(&run_path).unwrap();
@@ -1701,6 +1915,7 @@ EOF"#;
             invoke_all: false,
             harness: None,
             component_backend: false,
+            stub_imports: None,
         };
         let err = run_module(&options).expect_err("arity mismatch must error");
         let msg = format!("{err}");
@@ -1785,6 +2000,7 @@ EOF"#
             invoke_all: false,
             harness: Some(harness_cmd),
             component_backend: false,
+            stub_imports: None,
         };
         run_module(&options).unwrap();
 
@@ -1844,6 +2060,7 @@ EOF"#;
             invoke_all: false,
             harness: Some(harness_cmd.to_string()),
             component_backend: false,
+            stub_imports: None,
         };
         let err = run_module(&options).expect_err("unknown schema must error");
         let msg = format!("{err}");
@@ -1909,6 +2126,7 @@ EOF"#;
             invoke_all: true,
             harness: None,
             component_backend: false,
+            stub_imports: None,
         };
         run_module(&options).unwrap();
 
@@ -2010,6 +2228,7 @@ EOF"#;
             invoke_all: false,
             harness: None,
             component_backend: false,
+            stub_imports: None,
         };
         run_module(&options).unwrap();
 
@@ -2103,6 +2322,7 @@ EOF"#;
             invoke_all: true,
             harness: None,
             component_backend: false,
+            stub_imports: None,
         };
         let err = run_module(&options).expect_err("--invoke-all with nothing to invoke must error");
         let msg = format!("{err}");
@@ -2142,6 +2362,7 @@ EOF"#;
             invoke_all: false,
             harness: Some("exit 1".to_string()),
             component_backend: false,
+            stub_imports: None,
         };
         let result = run_module(&options);
         assert!(matches!(result, Err(Error::Harness { .. })));

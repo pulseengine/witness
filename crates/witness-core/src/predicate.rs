@@ -895,6 +895,7 @@ mod tests {
             branches: vec![],
             decisions: vec![full, gap],
             trace_health: TraceHealth::default(),
+            stubbed_imports: Vec::new(),
         }
     }
 

@@ -152,6 +152,7 @@ mod tests {
                 .collect(),
             decisions: vec![],
             trace_health: TraceHealth::default(),
+            stubbed_imports: Vec::new(),
         }
     }
 
