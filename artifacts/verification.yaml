@@ -798,3 +798,24 @@ artifacts:
         target: REQ-065
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-066
+    type: test-case
+    title: --stub-imports synthesises unsatisfied component imports and records them
+    description: >
+      run::tests::zero_val_of_primitives verifies the zero-value builder for every
+      primitive result type. Live e2e (documented in the PR): an importing component
+      (imports host:t/i#f) that FAILS to instantiate without --stub-imports runs to
+      completion with `witness run --backend-wasmtime-component --stub-imports`, and
+      the run JSON records `stubbed_imports: ["host:t/i#f"]` with a loud stderr
+      warning that coverage against stubbed seams is a weaker claim. --stub-imports=trap
+      synthesises trapping stubs. (REQ-066 / #180.)
+    tags: [verification, run, component, stub-imports]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc --lib run::tests::zero_val_of_primitives
+    links:
+      - type: verifies
+        target: REQ-066
+      - type: produced-by
+        target: AS-001

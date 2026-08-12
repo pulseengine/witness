@@ -1193,7 +1193,7 @@ artifacts:
     release: v0.41.0
     type: requirement
     title: Synthesise stub implementations for unsatisfied component imports
-    status: approved
+    status: verified
     description: >
       `witness run --stub-imports` shall synthesise zero-returning implementations for
       any unsatisfied component import from its WIT signature (0 / false / empty),

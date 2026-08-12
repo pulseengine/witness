@@ -263,6 +263,7 @@ mod tests {
             branches,
             decisions: vec![],
             trace_health: Default::default(),
+            stubbed_imports: Vec::new(),
         }
     }
 

@@ -101,6 +101,15 @@ enum Command {
         /// coverage). The second runtime for `cross-check` vs kiln.
         #[arg(long = "backend-wasmtime-component")]
         backend_wasmtime_component: bool,
+        /// v0.41 (#180) — synthesise implementations for unsatisfied component
+        /// imports (hardware seams that can't run under wasmtime) so a driver
+        /// runs to completion. Bare `--stub-imports` returns the zero value of
+        /// each result type; `--stub-imports=trap` traps on first call (to prove
+        /// a seam is not reached). Only for `--backend-wasmtime-component`.
+        /// Stubbed imports are recorded in the run JSON (`stubbed_imports`) —
+        /// coverage against stubbed seams is a materially weaker claim.
+        #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "zero")]
+        stub_imports: Option<StubImportsArg>,
     },
 
     /// Produce a coverage report from collected counter data.
@@ -532,6 +541,24 @@ impl From<AttributionArg> for witness_core::mcdc_report::Attribution {
     }
 }
 
+/// #180 — how to synthesise unsatisfied component imports on `witness run`.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum StubImportsArg {
+    /// Return the zero value of each result type (0 / false / "" / empty). Default.
+    Zero,
+    /// Trap on first call — proves a seam is not reached on a given path.
+    Trap,
+}
+
+impl From<StubImportsArg> for run::StubImports {
+    fn from(a: StubImportsArg) -> Self {
+        match a {
+            StubImportsArg::Zero => run::StubImports::Zero,
+            StubImportsArg::Trap => run::StubImports::Trap,
+        }
+    }
+}
+
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum DiffFormat {
     /// Machine-readable JSON.
@@ -680,6 +707,7 @@ fn main() -> Result<()> {
             invoke_all,
             harness,
             backend_wasmtime_component,
+            stub_imports,
         } => {
             let manifest =
                 manifest.unwrap_or_else(|| witness_core::instrument::Manifest::path_for(&module));
@@ -693,6 +721,7 @@ fn main() -> Result<()> {
                 invoke_all,
                 harness,
                 component_backend: backend_wasmtime_component,
+                stub_imports: stub_imports.map(Into::into),
             };
             run::run_module(&options)?;
             // v0.9.11 — chatty success.
@@ -1697,6 +1726,7 @@ fn run_all(
         invoke_all,
         harness: None,
         component_backend: false,
+        stub_imports: None,
     })?;
     #[allow(clippy::print_stderr)]
     {

@@ -98,6 +98,7 @@ fn run_with_invoke(invoke: &str) -> RunRecord {
         invoke_all: false,
         harness: None,
         component_backend: false,
+        stub_imports: None,
     };
     run_module(&options).expect("run instrumented fixture");
 

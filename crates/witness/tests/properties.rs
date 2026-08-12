@@ -111,6 +111,7 @@ prop_compose! {
             branches,
             decisions: vec![],
             trace_health: Default::default(),
+            stubbed_imports: Vec::new(),
         }
     }
 }
@@ -146,6 +147,7 @@ prop_compose! {
                 branches,
                 decisions: vec![],
                 trace_health: Default::default(),
+                stubbed_imports: Vec::new(),
             }
         };
         (make(hits_a), make(hits_b))

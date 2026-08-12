@@ -37,6 +37,14 @@ pub struct RunRecord {
     /// to emit MC/DC verdicts when `overflow` is true.
     #[serde(default)]
     pub trace_health: TraceHealth,
+    /// v0.41 (#180) — component imports that were *synthesised* (stubbed) to run
+    /// this coverage: hardware seams (context save/restore, MPU programming) that
+    /// cannot exist under wasmtime, substituted with zero-returning (or trapping)
+    /// implementations. A coverage result obtained against stubbed seams is a
+    /// materially weaker claim; it is recorded here so the evidence says so on its
+    /// face. Empty (skipped) when nothing was stubbed. Names are `instance#func`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stubbed_imports: Vec<String>,
 }
 
 /// One source-level decision's per-row truth table.
@@ -416,6 +424,7 @@ pub fn merge_records(records: &[RunRecord]) -> Result<RunRecord> {
         branches: merged_branches,
         decisions: merged_decisions,
         trace_health: merged_health,
+        stubbed_imports: Vec::new(),
     })
 }
 
@@ -468,6 +477,7 @@ mod tests {
             branches,
             decisions: vec![],
             trace_health: TraceHealth::default(),
+            stubbed_imports: Vec::new(),
         }
     }
 

@@ -213,6 +213,7 @@ mod tests {
             ],
             decisions: vec![],
             trace_health: Default::default(),
+            stubbed_imports: Vec::new(),
         }
     }
 
@@ -249,6 +250,7 @@ mod tests {
             branches: vec![],
             decisions: vec![],
             trace_health: Default::default(),
+            stubbed_imports: Vec::new(),
         };
         let report = Report::from_record(&empty);
         assert_eq!(report.total_branches, 0);
