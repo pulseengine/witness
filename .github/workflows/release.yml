@@ -314,7 +314,10 @@ jobs:
       # brief settles on.
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx --locked
+        # Pinned: an unpinned `--locked` install silently jumped 0.5.4 → 0.5.9
+        # between v0.40.0 and a v0.41.0 re-run and broke this step. Bump this
+        # deliberately, in lockstep with the SBOM-locating logic below.
+        run: cargo install cargo-cyclonedx --locked --version 0.5.9
       - name: Generate SBOM (CycloneDX 1.5)
         env:
           GITHUB_REF: ${{ github.ref }}
@@ -325,15 +328,21 @@ jobs:
             --manifest-path crates/witness/Cargo.toml \
             --format json \
             --spec-version 1.5
-          # cargo-cyclonedx writes one or more <crate>.cdx.json
-          # files alongside each crate's manifest. Find the one
-          # belonging to the `witness` binary crate (defensive —
-          # filename pattern has changed across cyclonedx versions).
-          SBOM=$(find crates/witness -maxdepth 2 -name "*.cdx.json" -type f | head -1)
+          # cargo-cyclonedx writes one `<package>.cdx.json` per workspace member
+          # reachable from the manifest — 0.5.9 names them by PACKAGE name
+          # (`witness-mcdc.cdx.json`), not crate dir, and the location has moved
+          # across versions. Search the whole tree and prefer the witness binary
+          # crate's SBOM; print what was produced so a future break is diagnosable
+          # instead of a bare "not found".
+          echo "cdx.json files produced:"; find . -name '*.cdx.json' -type f 2>/dev/null || true
+          SBOM=$(find . -name 'witness-mcdc.cdx.json' -type f 2>/dev/null | head -1)
+          [ -z "$SBOM" ] && SBOM=$(find . -path '*witness*' -name '*.cdx.json' -type f 2>/dev/null | head -1)
+          [ -z "$SBOM" ] && SBOM=$(find . -name '*.cdx.json' -type f 2>/dev/null | head -1)
           if [ -z "$SBOM" ]; then
-            echo "::error::cargo cyclonedx produced no .cdx.json under crates/witness/"
+            echo "::error::cargo cyclonedx produced no .cdx.json anywhere in the tree"
             exit 1
           fi
+          echo "using SBOM: $SBOM"
           cp "$SBOM" "release-assets/witness-${BARE}.cdx.json"
 
       # SHA256SUMS includes every release asset present at this
