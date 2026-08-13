@@ -1208,3 +1208,23 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+  - id: REQ-067
+    release: v0.42.0
+    type: requirement
+    title: Component backend must resolve functions inside exported interface instances
+    status: verified
+    description: >
+      On `--backend-wasmtime-component`, `--invoke <name>` did a flat top-level
+      `get_func`, so no WIT-interface export resolved — the common shape is a
+      function inside an exported instance (`export gust:switch/fsm@0.1.0`, addressed
+      `pkg:ns/iface@ver#func`). This made #180 `--stub-imports` unreachable (the
+      import side worked, then export lookup failed). The backend shall descend into
+      the exported instance for the `#`-separated form (stripping any `=args` suffix),
+      resolving the func and its result arity. (Issue #194.)
+    tags: [run, component, wit, dogfooding]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001
