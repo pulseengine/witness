@@ -127,6 +127,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "base64-simd"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2492,7 +2498,7 @@ version = "47.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65db2eb1bfc5371a3b4107dbf539d0b93d05016fc29625b1648146b47db02071"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "directories-next",
  "log",
  "postcard",
@@ -2976,7 +2982,7 @@ name = "witness-mcdc"
 version = "0.41.0"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.23.1",
  "clap",
  "insta",
  "proptest",
@@ -3006,7 +3012,7 @@ name = "witness-mcdc-core"
 version = "0.41.0"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.23.1",
  "cpp_demangle",
  "ed25519-compact",
  "gimli 0.34.0",
@@ -3050,7 +3056,7 @@ version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03443b460309f0a89e7f915600a33ed6b0e8aa7845858426d4b396f3ed710e85"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "chrono",
  "ct-codecs",
  "ed25519-compact",
