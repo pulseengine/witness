@@ -1228,3 +1228,36 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+  - id: REQ-068
+    release: v0.43.0
+    type: requirement
+    title: Recover DWARF-v4 inline chains and rebase branch offsets into DWARF space
+    status: verified
+    description: >
+      REQ-065's outermost-frame attribution was inert on real gale drivers: the
+      manifest's branch_inline_chains came back empty and every decision pinned to
+      the last line-table row (wit_bindgen_cabi_realloc.rs), not user code (#179,
+      reproduced on hm-thin). Two independent DWARF-reconstruction bugs, both
+      required: (a) rustc emits DWARF v4 range lists in `.debug_ranges` / `.debug_loc`,
+      which the section extractor never read, so `die_ranges` resolved no address
+      ranges and every non-contiguously-inlined subroutine yielded an empty chain;
+      (b) walrus records each branch's `byte_offset` as its file-absolute position,
+      but DWARF line + range addresses are relative to the Code section's contents —
+      the un-rebased offset fell past the last line row and `lookup_line` silently
+      clamped to it. Witness shall extract the v4 sections and subtract the
+      Code-section start (wasmparser CodeSectionStart) before every DWARF lookup, so
+      decisions attribute to user source and inline chains populate — making REQ-065
+      real. And because the clamp was *silent* (the exact class REQ-064 warns about),
+      any branch whose rebased offset still lands past the line table's covered range
+      shall raise `ManifestWarning::BranchesOutsideLineTable{count}` — the tripwire
+      that would have surfaced this immediately instead of shipping a plausible file
+      column pinned to the last row. (Issue #179.)
+    tags: [report, attribution, dwarf, dogfooding]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: refines
+        target: REQ-065
+      - type: produced-by
+        target: AS-001

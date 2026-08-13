@@ -7,6 +7,45 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **gale #179 — decisions behind wit-bindgen cabi wrappers now attribute to user
+  code.** The v0.42 note that "hm-thin has no DWARF inline chain to walk" was wrong:
+  the inline frames (`lib.rs:20 → lib.rs:66`) are in the DWARF; witness was dropping
+  them. Two independent reconstruction bugs, both required, found by reproducing the
+  exact `gust_hm_thin.wasm` build and dumping what the extractor saw:
+  1. **DWARF v4 `.debug_ranges` / `.debug_loc` were never extracted.** rustc emits v4
+     range lists (not v5 `.debug_rnglists`) for wasm; `build_dwarf` fed gimli an empty
+     `DebugRanges`, so `die_ranges` resolved nothing and every non-contiguously-inlined
+     subroutine produced an empty chain.
+  2. **Branch offsets were never rebased into DWARF space.** walrus records each
+     `byte_offset` as the instruction's file-absolute position, but DWARF line + range
+     addresses are relative to the Code section's contents. The un-rebased offset fell
+     past the last line-table row, so `lookup_line` silently clamped every branch to it
+     — that clamp *was* the `wit_bindgen_cabi_realloc.rs:11` mis-attribution. Witness now
+     subtracts the Code-section start (`wasmparser` `CodeSectionStart`) before every
+     DWARF lookup.
+  Together these make v0.41's outermost-frame rule (REQ-065) actually fire on real
+  drivers. (#179, REQ-068.)
+
+- **New silent-degradation tripwire (REQ-064 family).** Because the clamp above was
+  invisible in every output, witness now counts branches whose rebased offset still
+  falls past the DWARF line table's covered range and raises
+  `ManifestWarning::BranchesOutsideLineTable{count}` — *"N branches fell outside the
+  line table and were clamped; per-file rollups are suspect (the function-level and
+  per-condition counts are not)."* Had this existed, #179 would have announced itself
+  instead of shipping a plausible file column. Silent on healthy modules
+  (`clamped_branches=0` on hm-thin, inline_chain_v4, prov396). (#179, REQ-068.)
+
+**Falsification statement.** A committed DWARF-v4 fixture (`inline_chain_v4.wasm`, the
+inlined-`decide` wrapper shape) is instrumented each run; the test fails unless the
+decision lands on `lib.rs` and `branch_inline_chains` is non-empty with every frame in
+`lib.rs`. Verified with teeth: neutering the code-section rebase empties the chains, and a
+unit test pins the `.debug_ranges` wiring. On the real hm-thin build — both
+`wasm32-unknown-unknown` (code base `0x1b0`) and `wasm32-wasip1` (`0x205`) — decision 0
+(`_export_vote_ok_cabi`) now books to `lib.rs:55` (the actual `(a01 && a02) || …` vote)
+while decision 1 stays on library code (`mod.rs`), matching avrabe's two-sided reading.
+
 ## [0.42.0] — 2026-08-13
 
 Headline: **`--stub-imports` is actually usable** — the component backend now resolves

@@ -87,6 +87,11 @@ pub struct ReconstructionResult {
     pub branch_inline_contexts: BTreeMap<u32, InlineContext>,
     pub branch_inline_chains: BTreeMap<u32, Vec<InlineContext>>,
     pub attribution_source: AttributionSource,
+    /// Count of branches whose rebased offset fell beyond the DWARF line
+    /// table's covered range — `lookup_line` would clamp each to the final
+    /// row, so their `source_file`/`source_line` is unreliable. Non-zero
+    /// raises `ManifestWarning::BranchesOutsideLineTable` (gale #179).
+    pub clamped_branches: u32,
 }
 
 pub fn reconstruct_decisions(
@@ -98,16 +103,24 @@ pub fn reconstruct_decisions(
     // source map (carries inline chains, ranges, etc.).
     if let Some(dwarf_sections) = extract_dwarf_sections(wasm_bytes)
         && let Ok(line_map) = build_line_map(&dwarf_sections)
-        && !line_map.is_empty()
+        && !line_map.map.is_empty()
     {
         let inline_map = build_inline_map(&dwarf_sections).unwrap_or_default();
-        let (decisions, branch_inline_contexts, branch_inline_chains) =
-            group_into_decisions(branches, &line_map, &inline_map);
+        let code_base = code_section_offset(wasm_bytes).unwrap_or(0);
+        let (decisions, branch_inline_contexts, branch_inline_chains, clamped_branches) =
+            group_into_decisions(
+                branches,
+                &line_map.map,
+                &inline_map,
+                code_base,
+                line_map.covered_max,
+            );
         return Ok(ReconstructionResult {
             decisions,
             branch_inline_contexts,
             branch_inline_chains,
             attribution_source: AttributionSource::Dwarf,
+            clamped_branches,
         });
     }
 
@@ -119,7 +132,11 @@ pub fn reconstruct_decisions(
         && let Ok(line_map) = crate::sourcemap::build_line_map_from_v3(map_json)
         && !line_map.is_empty()
     {
-        let (decisions, _, _) = group_into_decisions(branches, &line_map, &InlineMap::new());
+        // V3 source-map offsets share the branch's own space (no
+        // code-section rebase), so `code_base` is 0; and a V3 map has no
+        // covered-range bound, so clamp detection is disabled (u64::MAX).
+        let (decisions, _, _, _) =
+            group_into_decisions(branches, &line_map, &InlineMap::new(), 0, u64::MAX);
         // Inline contexts / chains are intentionally empty — V3 has
         // no equivalent of `DW_TAG_inlined_subroutine`.
         return Ok(ReconstructionResult {
@@ -127,6 +144,7 @@ pub fn reconstruct_decisions(
             branch_inline_contexts: BTreeMap::new(),
             branch_inline_chains: BTreeMap::new(),
             attribution_source: AttributionSource::SourceMapV3,
+            clamped_branches: 0,
         });
     }
 
@@ -145,6 +163,16 @@ struct DwarfSections<'a> {
     debug_addr: &'a [u8],
     debug_rnglists: &'a [u8],
     debug_loclists: &'a [u8],
+    // DWARF v4 range/location lists. rustc emits `.debug_ranges` /
+    // `.debug_loc` (v4) rather than `.debug_rnglists` / `.debug_loclists`
+    // (v5) for wasm targets under the default debug format, and inlined
+    // subroutines with non-contiguous address ranges (LTO splits, opt-level
+    // reordering) carry `DW_AT_ranges` pointing here. Omitting these left
+    // `die_ranges` with nothing to resolve, so every v4 inline chain came
+    // back empty and the branch fell through to its leaf line record — the
+    // `wit_bindgen_cabi_realloc.rs` mis-attribution in gale #179.
+    debug_ranges: &'a [u8],
+    debug_loc: &'a [u8],
 }
 
 fn extract_dwarf_sections(wasm_bytes: &[u8]) -> Option<DwarfSections<'_>> {
@@ -198,12 +226,35 @@ fn extract_dwarf_sections(wasm_bytes: &[u8]) -> Option<DwarfSections<'_>> {
                     out.debug_loclists = data;
                     found_any = true;
                 }
+                ".debug_ranges" => {
+                    out.debug_ranges = data;
+                    found_any = true;
+                }
+                ".debug_loc" => {
+                    out.debug_loc = data;
+                    found_any = true;
+                }
                 _ => {}
             }
         }
     }
 
     if found_any { Some(out) } else { None }
+}
+
+/// File offset of the start of the Code section's contents. rustc/LLVM
+/// emit DWARF line + range addresses relative to this point, while walrus
+/// reports each instruction's `byte_offset` as its absolute position in
+/// the module file; the difference is exactly this offset. Returns `None`
+/// for a module with no Code section (nothing to attribute anyway).
+fn code_section_offset(wasm_bytes: &[u8]) -> Option<u64> {
+    let parser = wasmparser::Parser::new(0);
+    for payload in parser.parse_all(wasm_bytes) {
+        if let Ok(wasmparser::Payload::CodeSectionStart { range, .. }) = payload {
+            return u64::try_from(range.start).ok();
+        }
+    }
+    None
 }
 
 /// `address` here is the raw address from DWARF's line program. For Wasm
@@ -221,10 +272,26 @@ pub(crate) struct LineLocation {
     pub(crate) line: u32,
 }
 
-fn build_line_map(sections: &DwarfSections<'_>) -> std::result::Result<LineMap, gimli::Error> {
+/// A line map plus the highest address the line program covers. The
+/// bound is the maximum `end_sequence` row address across all units — the
+/// end of the last code range DWARF describes. `lookup_line` clamps any
+/// query past it to the final row (largest-row-≤-query), so a branch whose
+/// rebased offset lands beyond `covered_max` is silently mis-attributed
+/// rather than resolved; callers use this to *count* such branches and
+/// warn instead of trusting the clamp (the gale #179 failure mode,
+/// surfaced per REQ-064's no-silent-degradation rule).
+struct LineMapWithBound {
+    map: LineMap,
+    covered_max: u64,
+}
+
+fn build_line_map(
+    sections: &DwarfSections<'_>,
+) -> std::result::Result<LineMapWithBound, gimli::Error> {
     let dwarf = build_dwarf(sections);
     let mut units = dwarf.units();
     let mut out: LineMap = BTreeMap::new();
+    let mut covered_max: u64 = 0;
 
     while let Some(header) = units.next()? {
         let unit = dwarf.unit(header)?;
@@ -235,6 +302,9 @@ fn build_line_map(sections: &DwarfSections<'_>) -> std::result::Result<LineMap, 
         };
         let mut rows = lp.rows();
         while let Some((header, row)) = rows.next_row()? {
+            // `end_sequence` rows carry no line but mark the end of a code
+            // range — the true upper bound of what the line table covers.
+            covered_max = covered_max.max(row.address());
             if row.end_sequence() {
                 continue;
             }
@@ -253,7 +323,10 @@ fn build_line_map(sections: &DwarfSections<'_>) -> std::result::Result<LineMap, 
             out.insert(row.address(), LineLocation { file, line });
         }
     }
-    Ok(out)
+    Ok(LineMapWithBound {
+        map: out,
+        covered_max,
+    })
 }
 
 fn build_dwarf<'a>(s: &DwarfSections<'a>) -> gimli::Dwarf<EndianSlice<'a, LittleEndian>> {
@@ -272,11 +345,11 @@ fn build_dwarf<'a>(s: &DwarfSections<'a>) -> gimli::Dwarf<EndianSlice<'a, Little
         )),
         debug_types: gimli::DebugTypes::new(&[], endian),
         locations: gimli::LocationLists::new(
-            gimli::DebugLoc::new(&[], endian),
+            gimli::DebugLoc::new(s.debug_loc, endian),
             gimli::DebugLocLists::new(s.debug_loclists, endian),
         ),
         ranges: gimli::RangeLists::new(
-            gimli::DebugRanges::new(&[], endian),
+            gimli::DebugRanges::new(s.debug_ranges, endian),
             gimli::DebugRngLists::new(s.debug_rnglists, endian),
         ),
         file_type: gimli::DwarfFileType::Main,
@@ -326,12 +399,26 @@ type DecisionGroups = (
     Vec<Decision>,
     BTreeMap<u32, InlineContext>,
     BTreeMap<u32, Vec<InlineContext>>,
+    // Count of branches whose rebased offset fell beyond `line_table_max`
+    // (clamped, unreliable attribution — gale #179).
+    u32,
 );
 
 fn group_into_decisions(
     branches: &[BranchEntry],
     line_map: &LineMap,
     inline_map: &InlineMap,
+    // File offset of the Code section's contents, subtracted from each
+    // branch's file-absolute `byte_offset` to reach DWARF address space.
+    // The DWARF reconstruction path passes the real code-section start;
+    // the V3 source-map path (whose offsets are already in the map's own
+    // space) and the unit tests pass 0.
+    code_base: u64,
+    // Highest address the line table covers (max `end_sequence`). A rebased
+    // branch offset `>= line_table_max` is past all code DWARF describes, so
+    // `lookup_line` would clamp it to the final row — counted, not trusted.
+    // Callers with no bound (V3 map, unit tests) pass `u64::MAX` to disable.
+    line_table_max: u64,
 ) -> DecisionGroups {
     // Step 1: resolve each br_if's (function, file, line). Side-output
     // a per-branch `branch_id → InlineContext` map for everything
@@ -349,11 +436,30 @@ fn group_into_decisions(
     // v0.14.0 — full call chain per branch, in addition to the
     // single-hop leaf context. Same keyset as branch_inline_contexts.
     let mut branch_inline_chains: BTreeMap<u32, Vec<InlineContext>> = BTreeMap::new();
+    let mut clamped_branches: u32 = 0;
     for entry in branches {
         let Some(byte_offset) = entry.byte_offset else {
             continue;
         };
-        let addr = u64::from(byte_offset);
+        // walrus records `byte_offset` as the instruction's absolute
+        // position in the original module file (wasmparser operator
+        // offset). DWARF line-program and inlined-subroutine addresses,
+        // by contrast, are relative to the start of the Code section's
+        // contents. Rebase into DWARF space before every lookup, or the
+        // file-absolute offset falls past the last line-table row and
+        // `lookup_line` silently clamps to it (this is the gale #179
+        // `wit_bindgen_cabi_realloc.rs` mis-attribution — every branch
+        // pinned to the final line-map entry).
+        let addr = u64::from(byte_offset).saturating_sub(code_base);
+        // Guard against the clamp itself: an address past everything the
+        // line table covers would resolve to the final row (largest-row-
+        // ≤-query), a silently-wrong file/line. Count it and skip so the
+        // manifest can warn (REQ-064) instead of shipping the artifact —
+        // this is the tripwire that would have caught #179 immediately.
+        if addr >= line_table_max {
+            clamped_branches = clamped_branches.saturating_add(1);
+            continue;
+        }
         let Some(loc) = lookup_line(line_map, addr) else {
             continue;
         };
@@ -517,7 +623,12 @@ fn group_into_decisions(
         next_decision_id = next_decision_id.saturating_add(1);
     }
 
-    (out, branch_inline_contexts, branch_inline_chains)
+    (
+        out,
+        branch_inline_contexts,
+        branch_inline_chains,
+        clamped_branches,
+    )
 }
 
 /// v0.13.0 — pick the most-common `InlineContext` across the given
@@ -863,6 +974,34 @@ mod tests {
         );
     }
 
+    /// gale #179 guard: rustc emits DWARF v4 range lists in `.debug_ranges`
+    /// for wasm, and `build_inline_map` needs them to resolve any inlined
+    /// subroutine whose address range is non-contiguous (`DW_AT_ranges`).
+    /// Dropping the `.debug_ranges` extraction silently empties every such
+    /// inline chain (the manifest-level symptom is verified end-to-end in
+    /// `tests/inline_attribution_e2e.rs`; this unit test pins the section
+    /// wiring so a refactor can't quietly remove it). The fixture is the
+    /// same DWARF-v4 module the e2e test instruments.
+    #[test]
+    fn extract_dwarf_captures_v4_debug_ranges() {
+        let wasm = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/inline_chain_v4.wasm"),
+        )
+        .expect("read the inline_chain_v4 fixture");
+        let sections = extract_dwarf_sections(&wasm).expect("fixture carries DWARF");
+        assert!(
+            !sections.debug_ranges.is_empty(),
+            "`.debug_ranges` (DWARF v4) was not extracted — inline chains for \
+             non-contiguous inlined subroutines would be dropped (gale #179)"
+        );
+        // And the code section base the rebase depends on is discoverable.
+        assert!(
+            code_section_offset(&wasm).is_some_and(|b| b > 0),
+            "code-section offset must be found and non-zero for this fixture"
+        );
+    }
+
     /// Group two artificial entries with the same (file, line) into a
     /// single Decision. Direct test of `group_into_decisions` so we don't
     /// require an actual DWARF input here — that's covered by an
@@ -885,7 +1024,8 @@ mod tests {
             },
         );
         let entries = vec![entry_with_offset(0, 10), entry_with_offset(1, 20)];
-        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &InlineMap::new(), 0, u64::MAX);
         assert_eq!(
             decisions.len(),
             1,
@@ -914,7 +1054,8 @@ mod tests {
             },
         );
         let entries = vec![entry_with_offset(0, 10), entry_with_offset(1, 20)];
-        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &InlineMap::new(), 0, u64::MAX);
         assert!(
             decisions.is_empty(),
             "two singletons on different lines → no Decision (strict-per-br_if applies)"
@@ -942,7 +1083,8 @@ mod tests {
         a.function_index = 0;
         let mut b = entry_with_offset(1, 20);
         b.function_index = 1;
-        let (decisions, _, _) = group_into_decisions(&[a, b], &line_map, &InlineMap::new());
+        let (decisions, _, _, _) =
+            group_into_decisions(&[a, b], &line_map, &InlineMap::new(), 0, u64::MAX);
         // Same line, different functions → no shared decision.
         assert!(
             decisions.is_empty(),
@@ -990,7 +1132,8 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &InlineMap::new(), 0, u64::MAX);
         assert_eq!(
             decisions.len(),
             1,
@@ -1042,7 +1185,8 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &InlineMap::new(), 0, u64::MAX);
         assert_eq!(
             decisions.len(),
             2,
@@ -1133,8 +1277,8 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, branch_inline_contexts, _) =
-            group_into_decisions(&entries, &line_map, &inline_map);
+        let (decisions, branch_inline_contexts, _, _) =
+            group_into_decisions(&entries, &line_map, &inline_map, 0, u64::MAX);
         assert_eq!(
             decisions.len(),
             1,
@@ -1211,7 +1355,8 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &inline_map);
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &inline_map, 0, u64::MAX);
         assert_eq!(decisions.len(), 1);
         let label = decisions[0]
             .inline_context
@@ -1244,7 +1389,8 @@ mod tests {
             entry_with_offset(2, 30),
             entry_with_offset(3, 40),
         ];
-        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &InlineMap::new(), 0, u64::MAX);
         assert_eq!(
             decisions.len(),
             1,
@@ -1284,7 +1430,8 @@ mod tests {
             entry_with_kind(1, 100, BranchKind::IfElse),
             entry_with_kind(2, 104, BranchKind::BrIf),
         ];
-        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &InlineMap::new(), 0, u64::MAX);
         assert_eq!(
             decisions.len(),
             1,
@@ -1313,7 +1460,8 @@ mod tests {
             },
         );
         let entries = vec![entry_with_kind(0, 50, BranchKind::IfThen)];
-        let (decisions, _, _) = group_into_decisions(&entries, &line_map, &InlineMap::new());
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &InlineMap::new(), 0, u64::MAX);
         assert!(
             decisions.is_empty(),
             "singleton IfThen → no Decision (cluster.len() >= 2 gate holds)"
