@@ -1756,6 +1756,7 @@ mod tests {
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -1816,6 +1817,7 @@ mod tests {
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -1868,6 +1870,7 @@ mod tests {
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let harness_cmd = r#"cat > "$WITNESS_OUTPUT" <<'EOF'
@@ -1930,6 +1933,7 @@ EOF"#;
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -1986,6 +1990,7 @@ EOF"#;
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let options = RunOptions {
@@ -2046,6 +2051,7 @@ EOF"#;
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -2124,6 +2130,7 @@ EOF"#
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -2196,6 +2203,7 @@ EOF"#;
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -2292,6 +2300,7 @@ EOF"#;
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -2392,6 +2401,7 @@ EOF"#;
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
@@ -2429,6 +2439,7 @@ EOF"#;
             branch_inline_chains: std::collections::BTreeMap::new(),
 
             attribution_source: Default::default(),
+            clamped_branches: 0,
         };
         let manifest_path = dir.path().join("manifest.json");
         let module_path = dir.path().join("prog.wasm");

@@ -28,6 +28,15 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   Together these make v0.41's outermost-frame rule (REQ-065) actually fire on real
   drivers. (#179, REQ-068.)
 
+- **New silent-degradation tripwire (REQ-064 family).** Because the clamp above was
+  invisible in every output, witness now counts branches whose rebased offset still
+  falls past the DWARF line table's covered range and raises
+  `ManifestWarning::BranchesOutsideLineTable{count}` — *"N branches fell outside the
+  line table and were clamped; per-file rollups are suspect (the function-level and
+  per-condition counts are not)."* Had this existed, #179 would have announced itself
+  instead of shipping a plausible file column. Silent on healthy modules
+  (`clamped_branches=0` on hm-thin, inline_chain_v4, prov396). (#179, REQ-068.)
+
 **Falsification statement.** A committed DWARF-v4 fixture (`inline_chain_v4.wasm`, the
 inlined-`decide` wrapper shape) is instrumented each run; the test fails unless the
 decision lands on `lib.rs` and `branch_inline_chains` is non-empty with every frame in

@@ -408,6 +408,19 @@ pub struct Manifest {
     /// unchanged.
     #[serde(default, skip_serializing_if = "is_attribution_none")]
     pub attribution_source: crate::decisions::AttributionSource,
+
+    /// Count of branches whose rebased byte offset fell beyond the DWARF
+    /// line table's covered range during reconstruction. Each would clamp
+    /// to the final line-table row (a silently-wrong file/line), so a
+    /// non-zero value means the per-file attribution is unreliable and
+    /// `warnings()` raises `BranchesOutsideLineTable`. Zero (the healthy
+    /// case) is skipped; pre-v0.43 manifests deserialise unchanged.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub clamped_branches: u32,
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 fn is_attribution_none(s: &crate::decisions::AttributionSource) -> bool {
@@ -463,6 +476,17 @@ impl Manifest {
         {
             w.push(ManifestWarning::AdapterOnlyDwarf);
         }
+        // Branches whose rebased offset fell outside the DWARF line table
+        // were clamped to the final row during reconstruction — their
+        // per-file attribution is silently wrong. This is the tripwire for
+        // the gale #179 failure mode: had it existed, the offset-domain bug
+        // would have announced itself instead of shipping a plausible-
+        // looking file column pinned to `wit_bindgen_cabi_realloc.rs`.
+        if self.clamped_branches > 0 {
+            w.push(ManifestWarning::BranchesOutsideLineTable {
+                count: self.clamped_branches,
+            });
+        }
         w
     }
 }
@@ -478,6 +502,11 @@ pub enum ManifestWarning {
     /// `attribution_source == dwarf`, but no decision is attributed to real user
     /// code — every one is meld's synthetic `<meld-adapter>` unit.
     AdapterOnlyDwarf,
+    /// `count` branches had a byte offset past everything the DWARF line
+    /// table covers; each was clamped to the final row, so its
+    /// `source_file`/`source_line` is unreliable. Usually an offset-domain
+    /// mismatch between the instrumented module and its DWARF (gale #179).
+    BranchesOutsideLineTable { count: u32 },
 }
 
 /// Locate a V3 source-map for `input` and return its bytes if any.
@@ -797,6 +826,7 @@ fn instrument_file_impl(input: &Path, output: &Path, in_place: bool) -> Result<(
     let branch_inline_contexts = reconstruction.branch_inline_contexts;
     let branch_inline_chains = reconstruction.branch_inline_chains;
     let attribution_source = reconstruction.attribution_source;
+    let clamped_branches = reconstruction.clamped_branches;
     // v0.8: classify each decision's chain direction (And/Or/Mixed/Unknown)
     // using the per-branch hints captured during instrument_module.
     apply_chain_kinds(&mut decisions);
@@ -816,6 +846,7 @@ fn instrument_file_impl(input: &Path, output: &Path, in_place: bool) -> Result<(
         branch_inline_contexts,
         branch_inline_chains,
         attribution_source,
+        clamped_branches,
     };
     let manifest_path = Manifest::path_for(output);
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(Error::Serde)?;
@@ -2401,7 +2432,37 @@ mod tests {
             branch_inline_contexts: Default::default(),
             branch_inline_chains: Default::default(),
             attribution_source: attr,
+            clamped_branches: 0,
         }
+    }
+
+    #[test]
+    fn warns_branches_outside_line_table() {
+        use crate::decisions::AttributionSource;
+        let b = BranchEntry {
+            id: 0,
+            function_index: 0,
+            function_name: Some("f".into()),
+            function_display: Some("f".into()),
+            kind: BranchKind::BrIf,
+            instr_index: 0,
+            target_index: None,
+            byte_offset: Some(0),
+            seq_debug: String::new(),
+        };
+        let mut m = wmanifest(vec![b], vec![], AttributionSource::Dwarf);
+        // Healthy by default — no clamp warning.
+        assert!(
+            !m.warnings()
+                .iter()
+                .any(|w| matches!(w, ManifestWarning::BranchesOutsideLineTable { .. }))
+        );
+        // Reconstruction found 3 branches past the line table → warn.
+        m.clamped_branches = 3;
+        assert!(
+            m.warnings()
+                .contains(&ManifestWarning::BranchesOutsideLineTable { count: 3 })
+        );
     }
 
     #[test]

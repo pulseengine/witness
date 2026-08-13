@@ -851,13 +851,18 @@ artifacts:
       decisions::tests::extract_dwarf_captures_v4_debug_ranges unit test pins the
       `.debug_ranges` wiring the non-contiguous-inline path needs. The real hm-thin
       case (both wasm32-unknown-unknown and wasm32-wasip1, different code bases) was
-      manually confirmed: decision 0 → lib.rs, decision 1 stays library. (REQ-068 / #179.)
+      manually confirmed: decision 0 → lib.rs, decision 1 stays library. The clamp
+      tripwire is covered by instrument::tests::warns_branches_outside_line_table
+      (clamped_branches>0 → ManifestWarning::BranchesOutsideLineTable) and confirmed
+      silent on the healthy fixtures (inline_chain_v4, prov396, hm-thin all report
+      clamped_branches=0). (REQ-068 / #179.)
     tags: [verification, report, attribution, dwarf, dogfooding]
     fields:
       method: automated-test
       steps:
         - run: cargo test -p witness-mcdc-core --test inline_attribution_e2e
         - run: cargo test -p witness-mcdc-core --lib decisions::tests::extract_dwarf_captures_v4_debug_ranges
+        - run: cargo test -p witness-mcdc-core --lib instrument::tests::warns_branches_outside_line_table
     links:
       - type: verifies
         target: REQ-068

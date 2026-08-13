@@ -1247,7 +1247,11 @@ artifacts:
       clamped to it. Witness shall extract the v4 sections and subtract the
       Code-section start (wasmparser CodeSectionStart) before every DWARF lookup, so
       decisions attribute to user source and inline chains populate — making REQ-065
-      real. (Issue #179.)
+      real. And because the clamp was *silent* (the exact class REQ-064 warns about),
+      any branch whose rebased offset still lands past the line table's covered range
+      shall raise `ManifestWarning::BranchesOutsideLineTable{count}` — the tripwire
+      that would have surfaced this immediately instead of shipping a plausible file
+      column pinned to the last row. (Issue #179.)
     tags: [report, attribution, dwarf, dogfooding]
     fields:
       priority: must

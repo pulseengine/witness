@@ -692,6 +692,23 @@ fn main() -> Result<()> {
                                 );
                                 eprintln!("         source attribution.");
                             }
+                            ManifestWarning::BranchesOutsideLineTable { count } => {
+                                eprintln!(
+                                    "warning: {count} branch(es) fell outside the DWARF line table and were"
+                                );
+                                eprintln!(
+                                    "         clamped to the last row — their source file/line is unreliable."
+                                );
+                                eprintln!(
+                                    "         This is an offset-domain mismatch between the module and its"
+                                );
+                                eprintln!(
+                                    "         DWARF (the gale #179 class). Per-file rollups are suspect; the"
+                                );
+                                eprintln!(
+                                    "         function-level (name-section) and per-condition counts are not."
+                                );
+                            }
                         }
                     }
                 }
