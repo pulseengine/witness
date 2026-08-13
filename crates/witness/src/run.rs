@@ -344,7 +344,7 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
                 && let Some((_, iface_idx)) = instance.get_export(&mut store, None, iface)
                 && let Some((item, func_idx)) =
                     instance.get_export(&mut store, Some(&iface_idx), fname)
-                && let Some(f) = instance.get_func(&mut store, &func_idx)
+                && let Some(f) = instance.get_func(&mut store, func_idx)
             {
                 let n_res =
                     if let wasmtime::component::types::ComponentItem::ComponentFunc(ft) = item {
@@ -1667,7 +1667,10 @@ mod tests {
         let record = RunRecord::load(&out).unwrap();
         assert_eq!(record.invoked, vec!["test:pkg/iface@1.0.0#run".to_string()]);
         let total: u64 = record.branches.iter().map(|b| b.hits).sum();
-        assert!(total >= 1, "the branch inside the exported instance must count");
+        assert!(
+            total >= 1,
+            "the branch inside the exported instance must count"
+        );
     }
 
     /// Issue #107 (DEC-043) — `--invoke-with-args` must address WIT-style
