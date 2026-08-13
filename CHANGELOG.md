@@ -7,6 +7,31 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-08-13
+
+Headline: **`--stub-imports` is actually usable** — the component backend now resolves
+functions inside exported interface instances.
+
+### Fixed
+
+- On `--backend-wasmtime-component`, `--invoke <name>` did a flat top-level `get_func`,
+  so no WIT-interface export ever resolved — the common shape exports an *interface
+  instance* (`export gust:switch/fsm@0.1.0`), addressed `pkg:ns/iface@ver#func`. That
+  made v0.41's `--stub-imports` (#180) unreachable: the import side worked, then export
+  lookup failed on every name form. The backend now strips any `=args` suffix, tries a
+  flat func, then splits on the last `#` and **descends into the exported instance**
+  (`get_export(None, iface)` → `get_export(Some(iface), func)` → `get_func`), taking the
+  result arity from the resolved `ComponentFunc` type. (#194, REQ-067.)
+
+**Falsification statement.** A regression test instruments a component that exports an
+interface instance and invokes `test:pkg/iface@1.0.0#run`; it fails if the descent
+regresses (the export goes back to "not found") or the branch inside the instance stops
+counting. Live-verified on gale's `switch-thin` exported-instance shape.
+
+_Known: #179 (per-file attribution of decisions behind wit-bindgen cabi wrappers) remains
+open — hm-thin has no DWARF inline chain to walk, so it needs a separate rollup-attribution
+decision, tracked on the issue._
+
 ## [0.41.0] — 2026-08-12
 
 Headline: **gale MC/DC evidence, part 2** — attribute decisions to the user's own
