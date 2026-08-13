@@ -328,11 +328,40 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
 
     let mut invoked: Vec<String> = Vec::new();
     let mut counter_values: HashMap<u32, u64> = HashMap::new();
-    for name in &options.invoke {
-        let func = instance
-            .get_func(&mut store, name.as_str())
-            .ok_or_else(|| Error::Runtime(anyhow::anyhow!("export `{name}` not found")))?;
-        let n_res = result_counts.get(name).copied().unwrap_or(0);
+    for raw in &options.invoke {
+        // The component backend is no-arg (v1); drop any `=args` suffix the core
+        // backend uses. Then resolve the export: a bare top-level function, or —
+        // the common WIT case — a function *inside an exported interface instance*
+        // named `pkg:ns/iface@ver#func` (e.g. `gust:switch/fsm@0.1.0#frame-check`).
+        // #194: the old flat `get_func` never descended into the instance, so no
+        // WIT-interface export ever resolved and `--stub-imports` was unreachable.
+        let name = raw.split('=').next().unwrap_or(raw);
+        let (func, n_res) = 'resolve: {
+            if let Some(f) = instance.get_func(&mut store, name) {
+                break 'resolve Some((f, result_counts.get(name).copied().unwrap_or(0)));
+            }
+            if let Some((iface, fname)) = name.rsplit_once('#')
+                && let Some((_, iface_idx)) = instance.get_export(&mut store, None, iface)
+                && let Some((item, func_idx)) =
+                    instance.get_export(&mut store, Some(&iface_idx), fname)
+                && let Some(f) = instance.get_func(&mut store, &func_idx)
+            {
+                let n_res =
+                    if let wasmtime::component::types::ComponentItem::ComponentFunc(ft) = item {
+                        ft.results().len()
+                    } else {
+                        0
+                    };
+                break 'resolve Some((f, n_res));
+            }
+            None
+        }
+        .ok_or_else(|| {
+            Error::Runtime(anyhow::anyhow!(
+                "export `{name}` not found — for the component backend, name a function \
+                 inside an exported interface as `pkg:ns/iface@ver#func`"
+            ))
+        })?;
         let mut results = vec![wasmtime::component::Val::Bool(false); n_res];
         let err = match func.call(&mut store, &[], &mut results) {
             Ok(()) => {
@@ -351,7 +380,7 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
             })?;
         // `Instance` is Copy; collect to release the borrow on `err`/`dump`.
         let insts: Vec<wasmtime::Instance> = dump.instances().to_vec();
-        invoked.push(name.clone());
+        invoked.push(name.to_string());
         // Counters are cumulative globals; read after each call (last wins).
         for branch in &manifest.branches {
             let gname = format!("{COUNTER_EXPORT_PREFIX}{}", branch.id);
@@ -1588,6 +1617,57 @@ mod tests {
             total >= 1,
             "the taken branch arm must register a hit via the coredump (got {total})"
         );
+    }
+
+    // #194 — the real WIT shape: functions live inside an *exported interface
+    // instance* (`export test:pkg/iface@1.0.0`), not at the top level. The flat
+    // `get_func` never descended into the instance, so `--invoke
+    // 'pkg:ns/iface@ver#func'` returned "export not found" and `--stub-imports`
+    // was unreachable. This asserts the descent resolves and counters flow.
+    #[test]
+    fn component_backend_resolves_func_inside_exported_instance() {
+        let comp_wat = r#"
+            (component
+              (core module $m
+                (global $g (mut i32) (i32.const 1))
+                (func (export "run") (result i32)
+                  global.get $g
+                  if (result i32) i32.const 1 else i32.const 0 end))
+              (core instance $mi (instantiate $m))
+              (func $run (result u32) (canon lift (core func $mi "run")))
+              (instance $iface (export "run" (func $run)))
+              (export "test:pkg/iface@1.0.0" (instance $iface))
+            )
+        "#;
+        let comp = wat::parse_str(comp_wat).expect("valid component wat");
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("c.wasm");
+        let inst = dir.path().join("c-inst.wasm");
+        let out = dir.path().join("run.json");
+        std::fs::write(&src, &comp).unwrap();
+        witness_core::instrument::instrument_file_in_place(&src, &inst)
+            .expect("instrument --in-place");
+
+        let manifest = witness_core::instrument::Manifest::path_for(&inst);
+        let options = RunOptions {
+            module: &inst,
+            manifest,
+            output: &out,
+            // The func is inside the exported instance — addressed via `iface#func`.
+            invoke: vec!["test:pkg/iface@1.0.0#run".to_string()],
+            invoke_with_args: vec![],
+            call_start: false,
+            invoke_all: false,
+            harness: None,
+            component_backend: true,
+            stub_imports: None,
+        };
+        run_module(&options).expect("component backend must resolve iface#func, not error");
+
+        let record = RunRecord::load(&out).unwrap();
+        assert_eq!(record.invoked, vec!["test:pkg/iface@1.0.0#run".to_string()]);
+        let total: u64 = record.branches.iter().map(|b| b.hits).sum();
+        assert!(total >= 1, "the branch inside the exported instance must count");
     }
 
     /// Issue #107 (DEC-043) — `--invoke-with-args` must address WIT-style

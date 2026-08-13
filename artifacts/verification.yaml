@@ -819,3 +819,22 @@ artifacts:
         target: REQ-066
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-067
+    type: test-case
+    title: Component backend resolves a func inside an exported interface instance
+    description: >
+      run::tests::component_backend_resolves_func_inside_exported_instance instruments
+      a component that exports an interface instance (test:pkg/iface@1.0.0 with a func
+      inside), runs the backend with --invoke 'test:pkg/iface@1.0.0#run', and asserts
+      it resolves (not "export not found") and counters flow. Live-verified on gale's
+      switch-thin shape too. (REQ-067 / #194.)
+    tags: [verification, run, component]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc --lib run::tests::component_backend_resolves_func_inside_exported_instance
+    links:
+      - type: verifies
+        target: REQ-067
+      - type: produced-by
+        target: AS-001
