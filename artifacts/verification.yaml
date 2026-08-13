@@ -838,3 +838,28 @@ artifacts:
         target: REQ-067
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-068
+    type: test-case
+    title: DWARF-v4 inlined decision attributes to user source, not generated glue
+    description: >
+      inline_attribution_e2e::inlined_decision_attributes_to_user_source_not_glue
+      instruments a committed DWARF-v4 fixture (inline_chain_v4.wasm — a `run` that
+      inlines a boolean `decide` at two sites, the #179 wrapper shape) and asserts the
+      reconstructed decision lands on the user source (lib.rs) and branch_inline_chains
+      is non-empty with every frame naming lib.rs — not a stdlib/glue file. Falsified
+      both ways: neutering the code-section rebase empties the chains, and the
+      decisions::tests::extract_dwarf_captures_v4_debug_ranges unit test pins the
+      `.debug_ranges` wiring the non-contiguous-inline path needs. The real hm-thin
+      case (both wasm32-unknown-unknown and wasm32-wasip1, different code bases) was
+      manually confirmed: decision 0 → lib.rs, decision 1 stays library. (REQ-068 / #179.)
+    tags: [verification, report, attribution, dwarf, dogfooding]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --test inline_attribution_e2e
+        - run: cargo test -p witness-mcdc-core --lib decisions::tests::extract_dwarf_captures_v4_debug_ranges
+    links:
+      - type: verifies
+        target: REQ-068
+      - type: produced-by
+        target: AS-001
