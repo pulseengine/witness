@@ -7,6 +7,13 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-08-19
+
+Headline: **gale #179 — MC/DC decisions behind wit-bindgen cabi wrappers now
+attribute to the user's own code**, and a silent-clamp tripwire so a future
+offset-domain mismatch announces itself instead of shipping a plausible-but-wrong
+per-file column.
+
 ### Fixed
 
 - **gale #179 — decisions behind wit-bindgen cabi wrappers now attribute to user
