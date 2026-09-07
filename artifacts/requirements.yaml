@@ -1309,3 +1309,29 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+  - id: REQ-071
+    release: v0.44.0
+    type: requirement
+    title: Decision grouping is independent of instruction order
+    status: implemented
+    description: >
+      mcdc-json decision reconstruction was layout-sensitive: unrelated linked
+      code reshuffled the scored decision inventory (synth measured 26->21
+      scored / 6->3 fully-proved with a byte-for-byte identical per-function
+      branch population; #208). One mechanical cause: the greedy line-span
+      cluster walk consumed branches in INSTRUCTION order, so a non-monotone
+      line sequence (basic-block reordering, which shifts with unrelated code)
+      flushed clusters differently for the same resolved lines. Witness shall
+      sort each (function, file) bucket by (source line, branch id) before
+      clustering, making the grouping a function of the resolved lines alone.
+      This does not close #208 — the resolved lines themselves still move with
+      inlining decisions, and single-branch clusters are still dropped by the
+      >=2 gate (a both-ways-executed branch can be scored in no decision);
+      those remain open there. (Issue #208, partial.)
+    tags: [report, reconstruction, stability]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001

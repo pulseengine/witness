@@ -27,6 +27,14 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   files by hand (scry's 0-of-12 audit). Consumers matching on bare basenames
   should switch to suffix matches; LCOV `SF:` records inherit the fuller
   paths. (REQ-070)
+- **#208 (partial) — decision grouping no longer depends on instruction
+  order.** The greedy line-span cluster walk consumed branches in instruction
+  order, so basic-block reordering (which shifts with unrelated linked code)
+  clustered the same resolved lines differently. Each `(function, file)`
+  bucket is now sorted by `(line, branch id)` before clustering. The rest of
+  #208 stays open: resolved lines still move with inlining decisions, and a
+  lone branch on its line is still dropped by the ≥2-condition gate.
+  (REQ-071)
 
 ## [0.43.0] — 2026-08-19
 

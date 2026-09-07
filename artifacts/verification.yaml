@@ -912,3 +912,23 @@ artifacts:
         target: REQ-070
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-071
+    type: test-case
+    title: Interleaved line sequences cluster identically to monotone ones
+    description: >
+      decisions::tests::group_into_decisions_is_instruction_order_independent
+      resolves three branches whose instruction order visits lines 40, 60, 41
+      — pre-fix the greedy walk flushed three dropped singletons (zero
+      decisions); line-sorted, 40+41 form one two-condition decision.
+      Falsified two-sided: removing the sort fails the assertion, restoring
+      it passes. (REQ-071 / #208.)
+    tags: [verification, report, reconstruction]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --lib decisions::tests::group_into_decisions_is_instruction_order_independent
+    links:
+      - type: verifies
+        target: REQ-071
+      - type: produced-by
+        target: AS-001
