@@ -251,7 +251,8 @@ fn code_section_offset(wasm_bytes: &[u8]) -> Option<u64> {
     let parser = wasmparser::Parser::new(0);
     for payload in parser.parse_all(wasm_bytes) {
         if let Ok(wasmparser::Payload::CodeSectionStart { range, .. }) = payload {
-            return u64::try_from(range.start).ok();
+            // wasmparser 0.258 — payload ranges are already `Range<u64>`.
+            return Some(range.start);
         }
     }
     None
