@@ -1265,7 +1265,7 @@ artifacts:
     release: v0.44.0
     type: requirement
     title: Refuse to instrument past the WebAssembly global limit instead of emitting an invalid module
-    status: implemented
+    status: verified
     description: >
       `witness instrument` allocates three mutable globals per branch (the i64
       hit counter plus the per-row brval/brcnt pair). On a large enough module
@@ -1289,7 +1289,7 @@ artifacts:
     release: v0.44.0
     type: requirement
     title: Report directory-qualified source paths so decisions are crate-attributable
-    status: implemented
+    status: verified
     description: >
       Decisions and inline frames carried only the DWARF file entry's bare
       path_name — for rustc output a basename, so a report's `mod.rs`/`lib.rs`
@@ -1313,7 +1313,7 @@ artifacts:
     release: v0.44.0
     type: requirement
     title: Decision grouping is independent of instruction order
-    status: implemented
+    status: verified
     description: >
       mcdc-json decision reconstruction was layout-sensitive: unrelated linked
       code reshuffled the scored decision inventory (synth measured 26->21
