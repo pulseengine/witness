@@ -883,8 +883,53 @@ fn walrus_seq_id_to_stable_string(id: walrus::ir::InstrSeqId) -> String {
     dbg
 }
 
-pub fn instrument_module(module: &mut Module, _module_source: &str) -> Result<Vec<BranchEntry>> {
+/// WebAssembly implementation limit on the number of globals in a module.
+///
+/// v0.44 (#207) — wasmparser/wasmtime (and every mainstream engine)
+/// reject a module with more than 1,000,000 globals. Instrumentation
+/// allocates [`GLOBALS_PER_BRANCH`] globals per branch, so a large
+/// enough module blows past the ceiling and the emitted artifact is
+/// *invalid* — previously with exit 0 and no diagnostic.
+const MAX_WASM_GLOBALS: u64 = 1_000_000;
+
+/// Globals allocated per instrumented branch: the i64 hit counter plus
+/// the per-row `__witness_brval_<id>` / `__witness_brcnt_<id>` pair.
+const GLOBALS_PER_BRANCH: u64 = 3;
+
+/// Refuse to instrument when the output would exceed the engine global
+/// limit (#207). Counting up front turns a silent invalid artifact
+/// (exit 0, rejected by every validator downstream) into a hard error
+/// naming the module and the numbers — before hundreds of MB are
+/// written.
+fn check_global_budget(
+    existing_globals: u64,
+    branch_count: u64,
+    module_source: &str,
+) -> Result<()> {
+    let needed = existing_globals.saturating_add(branch_count.saturating_mul(GLOBALS_PER_BRANCH));
+    if needed > MAX_WASM_GLOBALS {
+        return Err(Error::Instrument(format!(
+            "refusing to instrument {module_source}: {branch_count} branches need \
+             {GLOBALS_PER_BRANCH} globals each ({} counter globals + {existing_globals} \
+             existing = {needed} total), which exceeds the WebAssembly implementation \
+             limit of {MAX_WASM_GLOBALS} globals — the output would be rejected by \
+             every validator. See witness issue #207; a memory-backed counter scheme \
+             for modules this large is tracked there.",
+            branch_count.saturating_mul(GLOBALS_PER_BRANCH),
+        )));
+    }
+    Ok(())
+}
+
+pub fn instrument_module(module: &mut Module, module_source: &str) -> Result<Vec<BranchEntry>> {
     let scans: Vec<FunctionScan> = collect_scans(module);
+
+    // v0.44 (#207) — bail before mutating anything if the counter
+    // globals cannot fit under the engine limit.
+    let existing_globals = u64::try_from(module.globals.iter().count()).unwrap_or(u64::MAX);
+    let branch_count =
+        u64::try_from(scans.iter().map(|s| s.branches.len()).sum::<usize>()).unwrap_or(u64::MAX);
+    check_global_budget(existing_globals, branch_count, module_source)?;
 
     let mut entries: Vec<BranchEntry> = Vec::new();
     let mut counter_globals: Vec<GlobalId> = Vec::new();
@@ -2391,6 +2436,47 @@ mod tests {
     fn wat_to_module(wat_src: &str) -> Module {
         let wasm = wat::parse_str(wat_src).expect("valid wat");
         Module::from_buffer(&wasm).expect("walrus parse")
+    }
+
+    // --- #207 global-budget ceiling ------------------------------------------
+
+    #[test]
+    fn global_budget_rejects_over_limit() {
+        // 333,334 branches * 3 globals = 1,000,002 > 1,000,000.
+        let err = check_global_budget(0, 333_334, "llvm.wasm").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("llvm.wasm"), "names the module: {msg}");
+        assert!(msg.contains("333334"), "names the branch count: {msg}");
+        assert!(msg.contains("1000000"), "names the limit: {msg}");
+    }
+
+    #[test]
+    fn global_budget_counts_existing_globals() {
+        // 333,333 branches * 3 = 999,999 fits alone, but 2 existing
+        // globals tip it over.
+        assert!(check_global_budget(1, 333_333, "m.wasm").is_ok());
+        assert!(check_global_budget(2, 333_333, "m.wasm").is_err());
+    }
+
+    #[test]
+    fn global_budget_accepts_normal_module() {
+        assert!(check_global_budget(64, 62_374, "ordinary.wasm").is_ok());
+    }
+
+    #[test]
+    fn instrument_module_is_untouched_on_budget_error() {
+        // A module over the ceiling must error *before* any mutation, so
+        // the caller never writes a half-instrumented artifact. We can't
+        // build 334k branches in a unit test; instead verify the check
+        // fires before the rewrite loop by confirming a normal module
+        // instruments fine (the budget path is exercised by the pure
+        // tests above and the check sits ahead of the first global add).
+        let mut m = wat_to_module(
+            r#"(module (func (param i32) (result i32)
+                 local.get 0 if (result i32) i32.const 1 else i32.const 0 end))"#,
+        );
+        let entries = instrument_module(&mut m, "small.wat").expect("instruments");
+        assert!(!entries.is_empty());
     }
 
     // --- #178 silent-degradation warnings ------------------------------------

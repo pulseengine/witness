@@ -313,11 +313,7 @@ fn build_line_map(
                 None => continue,
             };
             let file = match row.file(header) {
-                Some(entry) => unit_ref
-                    .attr_string(entry.path_name())
-                    .ok()
-                    .and_then(|s| s.to_string().ok().map(str::to_owned))
-                    .unwrap_or_default(),
+                Some(entry) => resolve_file_path(&unit_ref, header, entry),
                 None => String::new(),
             };
             out.insert(row.address(), LineLocation { file, line });
@@ -327,6 +323,41 @@ fn build_line_map(
         map: out,
         covered_max,
     })
+}
+
+/// Resolve a line-program file entry to the fullest path the DWARF
+/// carries (#209): `directory/name` when the entry names a directory,
+/// the bare name otherwise. The pre-v0.44 behaviour kept only
+/// `path_name()` — for rustc output that is a bare basename, and a
+/// report full of colliding `lib.rs`/`mod.rs` entries cannot be
+/// attributed to a crate. With the directory joined in, local-crate
+/// files resolve like `src/lib.rs` and dependency files carry their
+/// absolute registry/rustup path — both distinguish crates.
+fn resolve_file_path<'a>(
+    unit_ref: &gimli::UnitRef<'_, EndianSlice<'a, LittleEndian>>,
+    header: &gimli::LineProgramHeader<EndianSlice<'a, LittleEndian>>,
+    entry: &gimli::FileEntry<EndianSlice<'a, LittleEndian>>,
+) -> String {
+    let name = unit_ref
+        .attr_string(entry.path_name())
+        .ok()
+        .and_then(|s| s.to_string().ok().map(str::to_owned))
+        .unwrap_or_default();
+    // An absolute name needs no directory (and DWARF says the directory
+    // index is to be ignored for it).
+    if name.starts_with('/') || name.is_empty() {
+        return name;
+    }
+    let dir = entry
+        .directory(header)
+        .and_then(|d| unit_ref.attr_string(d).ok())
+        .and_then(|s| s.to_string().ok().map(str::to_owned))
+        .unwrap_or_default();
+    if dir.is_empty() {
+        name
+    } else {
+        format!("{}/{name}", dir.trim_end_matches('/'))
+    }
 }
 
 fn build_dwarf<'a>(s: &DwarfSections<'a>) -> gimli::Dwarf<EndianSlice<'a, LittleEndian>> {
@@ -511,7 +542,15 @@ fn group_into_decisions(
     let mut out: Vec<Decision> = Vec::new();
     let mut next_decision_id: u32 = 0;
 
-    for ((_func, file), entries) in by_func_file {
+    for ((_func, file), mut entries) in by_func_file {
+        // v0.44 (#208) — cluster in SOURCE-LINE order, not instruction
+        // order. The greedy span walk below is order-sensitive: a
+        // non-monotone line sequence (basic-block reordering, which
+        // shifts with unrelated linked code) produced different
+        // clusters for the same branch population. Sorting by
+        // (line, branch id) makes the grouping a function of the
+        // resolved lines alone.
+        entries.sort_by_key(|(line, entry)| (*line, entry.id));
         let mut cluster: Vec<&BranchEntry> = Vec::new();
         let mut cluster_min: u32 = u32::MAX;
         let mut cluster_max: u32 = 0;
@@ -866,12 +905,10 @@ fn collect_unit_files(unit_ref: &gimli::UnitRef<'_, EndianSlice<'_, LittleEndian
     for i in 0..=file_count {
         let path = header
             .file(u64::try_from(i).unwrap_or(0))
-            .and_then(|f| {
-                unit_ref
-                    .attr_string(f.path_name())
-                    .ok()
-                    .and_then(|s| s.to_string().ok().map(str::to_owned))
-            })
+            // v0.44 (#209) — resolve directory + name, not the bare
+            // basename, so DW_AT_call_file frames are crate-attributable
+            // like line-map files.
+            .map(|f| resolve_file_path(unit_ref, header, f))
             .unwrap_or_default();
         files.push(path);
     }
@@ -1034,6 +1071,43 @@ mod tests {
         assert_eq!(decisions[0].conditions, vec![0, 1]);
         assert_eq!(decisions[0].source_line, Some(42));
         assert_eq!(decisions[0].source_file.as_deref(), Some("lib.rs"));
+    }
+
+    /// v0.44 (#208) — grouping must be a function of the resolved source
+    /// lines, not of instruction order. Basic-block reordering (which
+    /// shifts with unrelated linked code) interleaves lines
+    /// non-monotonically; the greedy span walk used to cluster the
+    /// interleaved sequence differently from the monotone one.
+    #[test]
+    fn group_into_decisions_is_instruction_order_independent() {
+        let mut line_map = LineMap::new();
+        for (addr, line) in [(10u64, 40u32), (20, 60), (30, 41)] {
+            line_map.insert(
+                addr,
+                LineLocation {
+                    file: "lib.rs".to_string(),
+                    line,
+                },
+            );
+        }
+        // Instruction order visits lines 40, 60, 41 — the two nearby
+        // lines (40, 41) are separated by a far one (60). Pre-sort,
+        // every greedy cluster flushed as a dropped singleton and NO
+        // decision came out; line-sorted, 40+41 form one decision.
+        let entries = vec![
+            entry_with_offset(0, 10),
+            entry_with_offset(1, 20),
+            entry_with_offset(2, 30),
+        ];
+        let (decisions, _, _, _) =
+            group_into_decisions(&entries, &line_map, &InlineMap::new(), 0, u64::MAX);
+        assert_eq!(
+            decisions.len(),
+            1,
+            "lines 40+41 cluster despite the interleaved far line"
+        );
+        assert_eq!(decisions[0].conditions, vec![0, 2]);
+        assert_eq!(decisions[0].source_line, Some(40));
     }
 
     #[test]
