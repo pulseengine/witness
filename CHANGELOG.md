@@ -7,8 +7,39 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-09-07
+
+Headline: **three consumer-reported reconstruction/soundness fixes** — the
+silent >1M-global invalid artifact (#207), crate-attributable source paths
+(#209), and instruction-order-independent decision grouping (#208 partial) —
+plus the wasmtime 48 security bumps.
+
+Falsification statement: each fix was falsified two-sided before shipping —
+the global-budget boundary is pinned exactly (999,999+1 accepted, +2
+rejected); reverting the directory join fails the e2e with the bare `lib.rs`
+basename; removing the cluster sort turns the interleaved 40/60/41 line
+sequence from one 2-condition decision back into zero decisions. What was NOT
+verified: no real >333k-branch module was instrumented end-to-end (the
+ceiling test is unit-level), and #208's remaining halves (inline line drift,
+the ≥2-condition singleton gate) are measured but unfixed — a both-ways-
+executed lone branch is still scored in no decision.
+
+### Behavior changes for consumers
+
+- `source_file` / `call_file` values change from bare basenames to
+  directory-qualified paths (`src/lib.rs`, absolute registry paths for
+  dependencies). Switch basename matches to suffix matches.
+- Decision inventories will shift once against v0.43 baselines (path-
+  qualified bucket keys + line-sorted clustering), then be substantially more
+  stable under unrelated-code changes.
+- MSRV is now **1.95** (wasmtime 48 / cranelift 0.135 floor).
+
 ### Fixed
 
+- **#199/#217 — `witness --version` reports `witness`, not `witness-mcdc`.**
+  clap defaulted the CLI name to the crates.io package name (renamed in
+  v0.27.0 to dodge a registry conflict); the binary now reports its own name
+  via `CARGO_BIN_NAME`. (Contributed by avrabe.)
 - **#207 — `witness instrument` no longer emits an invalid module past the
   1,000,000-global WebAssembly limit with exit 0.** Instrumentation allocates
   three globals per branch (i64 counter + brval/brcnt), so a large enough
@@ -35,6 +66,21 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   #208 stays open: resolved lines still move with inlining decisions, and a
   lone branch on its line is still dropped by the ≥2-condition gate.
   (REQ-071)
+
+### Security
+
+- **wasmtime 47.0.3 → 48.0.0** — clears RUSTSEC-2026-0268 (guest-controlled
+  host heap allocation via WASIp3 streams) and RUSTSEC-2026-0269 (filesystem
+  sandbox escape via trailing-slash paths/symlinks). Migration: a
+  `FixedLengthList` zero-value arm in `--stub-imports` synthesis; payload
+  ranges are now `u64`.
+
+### Changed
+
+- Dependency wave: wasmparser 0.258 (root + component sibling lock),
+  wsc-attestation 0.11, wit-bindgen 0.61, walrus 0.26.5, wat 1.258.
+- CI: the MSRV job is named version-independently (`MSRV`) so toolchain
+  bumps no longer orphan the required branch-protection context.
 
 ## [0.43.0] — 2026-08-19
 
