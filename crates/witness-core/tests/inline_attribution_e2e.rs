@@ -57,6 +57,14 @@ fn inlined_decision_attributes_to_user_source_not_glue() {
         "decision mis-attributed to `{file}` — expected the user source (lib.rs). \
          A code-section-base or `.debug_ranges` regression reproduces gale #179."
     );
+    // (1b) v0.44 (#209): the file is the DIRECTORY-QUALIFIED path from
+    // the DWARF file table (`src/lib.rs`), not the colliding bare
+    // basename — a report of bare `lib.rs`/`mod.rs` entries cannot be
+    // attributed to a crate.
+    assert_eq!(
+        file, "src/lib.rs",
+        "decision source_file lost its directory qualification (#209)"
+    );
 
     // (2) The inline chain was recovered (non-empty) and every frame names
     // the user's file. Pre-fix (missing `.debug_ranges`), the DWARF v4
@@ -75,10 +83,11 @@ fn inlined_decision_attributes_to_user_source_not_glue() {
                 .call_file
                 .as_deref()
                 .expect("inline frame carries a call_file");
-            assert!(
-                cf.ends_with("lib.rs"),
-                "inline frame call_file `{cf}` is not the user source — \
-                 the code-section-base rebase or `.debug_ranges` fix regressed"
+            assert_eq!(
+                cf, "src/lib.rs",
+                "inline frame call_file `{cf}` is not the directory-qualified \
+                 user source — the code-section-base rebase, `.debug_ranges`, \
+                 or file-path resolution (#209) regressed"
             );
         }
     }

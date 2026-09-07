@@ -868,3 +868,67 @@ artifacts:
         target: REQ-068
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-069
+    type: test-case
+    title: Global-budget ceiling turns the silent invalid artifact into a hard error
+    description: >
+      instrument::tests::global_budget_rejects_over_limit drives the budget
+      check past the 1,000,000-global ceiling (333,334 branches x 3) and
+      asserts the error names the module, the branch count, and the limit;
+      global_budget_counts_existing_globals pins the boundary exactly
+      (999,999+1 ok, +2 rejected) so pre-existing module globals count against
+      the budget; global_budget_accepts_normal_module pins the measured
+      62,374-global control from #207 as accepted. The check runs before the
+      first module mutation in instrument_module, so no partial artifact is
+      written. (REQ-069 / #207.)
+    tags: [verification, instrument, soundness]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --lib instrument::tests::global_budget
+    links:
+      - type: verifies
+        target: REQ-069
+      - type: produced-by
+        target: AS-001
+  - id: TEST-REQ-070
+    type: test-case
+    title: Decision source paths and inline call_files are directory-qualified
+    description: >
+      inline_attribution_e2e::inlined_decision_attributes_to_user_source_not_glue
+      (extended) asserts the reconstructed decision's source_file and every
+      inline frame's call_file equal `src/lib.rs` — the directory-qualified
+      path from the fixture's DWARF file table — not the bare `lib.rs`
+      basename. Falsified two-sided: reverting the resolve_file_path directory
+      join fails the assertion with `lib.rs`; restoring it passes. (REQ-070 /
+      #209.)
+    tags: [verification, report, attribution, dwarf]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --test inline_attribution_e2e
+    links:
+      - type: verifies
+        target: REQ-070
+      - type: produced-by
+        target: AS-001
+  - id: TEST-REQ-071
+    type: test-case
+    title: Interleaved line sequences cluster identically to monotone ones
+    description: >
+      decisions::tests::group_into_decisions_is_instruction_order_independent
+      resolves three branches whose instruction order visits lines 40, 60, 41
+      — pre-fix the greedy walk flushed three dropped singletons (zero
+      decisions); line-sorted, 40+41 form one two-condition decision.
+      Falsified two-sided: removing the sort fails the assertion, restoring
+      it passes. (REQ-071 / #208.)
+    tags: [verification, report, reconstruction]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --lib decisions::tests::group_into_decisions_is_instruction_order_independent
+    links:
+      - type: verifies
+        target: REQ-071
+      - type: produced-by
+        target: AS-001
