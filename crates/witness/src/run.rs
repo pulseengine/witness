@@ -130,6 +130,13 @@ fn zero_val(ty: &wasmtime::component::types::Type) -> anyhow::Result<wasmtime::c
         T::Char => Val::Char('\0'),
         T::String => Val::String(String::new()),
         T::List(_) => Val::List(Vec::new()),
+        // wasmtime 48 — component-model fixed-length lists. Unlike `list`,
+        // the length is part of the type, so the zero is `len` zeroes of
+        // the element type, not an empty vec.
+        T::FixedLengthList(l) => {
+            let elem = zero_val(&l.ty())?;
+            Val::FixedLengthList(vec![elem; usize::try_from(l.len())?])
+        }
         T::Map(_) => Val::Map(Vec::new()),
         T::Flags(_) => Val::Flags(Vec::new()),
         T::Option(_) => Val::Option(None),
