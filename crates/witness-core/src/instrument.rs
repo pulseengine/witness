@@ -580,8 +580,22 @@ fn extract_sole_core_module_with_range(
             unchecked_range, ..
         } = payload
         {
-            match component_bytes.get(unchecked_range.clone()) {
-                Some(slice) => cores.push((slice.to_vec(), unchecked_range)),
+            // wasmparser 0.258 — payload ranges are `Range<u64>`; convert
+            // for slicing, erroring (never truncating) on overflow.
+            let range = match (
+                usize::try_from(unchecked_range.start),
+                usize::try_from(unchecked_range.end),
+            ) {
+                (Ok(start), Ok(end)) => start..end,
+                _ => {
+                    return Err(Error::ComponentUnbundle {
+                        path: input.to_path_buf(),
+                        detail: "embedded core-module range out of bounds".to_string(),
+                    });
+                }
+            };
+            match component_bytes.get(range.clone()) {
+                Some(slice) => cores.push((slice.to_vec(), range)),
                 None => {
                     return Err(Error::ComponentUnbundle {
                         path: input.to_path_buf(),
