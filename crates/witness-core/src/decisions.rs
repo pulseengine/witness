@@ -313,11 +313,7 @@ fn build_line_map(
                 None => continue,
             };
             let file = match row.file(header) {
-                Some(entry) => unit_ref
-                    .attr_string(entry.path_name())
-                    .ok()
-                    .and_then(|s| s.to_string().ok().map(str::to_owned))
-                    .unwrap_or_default(),
+                Some(entry) => resolve_file_path(&unit_ref, header, entry),
                 None => String::new(),
             };
             out.insert(row.address(), LineLocation { file, line });
@@ -327,6 +323,41 @@ fn build_line_map(
         map: out,
         covered_max,
     })
+}
+
+/// Resolve a line-program file entry to the fullest path the DWARF
+/// carries (#209): `directory/name` when the entry names a directory,
+/// the bare name otherwise. The pre-v0.44 behaviour kept only
+/// `path_name()` — for rustc output that is a bare basename, and a
+/// report full of colliding `lib.rs`/`mod.rs` entries cannot be
+/// attributed to a crate. With the directory joined in, local-crate
+/// files resolve like `src/lib.rs` and dependency files carry their
+/// absolute registry/rustup path — both distinguish crates.
+fn resolve_file_path<'a>(
+    unit_ref: &gimli::UnitRef<'_, EndianSlice<'a, LittleEndian>>,
+    header: &gimli::LineProgramHeader<EndianSlice<'a, LittleEndian>>,
+    entry: &gimli::FileEntry<EndianSlice<'a, LittleEndian>>,
+) -> String {
+    let name = unit_ref
+        .attr_string(entry.path_name())
+        .ok()
+        .and_then(|s| s.to_string().ok().map(str::to_owned))
+        .unwrap_or_default();
+    // An absolute name needs no directory (and DWARF says the directory
+    // index is to be ignored for it).
+    if name.starts_with('/') || name.is_empty() {
+        return name;
+    }
+    let dir = entry
+        .directory(header)
+        .and_then(|d| unit_ref.attr_string(d).ok())
+        .and_then(|s| s.to_string().ok().map(str::to_owned))
+        .unwrap_or_default();
+    if dir.is_empty() {
+        name
+    } else {
+        format!("{}/{name}", dir.trim_end_matches('/'))
+    }
 }
 
 fn build_dwarf<'a>(s: &DwarfSections<'a>) -> gimli::Dwarf<EndianSlice<'a, LittleEndian>> {
@@ -866,12 +897,10 @@ fn collect_unit_files(unit_ref: &gimli::UnitRef<'_, EndianSlice<'_, LittleEndian
     for i in 0..=file_count {
         let path = header
             .file(u64::try_from(i).unwrap_or(0))
-            .and_then(|f| {
-                unit_ref
-                    .attr_string(f.path_name())
-                    .ok()
-                    .and_then(|s| s.to_string().ok().map(str::to_owned))
-            })
+            // v0.44 (#209) — resolve directory + name, not the bare
+            // basename, so DW_AT_call_file frames are crate-attributable
+            // like line-map files.
+            .map(|f| resolve_file_path(unit_ref, header, f))
             .unwrap_or_default();
         files.push(path);
     }

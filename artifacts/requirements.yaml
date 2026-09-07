@@ -1261,3 +1261,51 @@ artifacts:
         target: REQ-065
       - type: produced-by
         target: AS-001
+  - id: REQ-069
+    release: v0.44.0
+    type: requirement
+    title: Refuse to instrument past the WebAssembly global limit instead of emitting an invalid module
+    status: implemented
+    description: >
+      `witness instrument` allocates three mutable globals per branch (the i64
+      hit counter plus the per-row brval/brcnt pair). On a large enough module
+      (>~333k branches; avrabe's 52 MB llvm.wasm) the output exceeds the
+      1,000,000-global WebAssembly implementation limit and every validator
+      rejects it — yet witness exited 0 after writing a 298 MB artifact, the
+      exact silent-invalid-evidence class this toolchain keeps hunting (#207,
+      loom#346 shape). Witness shall count the branch population up front
+      (existing globals + 3 per branch) and exit non-zero with a diagnostic
+      naming the module, the branch count, and the limit, before mutating or
+      writing anything. A memory-backed counter scheme lifting the ceiling is
+      tracked separately in #207. (Issue #207.)
+    tags: [instrument, soundness, scaling]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001
+  - id: REQ-070
+    release: v0.44.0
+    type: requirement
+    title: Report directory-qualified source paths so decisions are crate-attributable
+    status: implemented
+    description: >
+      Decisions and inline frames carried only the DWARF file entry's bare
+      path_name — for rustc output a basename, so a report's `mod.rs`/`lib.rs`
+      entries collide across the instrumented crate, its dependencies, and the
+      stdlib, and a consumer cannot answer "how many full-MC/DC decisions are
+      MY code" (scry measured 0-of-12 by hand; #209). Witness shall join the
+      file entry's directory to the name at both resolution sites (the line map
+      feeding decision source_file, and the DW_AT_call_file table feeding
+      inline chains): local-crate files resolve like `src/lib.rs` and
+      dependency files carry their absolute registry/rustup path — both
+      distinguish crates. Absolute path_names are passed through per the DWARF
+      spec. (Issue #209.)
+    tags: [report, attribution, dwarf]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001
