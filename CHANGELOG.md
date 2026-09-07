@@ -7,6 +7,35 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **#207 — `witness instrument` no longer emits an invalid module past the
+  1,000,000-global WebAssembly limit with exit 0.** Instrumentation allocates
+  three globals per branch (i64 counter + brval/brcnt), so a large enough
+  module (avrabe's 52 MB `llvm.wasm`, >333k branches) blew past the engine
+  limit and the 298 MB output was rejected by every validator — silently.
+  witness now counts the budget up front (existing globals + 3×branches) and
+  exits non-zero naming the module, the branch count, and the limit, before
+  writing anything. A memory-backed counter scheme that lifts the ceiling
+  stays tracked in #207. (REQ-069)
+- **#209 — decision `source_file` and inline `call_file` are now
+  directory-qualified paths, not colliding basenames.** The DWARF file
+  entry's directory is joined to its name at both resolution sites (line map
+  and `DW_AT_call_file` table): local-crate files resolve like `src/lib.rs`,
+  dependencies carry their absolute registry/rustup path — so a consumer can
+  finally answer "how many of these decisions are *my* crate" without opening
+  files by hand (scry's 0-of-12 audit). Consumers matching on bare basenames
+  should switch to suffix matches; LCOV `SF:` records inherit the fuller
+  paths. (REQ-070)
+- **#208 (partial) — decision grouping no longer depends on instruction
+  order.** The greedy line-span cluster walk consumed branches in instruction
+  order, so basic-block reordering (which shifts with unrelated linked code)
+  clustered the same resolved lines differently. Each `(function, file)`
+  bucket is now sorted by `(line, branch id)` before clustering. The rest of
+  #208 stays open: resolved lines still move with inlining decisions, and a
+  lone branch on its line is still dropped by the ≥2-condition gate.
+  (REQ-071)
+
 ## [0.43.0] — 2026-08-19
 
 Headline: **gale #179 — MC/DC decisions behind wit-bindgen cabi wrappers now

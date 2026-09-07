@@ -12,6 +12,12 @@ use witness::run;
 #[derive(Parser)]
 #[command(
     author,
+    // The package is `witness-mcdc` only to sidestep a crates.io squatter (see
+    // Cargo.toml). The binary is `witness`, and clap otherwise defaults this to
+    // CARGO_PKG_NAME — so `witness --version` reported `witness-mcdc 0.39.0`, a
+    // name no user ever types. pulseengine-cli-conventions rule 1: report the
+    // installed binary's name.
+    name = env!("CARGO_BIN_NAME"),
     version,
     about = "MC/DC-style branch coverage for WebAssembly.",
     long_about = None
