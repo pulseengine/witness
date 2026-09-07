@@ -64,7 +64,7 @@ jobs:
       - run: cargo test --all-targets --locked
 
   msrv:
-    name: MSRV (1.95)
+    name: MSRV
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v7
