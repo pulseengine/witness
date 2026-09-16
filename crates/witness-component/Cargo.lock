@@ -1120,6 +1120,18 @@ dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
  "semver",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.259.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f7c12eac7bb587801590f6a67ff0bc84d0748513864b71108e4b311cc3df694"
+dependencies = [
+ "bitflags",
+ "hashbrown 0.17.1",
+ "indexmap",
+ "semver",
  "serde",
 ]
 
@@ -1309,7 +1321,7 @@ dependencies = [
  "sourcemap",
  "thiserror",
  "walrus",
- "wasmparser 0.258.0",
+ "wasmparser 0.259.0",
  "witness-mcdc-checker",
  "wsc-attestation",
 ]
