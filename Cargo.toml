@@ -70,8 +70,8 @@ wasmparser = "0.258"
 # (wasm-bindgen/walrus PR #316 / issue #315) we'd been carrying as a
 # fork pin since v0.21. crates.io publish is now unblocked.
 walrus = "0.26.3"
-wasmtime = "48"
-wasmtime-wasi = "48"
+wasmtime = "49"
+wasmtime-wasi = "49"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
