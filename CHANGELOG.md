@@ -7,6 +7,40 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **#234 — static musl Linux release assets** (`x86_64-unknown-linux-musl`,
+  `aarch64-unknown-linux-musl`) beside the gnu ones, whose glibc-2.39 floor
+  excluded Ubuntu 22.04 / Debian 12 / RHEL 9 / Alpine / distroless. Option 1
+  (musl beside gnu) per the maintainer decision on the issue; asset naming
+  unchanged so varve picks them up by triple. (REQ-072)
+- **#235 — CycloneDX VEX per release** (`witness-<ver>.vex.json`): the
+  cargo-audit answer for the tag's committed lockfiles (root + viz +
+  component), recording the advisory-db commit and assertion time.
+  Judgements come only from hand-authored `security/vex-judgements.json`;
+  unjudged matches ship as `in_triage` — a generated `not_affected` would be
+  a false statement signed into a release. Deliberately outside
+  `SHA256SUMS.txt` (one lifecycle per document); integrity-bound by its
+  per-asset cosign signature. (REQ-073)
+- **#235 — weekly VEX re-issue** (`vex-reissue.yml`): re-audits the latest
+  shipped releases' pinned lockfiles against the current advisory DB,
+  replaces a release's VEX when the answer changes (first-issuing for
+  pre-VEX releases), refreshes its cosign signature, and opens a
+  classification issue for unjudged matches. (REQ-074)
+- **CI crates.io publishing via OIDC trusted publishing**
+  (`publish-to-crates-io.yml`): four crates in dependency order on every
+  `v*` tag, plus a `workflow_dispatch(tag)` backfill path. Removes the
+  laptop-token failure mode that stalled the v0.44.0 publish. One-time
+  crates.io Trusted Publishing setup required per crate. (REQ-075)
+
+### Security
+
+- **wasmtime 48.0.1 → 48.0.4** — clears RUSTSEC-2026-0316/0325/0326/0327
+  (GC rooting across `try_call`, hostcall fuel-limit allocation, async-lift
+  callback result-count overflow, mis-typed tag imports, `call_ref` fuel
+  drop). Patch-level on the same major; the 48→49 migration is tracked
+  separately.
+
 ## [0.44.0] — 2026-09-07
 
 Headline: **three consumer-reported reconstruction/soundness fixes** — the

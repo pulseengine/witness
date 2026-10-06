@@ -1,0 +1,3 @@
+{
+  "_comment": "Hand-authored VEX judgements (#235). Key: RUSTSEC id. Value: {state, justification?, detail}. `state` is a CycloneDX impact-analysis state (not_affected | false_positive | exploitable | resolved | in_triage); `justification` uses CycloneDX values like vulnerable_code_not_in_execute_path; `detail` (required) explains the judgement so a reviewer can check it. NEVER add an entry mechanically — a generated not_affected is a false statement signed into a release. tools/generate_vex.py emits unjudged matches as in_triage."
+}
