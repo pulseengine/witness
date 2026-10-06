@@ -63,6 +63,21 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
             cross: true
+          # #234 — musl beside gnu (option 1, decided 2026-09-24). The
+          # gnu assets above are glibc-2.39-floor (runner image), which
+          # excludes Ubuntu 22.04/Debian 12/RHEL 9/Alpine; the static
+          # musl builds run on all of them and are what the varve
+          # pulseengine layer ingests for its Linux platform keys.
+          # Asset naming stays witness-<tag>-<triple>.tar.gz — varve
+          # derives names from the Rust triple.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
           - target: x86_64-apple-darwin
             os: macos-14
             archive: tar.gz
@@ -360,6 +375,44 @@ jobs:
         with:
           subject-path: "release-assets/*.tar.gz"
 
+      # #235 — CycloneDX VEX. Audits the TAG's committed lockfiles
+      # (this checkout is the tag ref) against today's advisory DB and
+      # emits witness-<ver>.vex.json recording the advisory-db commit
+      # and assertion time. Judgements come only from
+      # security/vex-judgements.json — unjudged matches ship as
+      # in_triage, never a fabricated not_affected.
+      #
+      # Deliberately placed AFTER the SHA256SUMS step: the sums file is
+      # immutable once cut, while the VEX is re-issued by
+      # vex-reissue.yml when new advisories land (one lifecycle per
+      # document). Its integrity binding is the per-asset cosign
+      # .sig/.cert pair from the signing step below, which the re-issue
+      # refreshes together with the document.
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Generate VEX (CycloneDX)
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/}"
+          BARE="${VERSION#v}"
+          # cargo audit exits 1 when matches exist — the JSON is
+          # complete either way, so don't let that stop the release.
+          cargo audit --file Cargo.lock --json > audit-root.json || true
+          cargo audit --file crates/witness-viz/Cargo.lock --json > audit-viz.json || true
+          cargo audit --file crates/witness-component/Cargo.lock --json > audit-component.json || true
+          DB_COMMIT=$(for d in "$HOME"/.cargo/advisory-db/*/; do
+            git -C "$d" rev-parse HEAD 2>/dev/null && break; done || echo unknown)
+          python3 tools/generate_vex.py \
+            --component witness --version "$BARE" \
+            --advisory-db-commit "${DB_COMMIT:-unknown}" \
+            --judgements security/vex-judgements.json \
+            --audit root=audit-root.json \
+            --audit viz=audit-viz.json \
+            --audit component=audit-component.json \
+            --out "release-assets/witness-${BARE}.vex.json"
+
       # Cosign installer for both the per-asset signing (witness's
       # existing certification-evidence model — KEEP) and the
       # SHA256SUMS.txt bundle (NEW, per the brief).
@@ -456,8 +509,36 @@ jobs:
           witness keeps the per-asset `.sig` / `.cert` cosign pair on every
           tarball / zip / wasm as certification evidence; the sums-file
           signing above is added on top, not a replacement.
+
+          ### VEX (living document)
+
+          `witness-__BARE__.vex.json` is a CycloneDX VEX: the answer to
+          "does advisory RUSTSEC-X affect this release's pinned
+          dependency set?", recording the advisory-db commit it was
+          asserted against. It is deliberately **not** in
+          `SHA256SUMS.txt` — it is re-issued in place when new
+          advisories land (weekly re-audit of this tag's committed
+          lockfiles). Verify it via its own per-asset signature, which
+          is refreshed on every re-issue:
+
+          ```sh
+          cosign verify-blob \
+            --certificate-identity-regexp 'https://github.com/pulseengine/witness/.github/workflows/(release|vex-reissue).yml@.*' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            --signature witness-__BARE__.vex.json.sig \
+            --certificate witness-__BARE__.vex.json.cert \
+            witness-__BARE__.vex.json
+          ```
+
+          ### Linux binaries: gnu and musl
+
+          Linux assets ship in two flavours: `*-linux-gnu` (dynamic,
+          glibc ≥ 2.39) and `*-linux-musl` (static — runs on older
+          glibc distros, Alpine, and distroless). If in doubt, take
+          musl.
           EOF
           sed -i "s|__VERSION__|$VERSION|g" release-notes.md
+          sed -i "s|__BARE__|${VERSION#v}|g" release-notes.md
 
       - name: Create Release
         env:

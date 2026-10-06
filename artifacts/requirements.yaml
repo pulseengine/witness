@@ -1335,3 +1335,110 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+
+  - id: REQ-072
+    release: v0.45.0
+    type: requirement
+    title: Linux release assets include static musl builds beside gnu
+    status: approved
+    description: >
+      The v0.43.0 Linux assets are dynamically linked with a glibc 2.39
+      floor (the runner image's), excluding Ubuntu 22.04, Debian 12,
+      RHEL 9, Alpine and distroless consumers — and the varve
+      pulseengine layer inherits that floor for the whole toolchain
+      (#234, measured org-wide 2026-09-22). The release matrix shall
+      additionally build x86_64-unknown-linux-musl and
+      aarch64-unknown-linux-musl as static binaries, keeping the
+      witness-<tag>-<triple>.tar.gz naming varve derives from (option 1
+      — musl beside gnu — decided by the maintainer on the issue,
+      2026-09-24). witness reads files and writes reports: musl's
+      no-NSS/no-dlopen limits do not apply.
+    tags: [v0.45, release, portability]
+    fields:
+      priority: must
+      category: non-functional
+    links:
+      - type: produced-by
+        target: AS-001
+
+  - id: REQ-073
+    release: v0.45.0
+    type: requirement
+    title: Each release publishes a CycloneDX VEX for its shipped lockfiles
+    status: approved
+    description: >
+      An SBOM says what is in the product; it cannot say what an
+      advisory MEANS for it. Each release shall publish
+      witness-<ver>.vex.json (CycloneDX, same spec version as the
+      SBOM): the cargo-audit match list over the TAG's committed
+      lockfiles (root, viz, component), each match carrying an
+      impact-analysis state. Judgements (not_affected,
+      false_positive, ...) come only from the hand-authored
+      security/vex-judgements.json — an unjudged match ships as
+      in_triage, never a generated not_affected, which would be a false
+      statement signed into a release. The document records the
+      advisory-db commit and assertion timestamp so staleness is
+      detectable. Signed per-asset (cosign .sig/.cert); deliberately
+      outside SHA256SUMS.txt because the VEX is re-issued (REQ-074)
+      while the sums file is immutable — one lifecycle per document.
+      (#235; consumed by varve's supply-chain-document ingestion,
+      pulseengine/varve#179.)
+    tags: [v0.45, release, supply-chain, vex]
+    fields:
+      priority: must
+      category: non-functional
+    links:
+      - type: produced-by
+        target: AS-001
+
+  - id: REQ-074
+    release: v0.45.0
+    type: requirement
+    title: Shipped releases' VEX documents are re-issued when new advisories land
+    status: approved
+    description: >
+      A VEX is only worth reading six months later if it is re-asserted
+      when the advisory database moves (#235 part 4). A weekly
+      scheduled workflow shall re-audit the committed lockfiles of the
+      latest shipped releases (git show <tag>:Cargo.lock — the exact
+      pinned set, not main's) against the current advisory DB,
+      replace a release's vex.json asset when the normalized answer
+      changed (first-issuing for releases that predate VEX), refresh
+      the per-asset cosign signature, and open a classification issue
+      for any match with no judgement in security/vex-judgements.json.
+      The re-issue obligation is the commitment half: when it fires,
+      a human classifies.
+    tags: [v0.45, release, supply-chain, vex]
+    fields:
+      priority: must
+      category: non-functional
+    links:
+      - type: produced-by
+        target: AS-001
+
+  - id: REQ-075
+    release: v0.45.0
+    type: requirement
+    title: crates.io publishing runs in CI via OIDC trusted publishing
+    status: approved
+    description: >
+      The v0.44.0 cut stalled for a month on an expired laptop
+      crates.io token — the exact failure mode the org release
+      standard's Track B exists to remove. Publishing the four crates
+      (witness-mcdc-checker -> witness-mcdc-core -> witness-mcdc ->
+      witness-mcdc-viz, dependency order, viz from its own workspace)
+      shall run in a dedicated publish-to-crates-io.yml on the v* tag
+      push via rust-lang/crates-io-auth-action (OIDC trusted
+      publishing, no long-lived token anywhere), with a
+      workflow_dispatch(tag) path for backfilling an already-tagged
+      release. Already-published versions are skipped so partial
+      publishes and re-runs are safe. One-time setup: each crate's
+      crates.io Trusted Publishing settings must name this repo +
+      workflow file.
+    tags: [v0.45, release, supply-chain, distribution]
+    fields:
+      priority: must
+      category: non-functional
+    links:
+      - type: produced-by
+        target: AS-001

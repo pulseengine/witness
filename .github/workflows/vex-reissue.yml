@@ -1,0 +1,60 @@
+# #235 — weekly VEX re-issue. A release's VEX answers "does advisory
+# X affect what I pinned?" — an answer that changes after the release
+# ships, when new advisories land. This re-audits the latest shipped
+# releases' *committed lockfiles* against today's advisory DB and
+# replaces each release's witness-<ver>.vex.json asset when the answer
+# changed (first-issuing it for releases that predate VEX).
+#
+# The VEX is deliberately NOT in SHA256SUMS.txt (the sums file is
+# immutable once cut; the VEX is a living document — one lifecycle per
+# document). Its integrity binding is the per-asset cosign .sig/.cert
+# pair, refreshed here together with the document.
+#
+# Matches with no human judgement ship as `in_triage` and open a
+# classification issue — `not_affected` is a claim about this source
+# tree and is never auto-asserted (see security/vex-judgements.json).
+name: VEX Re-issue
+
+on:
+  schedule:
+    # Monday 06:17 UTC — offset from the hour to dodge the cron rush.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  # upload --clobber on release assets
+  contents: write
+  # keyless cosign signing of the re-issued document
+  id-token: write
+  # classification issues for unjudged matches
+  issues: write
+
+concurrency:
+  group: vex-reissue
+  cancel-in-progress: false
+
+jobs:
+  reissue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # tools/vex_reissue.py reads each tag's lockfiles via
+          # `git show <tag>:<path>` — needs full history + tags.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.4.1"
+
+      - name: Re-issue VEX for the latest shipped releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_EXPERIMENTAL: "1"
+        run: python3 tools/vex_reissue.py --releases 3

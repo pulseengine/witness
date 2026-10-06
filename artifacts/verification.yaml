@@ -932,3 +932,96 @@ artifacts:
         target: REQ-071
       - type: produced-by
         target: AS-001
+
+  - id: TEST-REQ-072
+    type: test-case
+    title: Release matrix carries both musl triples beside gnu
+    description: >
+      Drift guard for REQ-072: asserts x86_64-unknown-linux-musl and
+      aarch64-unknown-linux-musl are matrix targets in release.yml and
+      the gnu targets were not removed (option 1 was musl BESIDE gnu).
+      Compile/link proof for both triples: scratch run 37514532211
+      (cross build of witness + witness-viz, GLIBC-symbol-free check).
+      Full falsification is the v0.45.0 release run's published assets
+      — file(1) static, runs on a glibc-2.35 host.
+    tags: [verification, release, portability]
+    fields:
+      method: automated-test
+      steps:
+        - run: grep -q 'x86_64-unknown-linux-musl' .github/workflows/release.yml && grep -q 'aarch64-unknown-linux-musl' .github/workflows/release.yml && grep -q 'x86_64-unknown-linux-gnu' .github/workflows/release.yml
+    links:
+      - type: verifies
+        target: REQ-072
+      - type: produced-by
+        target: AS-001
+  - id: TEST-REQ-073
+    type: test-case
+    title: VEX generator honours judgements and never fabricates one
+    description: >
+      Runs tools/generate_vex.py --self-test (fixture cargo-audit
+      output, no network): a judged match carries its hand-authored
+      state + justification; an unjudged match is in_triage with no
+      justification; a judgement without a reviewable detail is
+      rejected; a clean document still records advisory-db commit and
+      asserted-at. Also asserts release.yml wires the generator in
+      (after the sums step — one lifecycle per document) and the
+      judgements file parses. (REQ-073 / #235.)
+    tags: [verification, release, supply-chain, vex]
+    fields:
+      method: automated-test
+      steps:
+        - run: python3 tools/generate_vex.py --self-test
+        - run: grep -q 'generate_vex.py' .github/workflows/release.yml
+        - run: python3 -c "import json; json.load(open('security/vex-judgements.json'))"
+    links:
+      - type: verifies
+        target: REQ-073
+      - type: produced-by
+        target: AS-001
+  - id: TEST-REQ-074
+    type: test-case
+    title: VEX re-issue workflow exists, is scheduled, and parses
+    description: >
+      Drift guard for REQ-074: vex-reissue.yml has a cron schedule and
+      calls tools/vex_reissue.py; the orchestrator parses as Python and
+      audits the tag's committed lockfiles (git show <tag>:...), not
+      main's. The operational half — a changed answer actually
+      replacing a shipped release's asset — is verified on the first
+      scheduled run that fires a change (workflow_dispatch available
+      for a manual proof run). (REQ-074 / #235 part 4.)
+    tags: [verification, release, supply-chain, vex]
+    fields:
+      method: automated-test
+      steps:
+        - run: grep -q 'cron:' .github/workflows/vex-reissue.yml && grep -q 'vex_reissue.py' .github/workflows/vex-reissue.yml
+        - run: python3 -c "import ast; ast.parse(open('tools/vex_reissue.py').read())"
+        - run: grep -q 'git show' tools/vex_reissue.py || grep -q '"show"' tools/vex_reissue.py
+    links:
+      - type: verifies
+        target: REQ-074
+      - type: produced-by
+        target: AS-001
+  - id: TEST-REQ-075
+    type: test-case
+    title: crates.io publish workflow is OIDC-based and dependency-ordered
+    description: >
+      Drift guard for REQ-075: publish-to-crates-io.yml uses
+      rust-lang/crates-io-auth-action (no CARGO_REGISTRY_TOKEN secret
+      reference), publishes the four crates in dependency order
+      (checker before core before witness before viz), and publishes
+      viz from its own workspace directory. End-to-end proof is the
+      first tag publish after the crates.io Trusted Publishing settings
+      are configured. (REQ-075.)
+    tags: [verification, release, distribution]
+    fields:
+      method: automated-test
+      steps:
+        - run: grep -q 'crates-io-auth-action' .github/workflows/publish-to-crates-io.yml
+        - run: "! grep -q 'secrets.CARGO_REGISTRY_TOKEN' .github/workflows/publish-to-crates-io.yml"
+        - run: python3 -c "s=open('.github/workflows/publish-to-crates-io.yml').read(); order=[s.index(c) for c in ('witness-mcdc-checker','witness-mcdc-core','-p witness-mcdc\n','crates/witness-viz')]; assert order==sorted(order), order"
+    links:
+      - type: verifies
+        target: REQ-075
+      - type: produced-by
+        target: AS-001
+
