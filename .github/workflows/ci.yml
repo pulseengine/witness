@@ -186,9 +186,21 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-      # The ratchet. 80 against a measured 80.92% (7021/8676 lines, 18 files,
-      # read from the Codecov API on 2026-10-07) — roughly one point of head
-      # room, so it holds the line without flapping on noise.
+      # The ratchet. 79 against a measured 79.80%, which is what THIS command
+      # reports on CI: 13295 lines, 2685 missed, over --all-targets.
+      #
+      # The first version of this gate used 80, calibrated from the Codecov API
+      # figure of 80.92% (7021/8676 lines). It failed immediately, and correctly:
+      # Codecov and `cargo llvm-cov report --all-targets` do not share a
+      # denominator — 8676 lines against 13295, because --all-targets counts test
+      # and example code the Codecov upload does not. Two honest numbers, not
+      # comparable, and the threshold has to come from the instrument that
+      # ENFORCES it, not from the dashboard that displays it.
+      #
+      # Same trap this repo documents elsewhere: a coverage percentage means
+      # nothing without its denominator. SQLite excludes ALWAYS()/NEVER()
+      # branches, FreeRTOS rebuilds without asserts, synth's MC/DC denominator is
+      # dominated by wasi-libc. All disclosed, none comparable.
       #
       # This re-reports from the profile data the step above already produced;
       # verified that `report` reuses it rather than re-running the suite.
@@ -200,7 +212,7 @@ jobs:
       # It can go red. Raise the number when coverage rises; never lower it to
       # make a build pass.
       - name: Coverage must not regress below the ratchet
-        run: cargo llvm-cov report --fail-under-lines 80
+        run: cargo llvm-cov report --fail-under-lines 79
 
   dogfood:
     name: Dogfood — witness measures the fixture
