@@ -160,7 +160,11 @@ jobs:
   coverage:
     name: Coverage
     runs-on: [self-hosted, linux, x64, rust-cpu]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Runs on PRs too, not only push-to-main. A coverage job that only runs
+    # after a merge is an alarm, not a gate — it tells you coverage fell once
+    # the fall is already on main. FreeRTOS's coverage-cop, the clearest public
+    # example of a numeric structural-coverage gate, runs per pull request
+    # (FreeRTOS-Plus-TCP ci.yml: branch-coverage-min 99.8, line-coverage-min 99.9).
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -170,13 +174,45 @@ jobs:
       - run: |
           cargo install cargo-llvm-cov --locked
           cargo llvm-cov --lcov --output-path lcov.info --all-targets
+
+      # Upload before the gate, and with `always()`, so a failing threshold
+      # still publishes the data you need to see WHICH lines regressed.
       - uses: codecov/codecov-action@v7
+        if: always()
         with:
           files: lcov.info
           flags: rust-source
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      # The ratchet. 79 against a measured 79.80%, which is what THIS command
+      # reports on CI: 13295 lines, 2685 missed, over --all-targets.
+      #
+      # The first version of this gate used 80, calibrated from the Codecov API
+      # figure of 80.92% (7021/8676 lines). It failed immediately, and correctly:
+      # Codecov and `cargo llvm-cov report --all-targets` do not share a
+      # denominator — 8676 lines against 13295, because --all-targets counts test
+      # and example code the Codecov upload does not. Two honest numbers, not
+      # comparable, and the threshold has to come from the instrument that
+      # ENFORCES it, not from the dashboard that displays it.
+      #
+      # Same trap this repo documents elsewhere: a coverage percentage means
+      # nothing without its denominator. SQLite excludes ALWAYS()/NEVER()
+      # branches, FreeRTOS rebuilds without asserts, synth's MC/DC denominator is
+      # dominated by wasi-libc. All disclosed, none comparable.
+      #
+      # This re-reports from the profile data the step above already produced;
+      # verified that `report` reuses it rather than re-running the suite.
+      #
+      # The gate was negative-controlled before being wired in, on a fixture at
+      # 66.67% line coverage:
+      #     --fail-under-lines 99 -> exit 1
+      #     --fail-under-lines 40 -> exit 0
+      # It can go red. Raise the number when coverage rises; never lower it to
+      # make a build pass.
+      - name: Coverage must not regress below the ratchet
+        run: cargo llvm-cov report --fail-under-lines 79
 
   dogfood:
     name: Dogfood — witness measures the fixture
