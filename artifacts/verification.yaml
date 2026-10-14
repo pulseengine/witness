@@ -1025,3 +1025,25 @@ artifacts:
       - type: produced-by
         target: AS-001
 
+
+  - id: TEST-REQ-076
+    type: test-case
+    title: Coverage job is a per-PR ratchet gate
+    description: >
+      Drift guard for REQ-076: asserts ci.yml still carries the
+      --fail-under-lines gate and that the coverage job no longer has
+      the push-to-main-only condition (scoped to the coverage job,
+      since other jobs legitimately gate on the main ref). The gate
+      itself was negative-controlled in #245 (fixture at 66.67%: 99
+      exits 1, 40 exits 0).
+    tags: [verification, ci, coverage, quality-gate]
+    fields:
+      method: automated-test
+      steps:
+        - run: grep -q 'fail-under-lines' .github/workflows/ci.yml
+        - run: python3 -c "import re; t=open('.github/workflows/ci.yml').read(); j=re.search(r'^  coverage:\n.*?(?=^  [A-Za-z0-9_-]+:\n|\Z)', t, re.S|re.M).group(0); assert 'refs/heads/main' not in j and 'event_name' not in j, 'main-only condition in coverage job'"
+    links:
+      - type: verifies
+        target: REQ-076
+      - type: produced-by
+        target: AS-001

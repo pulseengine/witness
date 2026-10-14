@@ -1442,3 +1442,34 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+
+  - id: REQ-076
+    release: v0.45.0
+    type: requirement
+    title: Line coverage is gated per PR at a ratchet that only moves up
+    status: implemented
+    description: >
+      Coverage shall be a gate, not an after-the-fact alarm. The CI
+      coverage job runs on pull requests, not only on push to main (the
+      push-to-main-only condition was removed), uploads to Codecov with
+      if: always() before the gate so a failing threshold still
+      publishes which lines regressed, and then runs
+      cargo llvm-cov report --fail-under-lines 79. The threshold shall
+      come from the instrument that enforces it: 79 against a measured
+      79.80% from cargo llvm-cov --all-targets (13295 lines, 2685
+      missed). The Codecov API figure of 80.92% has a different
+      denominator (it excludes test and example code) and an initial
+      threshold of 80 calibrated from it failed immediately. The gate
+      was negative-controlled on a fixture at 66.67% line coverage:
+      --fail-under-lines 99 exits 1, 40 exits 0. Rule: raise the number
+      when coverage rises, never lower it to make a build pass.
+      Delivered in #245 by avrabe. Whether the Coverage check becomes a
+      branch-protection required context is an open maintainer
+      decision and is not claimed here.
+    tags: [v0.45, ci, coverage, quality-gate]
+    fields:
+      priority: must
+      category: non-functional
+    links:
+      - type: produced-by
+        target: AS-001
