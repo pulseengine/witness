@@ -128,6 +128,40 @@ jobs:
           strip "target/${{ matrix.target }}/release/witness" 2>/dev/null || true
           strip "crates/witness-viz/target/${{ matrix.target }}/release/witness-viz" 2>/dev/null || true
 
+      # `file` says "static-pie linked" on x86_64 musl but "statically
+      # linked" on aarch64 musl, so match the properties (static, no
+      # interpreter, no glibc symbols), not one phrase. The record ships
+      # in the release so REQ-072 can be verified after tagging.
+      - name: Verify musl binaries are static
+        if: endsWith(matrix.target, '-linux-musl')
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          record="musl-static-${TARGET}.txt"
+          echo "target: ${TARGET}" > "$record"
+          fail=0
+          for bin in "target/${TARGET}/release/witness" \
+                     "crates/witness-viz/target/${TARGET}/release/witness-viz"; do
+            desc=$(file -b "$bin")
+            glibc=$(strings -a "$bin" | grep -c GLIBC_ || true)
+            echo "${bin##*/}: ${desc}" >> "$record"
+            echo "${bin##*/} GLIBC_ symbols: ${glibc}" >> "$record"
+            case "$desc" in
+              *static*) ;;
+              *) echo "::error::${bin} is not static: ${desc}"; fail=1 ;;
+            esac
+            case "$desc" in
+              *"dynamically linked"*|*interpreter*)
+                echo "::error::${bin} is dynamically linked: ${desc}"; fail=1 ;;
+            esac
+            if [ "$glibc" -ne 0 ]; then
+              echo "::error::${bin} references ${glibc} GLIBC_ symbols"; fail=1
+            fi
+          done
+          cat "$record"
+          exit "$fail"
+
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
         env:
@@ -161,6 +195,14 @@ jobs:
         with:
           name: binary-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
+
+      # Separate artifact: a widened path would fail the gnu/windows legs,
+      # which have no record file.
+      - uses: actions/upload-artifact@v7
+        if: endsWith(matrix.target, '-linux-musl')
+        with:
+          name: musl-static-${{ matrix.target }}
+          path: musl-static-${{ matrix.target }}.txt
 
   compliance:
     name: Generate compliance evidence
@@ -321,7 +363,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.wasm" \) -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.wasm" -o -name "musl-static-*.txt" \) -exec cp {} release-assets/ \;
 
       # SBOM step. Must run BEFORE the SHA256SUMS.txt step below so
       # the SBOM's own digest enters the sums. CycloneDX 1.5 JSON is
