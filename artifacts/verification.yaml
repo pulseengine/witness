@@ -949,6 +949,7 @@ artifacts:
       method: automated-test
       steps:
         - run: grep -q 'x86_64-unknown-linux-musl' .github/workflows/release.yml && grep -q 'aarch64-unknown-linux-musl' .github/workflows/release.yml && grep -q 'x86_64-unknown-linux-gnu' .github/workflows/release.yml
+        - run: grep -q "endsWith(matrix.target, '-linux-musl')" .github/workflows/release.yml && grep -q 'musl-static-\*.txt' .github/workflows/release.yml
     links:
       - type: verifies
         target: REQ-072

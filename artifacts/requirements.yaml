@@ -1447,7 +1447,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: Line coverage is gated per PR at a ratchet that only moves up
-    status: implemented
+    status: verified
     description: >
       Coverage shall be a gate, not an after-the-fact alarm. The CI
       coverage job runs on pull requests, not only on push to main (the
@@ -1463,9 +1463,9 @@ artifacts:
       was negative-controlled on a fixture at 66.67% line coverage:
       --fail-under-lines 99 exits 1, 40 exits 0. Rule: raise the number
       when coverage rises, never lower it to make a build pass.
-      Delivered in #245 by avrabe. Whether the Coverage check becomes a
-      branch-protection required context is an open maintainer
-      decision and is not claimed here.
+      Delivered in #245 by avrabe. The maintainer decided that Coverage
+      is a branch-protection required context (added 2026-10-14),
+      accepting the extra CI wait.
     tags: [v0.45, ci, coverage, quality-gate]
     fields:
       priority: must

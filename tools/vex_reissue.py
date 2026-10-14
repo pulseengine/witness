@@ -136,6 +136,11 @@ def ensure_classification_issue(adv_id: str, tags: list[str]) -> None:
 
 
 def sign_and_upload(tag: str, vex_path: Path, dry_run: bool) -> None:
+    # Checked first: signing is keyless and interactive-capable, so a dry
+    # run that reached cosign would start a real signing flow.
+    if dry_run:
+        print(f"[dry-run] would sign and upload {vex_path.name} to {tag}")
+        return
     uploads = [vex_path]
     have_cosign = run(["which", "cosign"], check=False).returncode == 0
     if have_cosign:
@@ -147,10 +152,6 @@ def sign_and_upload(tag: str, vex_path: Path, dry_run: bool) -> None:
         uploads += [sig, cert]
     else:
         print("::warning::cosign unavailable — uploading unsigned re-issue")
-    if dry_run:
-        print(f"[dry-run] would upload to {tag}: "
-              f"{', '.join(p.name for p in uploads)}")
-        return
     run(["gh", "release", "upload", tag, "--repo", REPO, "--clobber",
          *map(str, uploads)])
     print(f"::notice::re-issued {vex_path.name} on {tag}")
@@ -185,6 +186,15 @@ def self_test() -> None:
         {"id": "RUSTSEC-2026-9902", "affects": [{"ref": "root:b@2.0.0"}],
          "analysis": {"state": "in_triage"}})
     assert normalized(base) != normalized(extra), "new match must compare unequal"
+
+    calls: list[list[str]] = []
+    real_run = globals()["run"]
+    globals()["run"] = lambda cmd, **kw: calls.append(cmd)
+    try:
+        sign_and_upload("v0.0.0", Path("x.vex.json"), dry_run=True)
+    finally:
+        globals()["run"] = real_run
+    assert not calls, f"dry-run must not invoke external commands: {calls}"
     print("vex_reissue self-test: OK")
 
 
