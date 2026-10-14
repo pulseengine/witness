@@ -1340,7 +1340,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: Linux release assets include static musl builds beside gnu
-    status: approved
+    status: implemented
     description: >
       The v0.43.0 Linux assets are dynamically linked with a glibc 2.39
       floor (the runner image's), excluding Ubuntu 22.04, Debian 12,
@@ -1365,7 +1365,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: Each release publishes a CycloneDX VEX for its shipped lockfiles
-    status: approved
+    status: implemented
     description: >
       An SBOM says what is in the product; it cannot say what an
       advisory MEANS for it. Each release shall publish
@@ -1395,7 +1395,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: Shipped releases' VEX documents are re-issued when new advisories land
-    status: approved
+    status: implemented
     description: >
       A VEX is only worth reading six months later if it is re-asserted
       when the advisory database moves (#235 part 4). A weekly
@@ -1420,7 +1420,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: crates.io publishing runs in CI via OIDC trusted publishing
-    status: approved
+    status: implemented
     description: >
       The v0.44.0 cut stalled for a month on an expired laptop
       crates.io token — the exact failure mode the org release
