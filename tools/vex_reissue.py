@@ -50,17 +50,6 @@ def latest_release_tags(n: int) -> list[str]:
     return [t for t in out if re.fullmatch(r"v\d+\.\d+\.\d+", t)][:n]
 
 
-def advisory_db_commit() -> str:
-    base = Path.home() / ".cargo" / "advisory-db"
-    for d in sorted(base.glob("*")) if base.is_dir() else []:
-        if (d / ".git").exists():
-            try:
-                return run(["git", "-C", str(d), "rev-parse", "HEAD"]).stdout.strip()
-            except subprocess.CalledProcessError:
-                pass
-    return "unknown"
-
-
 def audit_tag_lock(tag: str, repo_path: str, tmp: Path, label: str) -> Path | None:
     """`git show tag:lock` -> cargo audit --json. None if the lock
     doesn't exist at that tag (older layouts)."""
@@ -81,16 +70,22 @@ def audit_tag_lock(tag: str, repo_path: str, tmp: Path, label: str) -> Path | No
     return out
 
 
-def normalized(doc: dict) -> str:
-    """The comparison form: everything except the volatile assertion
-    timestamp (and doc version counter)."""
-    d = json.loads(json.dumps(doc))
-    d.get("metadata", {}).pop("timestamp", None)
-    d.pop("version", None)
-    d["properties"] = [
-        p for p in d.get("properties", []) if p.get("name") != "asserted-at"
-    ]
-    return json.dumps(d, sort_keys=True)
+def normalized(doc: dict) -> list[tuple]:
+    """The comparison form: only the answer — (advisory, affected ref,
+    analysis). Provenance (db commit, advisory count, timestamps) must
+    not trigger a re-issue, or every RustSec update re-signs every
+    release."""
+    return sorted(
+        (
+            v.get("id", ""),
+            a.get("ref", ""),
+            v.get("analysis", {}).get("state", ""),
+            v.get("analysis", {}).get("justification", ""),
+            v.get("analysis", {}).get("detail", ""),
+        )
+        for v in doc.get("vulnerabilities", [])
+        for a in v.get("affects", [])
+    )
 
 
 def existing_vex(tag: str, bare: str, tmp: Path) -> dict | None:
@@ -126,8 +121,17 @@ def ensure_classification_issue(adv_id: str, tags: list[str]) -> None:
         "`not_affected` is a claim about this source tree and must never "
         "be auto-asserted."
     )
-    run(["gh", "issue", "create", "--repo", REPO, "--title", title,
-         "--body", body, "--label", "security"], check=False)
+    cmd = ["gh", "issue", "create", "--repo", REPO, "--title", title,
+           "--body", body]
+    res = run([*cmd, "--label", "security"], check=False)
+    if res.returncode != 0:
+        print(f"::warning::gh issue create with label 'security' failed for "
+              f"{adv_id}: {res.stderr.strip()[:300]}; retrying without label")
+        res = run(cmd, check=False)
+    if res.returncode != 0:
+        print(f"::warning::could not open classification issue for {adv_id}: "
+              f"{res.stderr.strip()[:300]}")
+        return
     print(f"::notice::opened classification issue for {adv_id}")
 
 
@@ -152,15 +156,50 @@ def sign_and_upload(tag: str, vex_path: Path, dry_run: bool) -> None:
     print(f"::notice::re-issued {vex_path.name} on {tag}")
 
 
+def self_test() -> None:
+    def doc(commit: str, count: int, ts: str, state: str = "in_triage") -> dict:
+        return {
+            "version": 1,
+            "metadata": {"timestamp": ts},
+            "vulnerabilities": [{
+                "id": "RUSTSEC-2026-9901",
+                "affects": [{"ref": "root:fixture-a@1.0.0"}],
+                "analysis": {"state": state, "detail": "d"},
+            }],
+            "properties": [
+                {"name": "advisory-db.commit", "value": commit},
+                {"name": "asserted-at", "value": ts},
+                {"name": "advisory-db.advisory-count",
+                 "value": json.dumps({"root": count})},
+            ],
+        }
+
+    base = doc("aaa", 1290, "2026-01-01T00:00:00Z")
+    assert normalized(base) == normalized(doc("bbb", 1311, "2026-02-01T00:00:00Z")), \
+        "provenance-only change must compare equal"
+    assert normalized(base) != normalized(
+        doc("aaa", 1290, "2026-01-01T00:00:00Z", "not_affected")), \
+        "changed analysis must compare unequal"
+    extra = doc("aaa", 1290, "2026-01-01T00:00:00Z")
+    extra["vulnerabilities"].append(
+        {"id": "RUSTSEC-2026-9902", "affects": [{"ref": "root:b@2.0.0"}],
+         "analysis": {"state": "in_triage"}})
+    assert normalized(base) != normalized(extra), "new match must compare unequal"
+    print("vex_reissue self-test: OK")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--releases", type=int, default=3)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
+    if args.self_test:
+        self_test()
+        return
 
     tools = Path(__file__).resolve().parent
     judgements_path = tools.parent / "security" / "vex-judgements.json"
-    db_commit = advisory_db_commit()
     needs_judgement: dict[str, list[str]] = {}
     changed = 0
 
@@ -179,7 +218,6 @@ def main() -> None:
             candidate = tmp / f"witness-{bare}.vex.json"
             run([sys.executable, str(tools / "generate_vex.py"),
                  "--component", "witness", "--version", bare,
-                 "--advisory-db-commit", db_commit,
                  "--judgements", str(judgements_path),
                  "--out", str(candidate), *audit_args])
             new_doc = json.loads(candidate.read_text(encoding="utf-8"))
