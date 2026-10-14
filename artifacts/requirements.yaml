@@ -1420,7 +1420,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: crates.io publishing runs in CI via OIDC trusted publishing
-    status: implemented
+    status: verified
     description: >
       The v0.44.0 cut stalled for a month on an expired laptop
       crates.io token — the exact failure mode the org release
@@ -1434,7 +1434,11 @@ artifacts:
       release. Already-published versions are skipped so partial
       publishes and re-runs are safe. One-time setup: each crate's
       crates.io Trusted Publishing settings must name this repo +
-      workflow file.
+      workflow file. VERIFIED 2026-10-14: workflow_dispatch(tag=v0.44.0)
+      run 38616109301 authenticated via OIDC and published all four
+      crates; the crates.io API reports 0.44.0 for witness-mcdc-checker,
+      witness-mcdc-core, witness-mcdc and witness-mcdc-viz. The
+      tag-push trigger runs the same job and is first exercised at v0.45.0.
     tags: [v0.45, release, supply-chain, distribution]
     fields:
       priority: must
