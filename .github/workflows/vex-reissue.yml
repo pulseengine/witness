@@ -46,7 +46,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        # Pinned: tools/generate_vex.py reads the `database.last-commit` and
+        # `database.advisory-count` fields and the `vulnerabilities.list`
+        # shape of `cargo audit --json`. Verified against 0.22.1; bump this
+        # deliberately, in lockstep with the generator.
+        run: cargo install cargo-audit --locked --version 0.22.1
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
