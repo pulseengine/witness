@@ -389,7 +389,11 @@ jobs:
       # .sig/.cert pair from the signing step below, which the re-issue
       # refreshes together with the document.
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        # Pinned: tools/generate_vex.py reads the `database.last-commit` and
+        # `database.advisory-count` fields and the `vulnerabilities.list`
+        # shape of `cargo audit --json`. Verified against 0.22.1; bump this
+        # deliberately, in lockstep with the generator.
+        run: cargo install cargo-audit --locked --version 0.22.1
       - name: Generate VEX (CycloneDX)
         env:
           GITHUB_REF: ${{ github.ref }}
@@ -399,14 +403,13 @@ jobs:
           BARE="${VERSION#v}"
           # cargo audit exits 1 when matches exist — the JSON is
           # complete either way, so don't let that stop the release.
+          # generate_vex.py reads the advisory-db commit from the audit
+          # JSON (`database.last-commit`).
           cargo audit --file Cargo.lock --json > audit-root.json || true
           cargo audit --file crates/witness-viz/Cargo.lock --json > audit-viz.json || true
           cargo audit --file crates/witness-component/Cargo.lock --json > audit-component.json || true
-          DB_COMMIT=$(for d in "$HOME"/.cargo/advisory-db/*/; do
-            git -C "$d" rev-parse HEAD 2>/dev/null && break; done || echo unknown)
           python3 tools/generate_vex.py \
             --component witness --version "$BARE" \
-            --advisory-db-commit "${DB_COMMIT:-unknown}" \
             --judgements security/vex-judgements.json \
             --audit root=audit-root.json \
             --audit viz=audit-viz.json \
