@@ -25,7 +25,6 @@ Usage (release workflow):
   python3 tools/generate_vex.py \
       --component witness --version 0.45.0 \
       --audit root=audit-root.json --audit viz=audit-viz.json \
-      --advisory-db-commit "$DB_COMMIT" \
       --judgements security/vex-judgements.json \
       --out release-assets/witness-0.45.0.vex.json
 
@@ -85,6 +84,16 @@ def _matches_from_audit(audit: dict, lock_label: str) -> list[dict]:
             }
         )
     return out
+
+
+def advisory_db_commit_from_audits(audits: dict[str, dict]) -> str:
+    """`database.last-commit` of the first audit that reports one (the
+    audits of one run share a database)."""
+    for _, audit in sorted(audits.items()):
+        commit = audit.get("database", {}).get("last-commit")
+        if commit:
+            return commit
+    return "unknown"
 
 
 def _analysis_for(match_id: str, judgements: dict) -> dict:
@@ -181,7 +190,10 @@ def build_vex(
 # --- self-test fixtures (no network, no cargo) -----------------------
 
 _FIXTURE_AUDIT = {
-    "database": {"advisory-count": 1290},
+    "database": {
+        "advisory-count": 1290,
+        "last-commit": "0123456789abcdef0123456789abcdef01234567",
+    },
     "vulnerabilities": {
         "count": 2,
         "list": [
@@ -252,6 +264,11 @@ def self_test() -> None:
         pass
     else:
         raise AssertionError("bare-state judgement was not rejected")
+    assert (
+        advisory_db_commit_from_audits({"root": _FIXTURE_AUDIT})
+        == "0123456789abcdef0123456789abcdef01234567"
+    ), "db commit read from audit JSON"
+    assert advisory_db_commit_from_audits({"root": {"database": {}}}) == "unknown"
     # The clean case still records what made it true.
     clean = build_vex(
         "witness", "0", {"root": {"database": {"advisory-count": 5}}}, {}, "c", "t"
@@ -276,7 +293,11 @@ def main() -> None:
         help="cargo-audit --json output for one lockfile; repeatable",
     )
     ap.add_argument("--judgements", type=Path, default=None)
-    ap.add_argument("--advisory-db-commit", default="unknown")
+    ap.add_argument(
+        "--advisory-db-commit",
+        default=None,
+        help="default: database.last-commit from the first --audit file",
+    )
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
@@ -311,7 +332,8 @@ def main() -> None:
         version=args.version,
         audits=audits,
         judgements=judgements,
-        advisory_db_commit=args.advisory_db_commit,
+        advisory_db_commit=args.advisory_db_commit
+        or advisory_db_commit_from_audits(audits),
         asserted_at=asserted_at,
     )
     text = json.dumps(doc, indent=2, sort_keys=False) + "\n"
