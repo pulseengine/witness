@@ -1020,7 +1020,7 @@ artifacts:
       steps:
         - run: grep -q 'crates-io-auth-action' .github/workflows/publish-to-crates-io.yml
         - run: "! grep -q 'secrets.CARGO_REGISTRY_TOKEN' .github/workflows/publish-to-crates-io.yml"
-        - run: python3 -c "s=open('.github/workflows/publish-to-crates-io.yml').read(); order=[s.index(c) for c in ('witness-mcdc-checker','witness-mcdc-core','-p witness-mcdc\n','crates/witness-viz')]; assert order==sorted(order), order"
+        - run: python3 -c "s=open('.github/workflows/publish-to-crates-io.yml').read(); order=[s.index(c) for c in ('publish_one . -p witness-mcdc-checker','publish_one . -p witness-mcdc-core','publish_one . -p witness-mcdc\n','publish_one crates/witness-viz')]; assert order==sorted(order), order"
     links:
       - type: verifies
         target: REQ-075
@@ -1047,5 +1047,47 @@ artifacts:
     links:
       - type: verifies
         target: REQ-076
+      - type: produced-by
+        target: AS-001
+
+  - id: TEST-REQ-077
+    type: test-case
+    title: Verification runner JUnit round-trips into rivet import-results
+    description: >
+      Verifies REQ-077. The self-test generates JUnit from a fixture (one
+      pass, one fail whose command contains <, & and ", one skipped)
+      without running real steps, asserts the XML parses, testcase names
+      equal the IDs, classname is absent and the failure message
+      round-trips; then, if rivet has import-results, imports it and
+      asserts every artifact value is exactly a fixture ID. The rivet half
+      prints SKIP when rivet lacks the subcommand.
+    tags: [verification, release, traceability]
+    fields:
+      method: automated-test
+      steps:
+        - run: python3 tools/run_verification.py --junit-self-test
+    links:
+      - type: verifies
+        target: REQ-077
+      - type: produced-by
+        target: AS-001
+
+  - id: TEST-REQ-078
+    type: test-case
+    title: Release workflow carries the JUnit evidence and import jobs
+    description: >
+      Drift guard for REQ-078 only; the requirement itself is proven after
+      the tag (see DEC-049): the release carries
+      witness-<TAG>-verification.junit.xml covered by the signed
+      SHA256SUMS.txt, and an import PR exists on rivet-results/<TAG>.
+    tags: [verification, release, traceability]
+    fields:
+      method: inspection
+      steps:
+        - run: grep -q 'import-verification-results' .github/workflows/release.yml
+        - run: grep -q 'create-github-app-token' .github/workflows/release.yml
+    links:
+      - type: verifies
+        target: REQ-078
       - type: produced-by
         target: AS-001

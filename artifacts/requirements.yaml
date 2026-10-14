@@ -1477,3 +1477,56 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+
+  - id: REQ-077
+    release: v0.45.0
+    type: requirement
+    title: The verification runner emits JUnit whose testcase names are exact rivet IDs
+    status: implemented
+    description: >
+      tools/run_verification.py --junit writes one <testcase> per rivet
+      test-case artifact with name set to the artifact ID, no classname,
+      the case's wall-clock time, <failure message> naming the failing
+      step command for a failed case and <skipped/> for a no-steps case.
+      rivet import-results joins on <classname>.<name>, so an absent
+      classname makes each imported result's artifact exactly the rivet ID
+      and the result attaches to the trace graph. The XML is built with
+      xml.etree.ElementTree because failure messages carry shell commands
+      with quotes, < and &. A round-trip self-test
+      (run_verification.py --junit-self-test) checks the XML and, when the
+      installed rivet has import-results, that every imported artifact
+      value is exactly a fixture ID.
+    tags: [v0.45, release, verification, traceability]
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: produced-by
+        target: AS-001
+
+  - id: REQ-078
+    release: v0.45.0
+    type: requirement
+    title: Each release runs the full verification suite and imports the signed JUnit into rivet
+    status: implemented
+    description: >
+      The release workflow shall run every rivet test-case at the tag
+      (verification-evidence job, ubuntu-latest, pinned rivet) and emit
+      witness-<TAG>-verification.junit.xml with the tag commit's committer
+      time as the suite timestamp. create-github-release needs that job, so
+      a failing case at the tag blocks the release, and the JUnit is
+      uploaded even on failure. The file lands in release-assets before
+      SHA256SUMS.txt, so the signed checksums and a per-asset cosign
+      signature cover it. After the release, import-verification-results
+      downloads the JUnit by pinned tag, verifies its sha256 against
+      SHA256SUMS.txt, runs rivet import-results, and opens or updates a PR
+      on rivet-results/<TAG> through the org GitHub App token. The PR
+      imports evidence only: no status changes, no auto-merge. It can only
+      be proven after the tag exists.
+    tags: [v0.45, release, supply-chain, traceability]
+    fields:
+      priority: must
+      category: non-functional
+    links:
+      - type: produced-by
+        target: AS-001

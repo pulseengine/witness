@@ -337,9 +337,68 @@ jobs:
           name: wasm-component
           path: ${{ env.ASSET }}
 
+  # REQ-078 — run the whole rivet test-case suite at the tag and ship the
+  # result as JUnit. The release `needs` this job, so a failing case at the
+  # tag blocks the release; the JUnit is uploaded with if: always() so a
+  # failing run still leaves its evidence.
+  verification-evidence:
+    name: Verification evidence (JUnit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      RIVET_REV: 6f9ef82c846aca0229583f155e9a255e3becfa6f
+      TAG: ${{ github.ref_name }}
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Cache rivet binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/rivet
+          key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install rivet (skip if cached)
+        run: |
+          if [ -x "$HOME/.cargo/bin/rivet" ]; then
+            echo "rivet already present: $("$HOME/.cargo/bin/rivet" --version)"
+          else
+            cargo install --locked --git https://github.com/pulseengine/rivet \
+              --rev "$RIVET_REV" \
+              --bin rivet \
+              rivet-cli
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@v2
+      - name: Run full verification suite
+        run: |
+          # Fixed timestamp (tag commit, UTC) + tag in the suite name make
+          # the rivet run id, and so the results file name, deterministic.
+          TS=$(TZ=UTC git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)
+          python3 tools/run_verification.py \
+            --filter '(= type "test-case")' \
+            --results-json verification-results.json \
+            --junit "witness-${TAG}-verification.junit.xml" \
+            --suite-name "witness-${TAG}" \
+            --timestamp "$TS"
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verification-junit
+          path: |
+            witness-${{ github.ref_name }}-verification.junit.xml
+            verification-results.json
+          if-no-files-found: warn
+
   create-github-release:
     name: Create GitHub Release
-    needs: [build-binaries, compliance, wasm-component]
+    needs: [build-binaries, compliance, wasm-component, verification-evidence]
     runs-on: ubuntu-latest
     # Permissions — three of them, per the org-wide release-artifact
     # standardization brief:
@@ -363,7 +422,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.wasm" -o -name "musl-static-*.txt" \) -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.wasm" -o -name "musl-static-*.txt" -o -name "*-verification.junit.xml" \) -exec cp {} release-assets/ \;
 
       # SBOM step. Must run BEFORE the SHA256SUMS.txt step below so
       # the SBOM's own digest enters the sums. CycloneDX 1.5 JSON is
@@ -594,6 +653,136 @@ jobs:
             --title "witness $VERSION" \
             --notes-file release-notes.md \
             release-assets/*
+
+  # REQ-078 — import the PUBLISHED, signed JUnit into rivet via a PR. Only
+  # the app token writes: GITHUB_TOKEN-made PRs are blocked by org policy
+  # and would not trigger CI. Imports evidence only: no status is changed
+  # and auto-merge is deliberately not armed.
+  import-verification-results:
+    name: Open rivet results import PR
+    needs: [create-github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      RIVET_REV: 6f9ef82c846aca0229583f155e9a255e3becfa6f
+      TAG: ${{ github.ref_name }}
+      BASE: ${{ github.event.repository.default_branch }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Mint App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.ACTIONS_BOT_APP_ID }}
+          private-key: ${{ secrets.ACTIONS_BOT_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.app_token.outputs.token }}
+      - name: Cache rivet binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/rivet
+          key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install rivet (skip if cached)
+        run: |
+          if [ -x "$HOME/.cargo/bin/rivet" ]; then
+            echo "rivet already present: $("$HOME/.cargo/bin/rivet" --version)"
+          else
+            cargo install --locked --git https://github.com/pulseengine/rivet \
+              --rev "$RIVET_REV" \
+              --bin rivet \
+              rivet-cli
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Download release JUnit and checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dl
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dl \
+            --pattern '*-verification.junit.xml' --pattern SHA256SUMS.txt
+      - name: Verify JUnit against SHA256SUMS.txt
+        id: verify
+        run: |
+          set -euo pipefail
+          cd dl
+          FILE="witness-${TAG}-verification.junit.xml"
+          [ -f "$FILE" ] || { echo "::error::$FILE not on release $TAG"; exit 1; }
+          ACTUAL=$(sha256sum "$FILE" | cut -d' ' -f1)
+          EXPECTED=$(awk -v f="./$FILE" '$2==f {print $1}' SHA256SUMS.txt)
+          [ -n "$EXPECTED" ] || { echo "::error::$FILE has no line in SHA256SUMS.txt"; exit 1; }
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::sha256 mismatch for $FILE: downloaded $ACTUAL, SHA256SUMS.txt says $EXPECTED"
+            exit 1
+          fi
+          echo "sha256=$ACTUAL" >> "$GITHUB_OUTPUT"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "verified $FILE sha256=$ACTUAL matches SHA256SUMS.txt"
+      - name: Import into rivet results
+        id: import
+        env:
+          FILE: ${{ steps.verify.outputs.file }}
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          rivet import-results --format junit "dl/$FILE" --output results | tee import.log
+          echo "summary=$(grep -m1 '^Imported' import.log)" >> "$GITHUB_OUTPUT"
+      - name: Commit, push and open PR
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          SHA256: ${{ steps.verify.outputs.sha256 }}
+          SUMMARY: ${{ steps.import.outputs.summary }}
+          FILE: ${{ steps.verify.outputs.file }}
+        run: |
+          set -euo pipefail
+          BRANCH="rivet-results/${TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add results/
+          if git diff --cached --quiet; then
+            echo "::notice::results for $TAG already on $BASE; nothing to import"
+            exit 0
+          fi
+          printf '%s\n' \
+            "chore(rivet): import verification results for ${TAG}" \
+            "" \
+            "Imports ${FILE} from release ${TAG}, sha256 ${SHA256}," \
+            "verified against the release's SHA256SUMS.txt." \
+            "Run: ${RUN_URL}" \
+            "" \
+            "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" \
+            "Claude-Session: https://claude.ai/code/session_01D6xBKgA1rLcdxxaYv5Cfrc" > commit-msg.txt
+          git commit -F commit-msg.txt
+          # Lease against the remote branch as it is now, so a re-run
+          # overwrites its own earlier push but not a foreign one.
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            git fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+          fi
+          git push --force-with-lease origin "HEAD:refs/heads/${BRANCH}"
+          printf '%s\n' \
+            "Imports the verification evidence from release \`${TAG}\` into rivet." \
+            "" \
+            "- ${SUMMARY}" \
+            "- Source: \`${FILE}\`, sha256 \`${SHA256}\` (checked against the release's \`SHA256SUMS.txt\`)" \
+            "- Run: ${RUN_URL}" \
+            "" \
+            "This imports evidence only. It changes no artifact status; moving a requirement to verified stays a reviewed, separate change." > pr-body.txt
+          EXISTING=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh pr edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --body-file pr-body.txt
+            echo "Updated PR #$EXISTING"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE" \
+              --head "$BRANCH" \
+              --title "chore(rivet): import verification results for ${TAG}" \
+              --body-file pr-body.txt
+          fi
 
   # v0.23.0 — Publish the static MC/DC viz dashboard for this release's
   # canonical verdict set to GitHub Pages. The dashboard is generated
