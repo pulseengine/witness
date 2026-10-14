@@ -33,6 +33,18 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   laptop-token failure mode that stalled the v0.44.0 publish. One-time
   crates.io Trusted Publishing setup required per crate. (REQ-075)
 
+### Changed
+
+- **wasmtime 48.0.4 → 49.0.2** — the deliberate 48→49 major migration
+  (no witness API changes needed; verified clippy/test/component-check
+  green at `--locked`). **MSRV is now 1.96** (cranelift 0.136 floor);
+  fmt/clippy CI pins bumped in lockstep.
+- Coverage is now a gate, not a dashboard: the Coverage job runs on PRs
+  with `cargo llvm-cov report --fail-under-lines 79` (measured 79.80%
+  on the enforcing instrument; negative-controlled). Raise the number
+  when coverage rises — never lower it to make a build pass. (#245, by
+  avrabe.)
+
 ### Security
 
 - **wasmtime 48.0.1 → 48.0.4** — clears RUSTSEC-2026-0316/0325/0326/0327
