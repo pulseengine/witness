@@ -995,6 +995,7 @@ artifacts:
       steps:
         - run: grep -q 'cron:' .github/workflows/vex-reissue.yml && grep -q 'vex_reissue.py' .github/workflows/vex-reissue.yml
         - run: python3 -c "import ast; ast.parse(open('tools/vex_reissue.py').read())"
+        - run: python3 tools/vex_reissue.py --self-test
         - run: grep -q 'git show' tools/vex_reissue.py || grep -q '"show"' tools/vex_reissue.py
     links:
       - type: verifies
