@@ -360,9 +360,13 @@ jobs:
         with:
           path: ~/.cargo/bin/rivet
           key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
+      # The verdict suite (TEST-VERDICT-SUITE) builds its fixtures for both
+      # wasm targets; the PR gate never runs it, so its prerequisites
+      # live only here.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown, wasm32-wasip2
       - name: Install rivet (skip if cached)
         run: |
           if [ -x "$HOME/.cargo/bin/rivet" ]; then
@@ -754,10 +758,7 @@ jobs:
             "" \
             "Imports ${FILE} from release ${TAG}, sha256 ${SHA256}," \
             "verified against the release's SHA256SUMS.txt." \
-            "Run: ${RUN_URL}" \
-            "" \
-            "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" \
-            "Claude-Session: https://claude.ai/code/session_01D6xBKgA1rLcdxxaYv5Cfrc" > commit-msg.txt
+            "Run: ${RUN_URL}" > commit-msg.txt
           git commit -F commit-msg.txt
           # Lease against the remote branch as it is now, so a re-run
           # overwrites its own earlier push but not a foreign one.
