@@ -169,6 +169,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
+        - run: verdicts/build-all.sh
         - run: cargo build --release -p witness-mcdc
         - run: |
             for v in leap_year range_overlap triangle state_guard mixed_or_and safety_envelope parser_dispatch; do
