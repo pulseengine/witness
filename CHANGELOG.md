@@ -7,6 +7,15 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **crates.io publishing now waits for a successful release.** `publish-to-crates-io.yml`
+  runs on `workflow_run` after the Release workflow completes successfully for a tag push,
+  instead of in parallel with it. It publishes the exact commit Release built (checked
+  against the tag), so a failing release, e.g. a red test suite at the tag, can no longer
+  leave an irreversible crates.io publish behind. The manual `workflow_dispatch(tag)`
+  backfill path is unchanged. (REQ-075)
+
 ## [0.45.0] — 2026-10-15
 
 Headline: **the release pipeline now proves itself.** Static musl assets (#234),
