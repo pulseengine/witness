@@ -1482,7 +1482,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: The verification runner emits JUnit whose testcase names are exact rivet IDs
-    status: implemented
+    status: verified
     description: >
       tools/run_verification.py --junit writes one <testcase> per rivet
       test-case artifact with name set to the artifact ID, no classname,
