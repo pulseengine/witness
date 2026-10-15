@@ -37,6 +37,30 @@ proof is this release's own records (signed musl records, the VEX signature,
 the JUnit import PR) and the first VEX re-issue run, and they flip to verified
 from those afterwards.
 
+### Known limitation — read this if you build with rustc ≥ 1.99
+
+**rustc 1.99 can compile a real multi-condition decision into code witness
+cannot see, and witness then reports it as `0/0 full MC/DC`.** Side-effect-free
+short-circuit chains (`a || b || c`, `a && b`) are lowered to branch-free
+`i32.or`/`i32.and` arithmetic over comparisons, even at `opt-level = 1`.
+witness instruments conditional branches, so those decisions disappear from
+the report rather than showing as gaps.
+
+Measured on the canonical verdicts, with the same source and the same witness
+binary: `triangle` drops from 2 branches to 0 and `state_guard` from 3 to 0
+between rustc 1.98.1 and 1.99.0 (#268). This is not a regression in this
+release: v0.44.0 behaves identically on a 1.99-built binary.
+
+Until witness reports or measures these decisions (REQ-079, planned for
+v0.46.0): treat a `0/0` result on code you know has conditions as
+**unmeasured, not covered**. Build MC/DC evidence at `opt-level = 0`, or with
+rustc 1.98. Measured: under rustc 1.99 at `opt-level = 0`, `triangle` and
+`state_guard` keep all their branches (2 and 3).
+
+The verdict-suite CI job is pinned to rustc 1.98.1 so its regression gate
+measures witness against fixed fixtures. It now runs on every PR, too: as a
+main-only job it sat red on `main` from 2026-10-03 to 2026-10-15 unseen.
+
 ### Behavior changes for consumers
 
 - **MSRV is now 1.96** (wasmtime 49 / cranelift 0.136).
