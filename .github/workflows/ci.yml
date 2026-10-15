@@ -32,9 +32,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  # v0.45 — every job that ran on the self-hosted `rust-cpu` pool now runs
+  # on GitHub-hosted ubuntu-latest, for the reason Miri moved in v0.29: the
+  # pool is shared org-wide and was saturated for days (required checks sat
+  # QUEUED 75+ min and were cancelled before getting a runner). The full
+  # 58-case rivet suite was proven on ubuntu-latest before this move.
+  # Trade: GitHub-hosted minutes.
   clippy:
     name: Clippy
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       # Pinned (not @stable) so a moving stable can't surface NEW clippy
@@ -52,7 +58,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: [self-hosted, linux, x64, rust-cpu]
+          - os: ubuntu-latest
           # Stays on ubuntu-latest equivalents: smithy is Linux x86_64 only.
           - os: macos-latest
           - os: windows-latest
@@ -65,7 +71,7 @@ jobs:
 
   msrv:
     name: MSRV
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.96.0
@@ -148,7 +154,7 @@ jobs:
 
   proptest-extended:
     name: Proptest (extended cases)
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v7
@@ -173,7 +179,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     # Runs on PRs too, not only push-to-main. A coverage job that only runs
     # after a merge is an alarm, not a gate — it tells you coverage fell once
     # the fall is already on main. FreeRTOS's coverage-cop, the clearest public
@@ -230,7 +236,7 @@ jobs:
 
   dogfood:
     name: Dogfood — witness measures the fixture
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v7
@@ -283,7 +289,7 @@ jobs:
 
   wasm-component:
     name: Build witness-component (Component Model wasm) — v0.7.0+
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -353,7 +359,7 @@ jobs:
 
   verdict-suite:
     name: Verdict suite — end-to-end MC/DC on the canonical 7
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v7
