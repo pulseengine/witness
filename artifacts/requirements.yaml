@@ -1442,6 +1442,9 @@ artifacts:
       crates; the crates.io API reports 0.44.0 for witness-mcdc-checker,
       witness-mcdc-core, witness-mcdc and witness-mcdc-viz. The
       tag-push trigger runs the same job and is first exercised at v0.45.0.
+      Since 2026-10-15 the tag publish waits for the Release workflow to succeed
+      (workflow_run), and publishes the exact commit Release built, so a failing
+      release can no longer leave an irreversible crates.io publish behind.
     tags: [v0.45, release, supply-chain, distribution]
     fields:
       priority: must
