@@ -1530,3 +1530,33 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+
+  - id: REQ-079
+    release: v0.46.0
+    type: requirement
+    title: Decisions lowered to branch-free arithmetic are never reported as clean
+    status: approved
+    description: >
+      rustc 1.99 lowers side-effect-free short-circuit chains (a || b || c,
+      a && b) to branch-free i32.or/i32.and arithmetic over comparisons even
+      at opt-level 1, so witness, which instruments conditional branches,
+      finds no branch and reports 0/0 full MC/DC for a function that has a
+      real multi-condition decision. Proven one-variable on the canonical
+      verdicts: triangle (2 -> 0 branches) and state_guard (3 -> 0) between
+      rustc 1.98.1 and 1.99.0, same source and same witness (#268). witness
+      shall never report a silent clean result here. At minimum, when a
+      source-level decision (DWARF line info, or comparisons feeding an
+      i32.and/i32.or tree into a return value or condition) yields no
+      instrumentable branch, it emits a diagnostic and a manifest warning.
+      The full fix measures branch-free-lowered conditions directly, by
+      instrumenting the comparison results feeding the and/or tree, which
+      would also let the verdict-suite CI pin (rustc 1.98.1) be lifted.
+      Interim mitigation in v0.45.0: that pin, the verdict suite running
+      on PRs, and a changelog disclosure.
+    tags: [v0.46, instrument, soundness, compiler-drift]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001
