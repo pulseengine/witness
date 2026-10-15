@@ -1088,6 +1088,8 @@ artifacts:
     fields:
       method: inspection
       steps:
+        - run: python3 tools/gh_signed_commit.py --self-test
+        - run: grep -q 'tools/gh_signed_commit.py' .github/workflows/release.yml
         - run: grep -q 'import-verification-results' .github/workflows/release.yml
         - run: grep -q 'create-github-app-token' .github/workflows/release.yml
     links:

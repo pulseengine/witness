@@ -745,9 +745,6 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="rivet-results/${TAG}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$BRANCH"
           git add results/
           if git diff --cached --quiet; then
             echo "::notice::results for $TAG already on $BASE; nothing to import"
@@ -759,13 +756,14 @@ jobs:
             "Imports ${FILE} from release ${TAG}, sha256 ${SHA256}," \
             "verified against the release's SHA256SUMS.txt." \
             "Run: ${RUN_URL}" > commit-msg.txt
-          git commit -F commit-msg.txt
-          # Lease against the remote branch as it is now, so a re-run
-          # overwrites its own earlier push but not a foreign one.
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
-            git fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
-          fi
-          git push --force-with-lease origin "HEAD:refs/heads/${BRANCH}"
+          # main requires signed commits and a bot's local `git commit` is
+          # unsigned, so commit through the GraphQL API, which GitHub signs.
+          # The branch is reset to main first, so a re-run overwrites.
+          BASE_SHA=$(git rev-parse HEAD)
+          mapfile -t CHANGED < <(git diff --cached --name-only)
+          python3 tools/gh_signed_commit.py --repo "$GITHUB_REPOSITORY" \
+            --branch "$BRANCH" --base-sha "$BASE_SHA" \
+            --message-file commit-msg.txt "${CHANGED[@]}"
           printf '%s\n' \
             "Imports the verification evidence from release \`${TAG}\` into rivet." \
             "" \
