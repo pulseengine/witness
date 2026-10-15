@@ -9,6 +9,19 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Per-release verification JUnit** (`witness-<TAG>-verification.junit.xml`):
+  `tools/run_verification.py --junit` emits one `<testcase>` per rivet
+  test-case, `name` = the rivet ID and no `classname`, so
+  `rivet import-results` maps results onto the trace graph. The release runs
+  the full suite at the tag (a failing case blocks the release), and the
+  JUnit ships before `SHA256SUMS.txt`, so the signed checksums and a
+  per-asset cosign signature cover it. Round-trip self-test:
+  `run_verification.py --junit-self-test`. (REQ-077, REQ-078)
+- **Automated rivet results import PR**: after the release, CI verifies the
+  published JUnit's sha256 against the signed `SHA256SUMS.txt`, runs
+  `rivet import-results`, and opens or updates a PR on
+  `rivet-results/<TAG>` through the org GitHub App. Evidence only: no status
+  changes, no auto-merge. (REQ-078)
 - **#234 — static musl Linux release assets** (`x86_64-unknown-linux-musl`,
   `aarch64-unknown-linux-musl`) beside the gnu ones, whose glibc-2.39 floor
   excluded Ubuntu 22.04 / Debian 12 / RHEL 9 / Alpine / distroless. Option 1

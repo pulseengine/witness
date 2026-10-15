@@ -12,3 +12,5 @@ schema-paths:
 sources:
   - path: artifacts
     format: generic-yaml
+
+results: results
