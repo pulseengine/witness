@@ -7,6 +7,23 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **crates.io publishing now waits for a successful release.** `publish-to-crates-io.yml`
+  runs on `workflow_run` after the Release workflow completes successfully for a tag push,
+  instead of in parallel with it. It publishes the exact commit Release built (checked
+  against the tag), so a failing release, e.g. a red test suite at the tag, can no longer
+  leave an irreversible crates.io publish behind. The manual `workflow_dispatch(tag)`
+  backfill path is unchanged. (REQ-075)
+
+### Fixed
+
+- **The release's rivet import PR could never merge:** `main` requires signed commits, and
+  the import job's plain `git commit` by github-actions[bot] was unsigned (v0.45.0's #270
+  was blocked and re-signed by hand). The job now commits through GitHub's GraphQL
+  `createCommitOnBranch` (`tools/gh_signed_commit.py`), which GitHub signs. Proven on a
+  throwaway branch with the org app: `verified: true (valid)`. (REQ-078)
+
 ## [0.45.0] — 2026-10-15
 
 Headline: **the release pipeline now proves itself.** Static musl assets (#234),
@@ -36,6 +53,30 @@ REQ-073 (VEX asset), REQ-074 (re-issue) and REQ-078 (JUnit import PR). Their
 proof is this release's own records (signed musl records, the VEX signature,
 the JUnit import PR) and the first VEX re-issue run, and they flip to verified
 from those afterwards.
+
+### Known limitation — read this if you build with rustc ≥ 1.99
+
+**rustc 1.99 can compile a real multi-condition decision into code witness
+cannot see, and witness then reports it as `0/0 full MC/DC`.** Side-effect-free
+short-circuit chains (`a || b || c`, `a && b`) are lowered to branch-free
+`i32.or`/`i32.and` arithmetic over comparisons, even at `opt-level = 1`.
+witness instruments conditional branches, so those decisions disappear from
+the report rather than showing as gaps.
+
+Measured on the canonical verdicts, with the same source and the same witness
+binary: `triangle` drops from 2 branches to 0 and `state_guard` from 3 to 0
+between rustc 1.98.1 and 1.99.0 (#268). This is not a regression in this
+release: v0.44.0 behaves identically on a 1.99-built binary.
+
+Until witness reports or measures these decisions (REQ-079, planned for
+v0.46.0): treat a `0/0` result on code you know has conditions as
+**unmeasured, not covered**. Build MC/DC evidence at `opt-level = 0`, or with
+rustc 1.98. Measured: under rustc 1.99 at `opt-level = 0`, `triangle` and
+`state_guard` keep all their branches (2 and 3).
+
+The verdict-suite CI job is pinned to rustc 1.98.1 so its regression gate
+measures witness against fixed fixtures. It now runs on every PR, too: as a
+main-only job it sat red on `main` from 2026-10-03 to 2026-10-15 unseen.
 
 ### Behavior changes for consumers
 
