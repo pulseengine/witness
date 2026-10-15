@@ -65,6 +65,18 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   callback result-count overflow, mis-typed tag imports, `call_ref` fuel
   drop). Patch-level on the same major; the 48→49 migration is tracked
   separately.
+- **witness-viz lockfile: 11 advisories cleared** (`crates/witness-viz/Cargo.lock`,
+  a standalone workspace that ships in every release tarball): quick-xml
+  0.39.4 → 0.42.0 via plist 1.9.0 → 1.10.1 (RUSTSEC-2026-0194/0195);
+  quinn-proto 0.11.14 → 0.11.19 (RUSTSEC-2026-0185/0338/0339/0340/0342);
+  rustls 0.23.40 → 0.23.46 (RUSTSEC-2026-0285/0346/0348/0349), which also
+  moves aws-lc-rs 1.17.0 → 1.18.2, aws-lc-sys 0.41.0 → 0.46.0 and
+  rustls-webpki 0.103.13 → 0.103.15. The cross-compiled targets (aarch64
+  gnu, both musl) were build-checked before merge. No `Cargo.toml` change.
+- **CI Security Audit now covers all three lockfiles** (root, witness-viz,
+  witness-component) with cargo-audit pinned to 0.22.2. Previously only the
+  root `Cargo.lock` was audited, which is why the witness-viz advisories
+  above went unnoticed.
 
 ## [0.44.0] — 2026-09-07
 
