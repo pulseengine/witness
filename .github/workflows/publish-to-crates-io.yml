@@ -16,10 +16,13 @@
 # (or a re-run) is safe.
 name: Publish to crates.io
 
+# Runs only after the Release workflow SUCCEEDS for a tag push: a failing
+# release (e.g. the full verification suite at the tag) must not leave an
+# irreversible crates.io publish behind. The manual backfill path stays.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -33,16 +36,49 @@ permissions:
   id-token: write
 
 concurrency:
-  group: crates-io-${{ github.event.inputs.tag || github.ref }}
+  group: crates-io-${{ github.event.inputs.tag || github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
   publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve and validate the tag
+        id: tag
+        env:
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          TAG="${DISPATCH_TAG:-$RUN_TAG}"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::not a release tag: '$TAG'"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # Publish the exact commit the Release run built and signed.
+          echo "ref=${RUN_SHA:-$TAG}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ steps.tag.outputs.ref }}
+
+      - name: Tag must point at the commit Release built
+        if: github.event_name == 'workflow_run'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          TAG_SHA=$(git rev-parse "${TAG}^{commit}")
+          if [ "$TAG_SHA" != "$RUN_SHA" ]; then
+            echo "::error::tag $TAG is $TAG_SHA but Release built $RUN_SHA"; exit 1
+          fi
 
       - uses: dtolnay/rust-toolchain@stable
 

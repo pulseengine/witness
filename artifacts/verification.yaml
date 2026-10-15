@@ -1020,6 +1020,9 @@ artifacts:
       method: automated-test
       steps:
         - run: grep -q 'crates-io-auth-action' .github/workflows/publish-to-crates-io.yml
+        - run: |
+            grep -q 'workflows: \[Release\]' .github/workflows/publish-to-crates-io.yml &&
+              grep -q "workflow_run.conclusion == 'success'" .github/workflows/publish-to-crates-io.yml
         - run: "! grep -q 'secrets.CARGO_REGISTRY_TOKEN' .github/workflows/publish-to-crates-io.yml"
         - run: python3 -c "s=open('.github/workflows/publish-to-crates-io.yml').read(); order=[s.index(c) for c in ('publish_one . -p witness-mcdc-checker','publish_one . -p witness-mcdc-core','publish_one . -p witness-mcdc\n','publish_one crates/witness-viz')]; assert order==sorted(order), order"
     links:
