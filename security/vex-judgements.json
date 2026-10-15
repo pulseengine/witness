@@ -1,3 +1,167 @@
 {
-  "_comment": "Hand-authored VEX judgements (#235). Key: RUSTSEC id. Value: {state, justification?, detail}. `state` is a CycloneDX impact-analysis state (not_affected | false_positive | exploitable | resolved | in_triage); `justification` uses CycloneDX values like vulnerable_code_not_in_execute_path; `detail` (required) explains the judgement so a reviewer can check it. NEVER add an entry mechanically — a generated not_affected is a false statement signed into a release. tools/generate_vex.py emits unjudged matches as in_triage."
+  "_comment": "Hand-authored VEX judgements (#235). Key: RUSTSEC id. Value: {state, justification?, detail}. `state` is a CycloneDX impact-analysis state (not_affected | false_positive | exploitable | resolved | in_triage); `justification` uses CycloneDX values like vulnerable_code_not_in_execute_path; `detail` (required) explains the judgement so a reviewer can check it. NEVER add an entry mechanically — a generated not_affected is a false statement signed into a release. tools/generate_vex.py emits unjudged matches as in_triage.",
+  "RUSTSEC-2026-0268": {
+    "state": "not_affected",
+    "justification": "code_not_reachable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): affects the WASIp3 file/HTTP stream host implementation only. witness links WASI only via wasmtime_wasi::p2::add_to_linker_sync (run_via_wasmtime_component) and wasmtime_wasi::p1::add_to_linker_sync (run_via_embedded); no wasmtime_wasi::p3 / p3 add_to_linker call exists in crates/ at either tag, and wasmtime-wasi is depended on with default features only (workspace Cargo.toml `wasmtime-wasi = 47` at v0.43.0 and `= 48` at v0.44.0, no features key; only crates/witness depends on it). The p3 stream code is never linked into a Store."
+  },
+  "RUSTSEC-2026-0357": {
+    "state": "not_affected",
+    "justification": "code_not_reachable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): panic in Direct{Source,Destination}::remaining, used by wasmtime-wasi's WASIp3 implementation. witness links WASI only via wasmtime_wasi::p2::add_to_linker_sync (run_via_wasmtime_component) and wasmtime_wasi::p1::add_to_linker_sync (run_via_embedded); no wasmtime_wasi::p3 / p3 add_to_linker call exists in crates/ at either tag, and wasmtime-wasi is depended on with default features only (workspace Cargo.toml `wasmtime-wasi = 47` at v0.43.0 and `= 48` at v0.44.0, no features key; only crates/witness depends on it). witness does not call the Direct* APIs directly (no such symbol in crates/)."
+  },
+  "RUSTSEC-2026-0269": {
+    "state": "not_affected",
+    "justification": "requires_configuration",
+    "detail": "wasmtime-wasi 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): cap-std filesystem sandbox escape via trailing-slash paths/symlinks. WASI context is built only as WasiCtxBuilder::new().inherit_stdio() (crates/witness/src/run.rs, functions run_via_wasmtime_component and run_via_embedded, identical at v0.43.0 and v0.44.0; git grep at both tags); no preopened_dir/preopen call exists anywhere in crates/, so a guest has no filesystem descriptors to operate on. Without a preopened directory there is no sandboxed filesystem to escape from."
+  },
+  "RUSTSEC-2026-0352": {
+    "state": "not_affected",
+    "justification": "requires_configuration",
+    "detail": "wasmtime-wasi 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): sandbox escape when renaming symlinks with trailing slashes (macOS/FreeBSD). WASI context is built only as WasiCtxBuilder::new().inherit_stdio() (crates/witness/src/run.rs, functions run_via_wasmtime_component and run_via_embedded, identical at v0.43.0 and v0.44.0; git grep at both tags); no preopened_dir/preopen call exists anywhere in crates/, so a guest has no filesystem descriptors to operate on. Renaming requires a writable preopened directory."
+  },
+  "RUSTSEC-2026-0314": {
+    "state": "not_affected",
+    "justification": "requires_configuration",
+    "detail": "wasmtime-wasi 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): guest panic via set-times with overflowing datetime (wasip1/2/3 filesystem). WASI context is built only as WasiCtxBuilder::new().inherit_stdio() (crates/witness/src/run.rs, functions run_via_wasmtime_component and run_via_embedded, identical at v0.43.0 and v0.44.0; git grep at both tags); no preopened_dir/preopen call exists anywhere in crates/, so a guest has no filesystem descriptors to operate on. fd_filestat_set_times on stdio fds returns Badf (wasmtime-wasi p1.rs get_fd), and wasi:filesystem descriptors are only obtainable from preopens, which are empty."
+  },
+  "RUSTSEC-2026-0323": {
+    "state": "not_affected",
+    "justification": "requires_configuration",
+    "detail": "wasmtime-wasi 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): WASIp1 fd_readdir leaks 3 struct-padding bytes; advisory states it only affects guests with a preopened directory. WASI context is built only as WasiCtxBuilder::new().inherit_stdio() (crates/witness/src/run.rs, functions run_via_wasmtime_component and run_via_embedded, identical at v0.43.0 and v0.44.0; git grep at both tags); no preopened_dir/preopen call exists anywhere in crates/, so a guest has no filesystem descriptors to operate on."
+  },
+  "RUSTSEC-2026-0324": {
+    "state": "not_affected",
+    "justification": "code_not_reachable",
+    "detail": "wasmtime-wasi 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): WASIp3-only pre-epoch timestamp panic, also requiring a mutable preopened descriptor. witness links WASI only via wasmtime_wasi::p2::add_to_linker_sync (run_via_wasmtime_component) and wasmtime_wasi::p1::add_to_linker_sync (run_via_embedded); no wasmtime_wasi::p3 / p3 add_to_linker call exists in crates/ at either tag, and wasmtime-wasi is depended on with default features only (workspace Cargo.toml `wasmtime-wasi = 47` at v0.43.0 and `= 48` at v0.44.0, no features key; only crates/witness depends on it). WASI context is built only as WasiCtxBuilder::new().inherit_stdio() (crates/witness/src/run.rs, functions run_via_wasmtime_component and run_via_embedded, identical at v0.43.0 and v0.44.0; git grep at both tags); no preopened_dir/preopen call exists anywhere in crates/, so a guest has no filesystem descriptors to operate on."
+  },
+  "RUSTSEC-2026-0321": {
+    "state": "not_affected",
+    "justification": "requires_configuration",
+    "detail": "wasmtime-wasi 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): WASI preview 0 poll_oneoff skips fuel accounting. The advisory states library embedders are unaffected unless they call p0::add_to_linker_*; witness calls only p1 and p2 add_to_linker_sync (run_via_embedded, run_via_wasmtime_component), and witness never enables fuel: the only Config::new() sites are in run_via_wasmtime_component (sets only coredump_on_trap) and run_via_embedded (sets only wasm_component_model(false)), at both tags, and neither calls consume_fuel (also no set_fuel/set_hostcall_fuel/epoch_interruption anywhere in crates/)."
+  },
+  "RUSTSEC-2026-0322": {
+    "state": "not_affected",
+    "justification": "requires_configuration",
+    "detail": "wasmtime-wasi 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): unbounded write-zeroes allocation in SinkOutputStream, which wasmtime-wasi uses only for stdout/stderr that are NOT configured. witness configures all three stdio streams (WasiCtxBuilder::new().inherit_stdio() in run_via_wasmtime_component and run_via_embedded), so SinkOutputStream (cli/empty.rs) is never the guest's stream."
+  },
+  "RUSTSEC-2026-0315": {
+    "state": "not_affected",
+    "justification": "requires_configuration",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): call_ref / try_table drop fuel accounting. The advisory says the bug requires Config::consume_fuel (off by default). witness never enables fuel: the only Config::new() sites are in run_via_wasmtime_component (sets only coredump_on_trap) and run_via_embedded (sets only wasm_component_model(false)), at both tags, and neither calls consume_fuel (also no set_fuel/set_hostcall_fuel/epoch_interruption anywhere in crates/)."
+  },
+  "RUSTSEC-2026-0354": {
+    "state": "not_affected",
+    "justification": "code_not_reachable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): panic when the future from TypedFunc::call_async is dropped. witness uses only synchronous component calls (Func::call in run_via_wasmtime_component, Linker::instantiate); `call_async`, `instantiate_async`, `run_concurrent` and any `*_async(` call do not appear anywhere in crates/ at v0.43.0 or v0.44.0 (git grep). wasmtime is linked with default features (async included), so the code is compiled in but never reached."
+  },
+  "RUSTSEC-2026-0355": {
+    "state": "not_affected",
+    "justification": "code_not_reachable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): panic when a host-created StreamReader<T> comes back from the guest as StreamReader<U>. The advisory limits impact to embedders that create streams via StreamReader::new; no StreamReader/StreamWriter/FutureReader/FutureWriter symbol appears in crates/ at v0.43.0 or v0.44.0 (git grep). The code is compiled in (default features) but never reached."
+  },
+  "RUSTSEC-2026-0362": {
+    "state": "not_affected",
+    "justification": "code_not_reachable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): needs an embedder that re-enters Wasm via sync-style APIs from host functions while the original entry was async-style; the advisory says the bug is not guest-controllable and embedders that do not use async at all are unaffected. witness has no async entry points anywhere in crates/ (git grep at v0.43.0/v0.44.0: no call_async, instantiate_async, run_concurrent, func_wrap_async or func_new_async; the only host functions are the #180 stub-import closures in run_via_wasmtime_component, which are sync Linker::func_new closures that do not re-enter the guest)."
+  },
+  "RUSTSEC-2026-0185": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "quinn-proto 0.11.14 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): unbounded out-of-order stream reassembly (QUIC). quinn-proto is reached only via quinn <- reqwest 0.13.4. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz ships no QUIC/HTTP3 endpoint."
+  },
+  "RUSTSEC-2026-0338": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "quinn-proto 0.11.14 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): zero-length STREAM frames panic (QUIC). quinn-proto is reached only via quinn <- reqwest 0.13.4. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz ships no QUIC/HTTP3 endpoint."
+  },
+  "RUSTSEC-2026-0339": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "quinn-proto 0.11.14 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): unbounded pending connection-ID retirements (QUIC). quinn-proto is reached only via quinn <- reqwest 0.13.4. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz ships no QUIC/HTTP3 endpoint."
+  },
+  "RUSTSEC-2026-0340": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "quinn-proto 0.11.14 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): ACK_FREQUENCY min-ACK-delay panic (QUIC). quinn-proto is reached only via quinn <- reqwest 0.13.4. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz ships no QUIC/HTTP3 endpoint."
+  },
+  "RUSTSEC-2026-0342": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "quinn-proto 0.11.14 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): zero-length DATAGRAM frames bypass receive limit (QUIC). quinn-proto is reached only via quinn <- reqwest 0.13.4. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz ships no QUIC/HTTP3 endpoint."
+  },
+  "RUSTSEC-2026-0285": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "rustls 0.23.40 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): TLS 1.3 handshake messages accepted across encryption levels. rustls is reached only via reqwest/hyper-rustls/tokio-rustls/quinn. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz never terminates or initiates TLS in production."
+  },
+  "RUSTSEC-2026-0346": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "rustls 0.23.40 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): Debug impls of client session values expose TLS secrets. rustls is reached only via reqwest/hyper-rustls/tokio-rustls/quinn. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz never terminates or initiates TLS in production."
+  },
+  "RUSTSEC-2026-0348": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "rustls 0.23.40 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): Brotli certificate decompression allocates up to 1 GiB pre-authentication. rustls is reached only via reqwest/hyper-rustls/tokio-rustls/quinn. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz never terminates or initiates TLS in production."
+  },
+  "RUSTSEC-2026-0349": {
+    "state": "not_affected",
+    "justification": "code_not_present",
+    "detail": "rustls 0.23.40 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): unauthenticated ServerHello downgrades later connections to classical key exchange. rustls is reached only via reqwest/hyper-rustls/tokio-rustls/quinn. In crates/witness-viz/Cargo.toml reqwest is a [dev-dependencies] entry only, and it is the sole parent of quinn/hyper-rustls/rustls-platform-verifier/tokio-rustls in crates/witness-viz/Cargo.lock; the release workflow builds the shipped witness-viz with `cargo build --release` (release.yml: the `Build witness-viz` step and the Pages-build step `cargo build --release --locked --bin witness-viz`, same at both tags), which excludes dev-dependencies, so the crate is not in the shipped binary. Its only use is crates/witness-viz/tests/{integration,mcp}.rs, a test client talking to the loopback server over plain http://{addr}. The witness-viz server itself is axum over tokio::net::TcpListener (src/main.rs, main) with no TLS or QUIC. witness-viz never terminates or initiates TLS in production."
+  },
+  "RUSTSEC-2026-0195": {
+    "state": "not_affected",
+    "justification": "code_not_reachable",
+    "detail": "quick-xml 0.39.4 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): unbounded namespace-declaration allocation in NsReader. quick-xml is reached only via plist 1.9.0 <- syntect 5.3.0, and plist 1.9.0's XML reader uses quick_xml::Reader, not NsReader (plist-1.9.0/src/stream/xml_reader.rs imports `Reader as EventReader`; NsReader appears nowhere in plist). witness-viz has no direct quick-xml dependency (crates/witness-viz/Cargo.toml) and references no NsReader. quick-xml is compiled in via plist, but the NsReader type is never used."
+  },
+  "RUSTSEC-2026-0194": {
+    "state": "not_affected",
+    "justification": "code_not_reachable",
+    "detail": "quick-xml 0.39.4 (crates/witness-viz/Cargo.lock, v0.43.0 and v0.44.0): quadratic duplicate-attribute check on start tags. quick-xml is linked only via plist 1.9.0 <- syntect 5.3.0 (default-fancy). witness-viz never parses XML: its only syntect calls are SyntaxSet::load_defaults_newlines() and ThemeSet::load_defaults() (crates/witness-viz/src/render.rs, syntect highlighter setup), which deserialise embedded binary dumps (syntect dumps.rs include_bytes!(\"default_newlines.packdump\" / \"default.themedump\")); no load_from_folder/load_from_reader/plist call exists in src/ or build.rs. No attacker- or user-supplied XML reaches quick-xml."
+  },
+  "RUSTSEC-2026-0325": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): mis-typed tag imports in a component accepted -> GC heap corruption. Exceptions are on by default since wasmtime 47.0.0 and witness never disables them (Config::wasm_exceptions is not called in run_via_wasmtime_component or run_via_embedded). Reachable via `witness run --backend-wasmtime-component` with a crafted component. witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.4 / 49.0.2). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0326": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): missing GC rooting across try_call -> GC heap corruption. GC and exceptions are both on by default since wasmtime 47 and witness never disables either (run_via_wasmtime_component / run_via_embedded Config; wasmtime default features include gc), so a hostile core module or component run by witness reaches it. witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.4 / 49.0.2). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0364": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): odd number of exception tags mis-aligns VMContext fields (undefined behaviour; no known exploit). Exceptions are on by default since wasmtime 47.0.0 and witness never calls Config::wasm_exceptions(false) (run_via_wasmtime_component / run_via_embedded Config), so any module with tags that witness runs is affected. witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.6 / 49.0.3). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0359": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): stack overflow dropping a long chain of recursive types (guest-controlled, regression since wasmtime 42.0.0). Triggered while the type registry drops a module/component the guest defines; witness compiles every user-supplied module and component (Module::from_binary in run_via_embedded, Component::from_binary in run_via_wasmtime_component). witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.6 / 49.0.3). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0363": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): component-model handle tables are not charged to any limit (guest-driven host memory growth, default config). witness's component backend instantiates user components with default limits (no ResourceLimiter/StoreLimits anywhere in crates/; plain Store::new in run_via_wasmtime_component). Only the --backend-wasmtime-component path. witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.6 / 49.0.3). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0316": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): dynamic `Val` lifting allocates beyond the hostcall fuel limit (DoS). witness uses the dynamically typed component Val API: zero_val builds component::Val, and run_via_wasmtime_component calls func.call(&mut store, &[], &mut results) with Vec<component::Val> results. Affects the --backend-wasmtime-component path with a hostile component. witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.3 / 49.0.1). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0327": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): unvalidated async-lifted callback result count -> native stack buffer overflow (treat as sandbox escape). component-model-async is in wasmtime's default features and, with default Config, concurrency support (CM_ASYNC) is on, and witness does not disable it (run_via_wasmtime_component sets only coredump_on_trap), so async-ABI components are accepted by Component::from_binary (run_via_wasmtime_component). Reachable by `witness run --backend-wasmtime-component` on a hostile component. witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.4 / 49.0.2). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0353": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): Func::call on an async-lifted export panics the host. witness invokes the user-named export with the sync Func::call (run_via_wasmtime_component), and component-model-async is in wasmtime's default features and, with default Config, concurrency support (CM_ASYNC) is on, and witness does not disable it (run_via_wasmtime_component sets only coredump_on_trap), so async-ABI components are accepted by Component::from_binary (run_via_wasmtime_component). A user naming an async-lifted export via --invoke triggers a host panic (DoS only). witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.6 / 49.0.3). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0356": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): guest realloc during stream/future lowering can panic the host (may_leave not cleared). component-model-async is in wasmtime's default features and, with default Config, concurrency support (CM_ASYNC) is on, and witness does not disable it (run_via_wasmtime_component sets only coredump_on_trap), so async-ABI components are accepted by Component::from_binary (run_via_wasmtime_component). Guest-triggerable by a hostile component. witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.6 / 49.0.3). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0358": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): yielding in a component start function after an async-lowered import panics the host (advisory: embedders that instantiate arbitrary components). witness instantiates user components via Linker::instantiate (run_via_wasmtime_component) and component-model-async is in wasmtime's default features and, with default Config, concurrency support (CM_ASYNC) is on, and witness does not disable it (run_via_wasmtime_component sets only coredump_on_trap), so async-ABI components are accepted by Component::from_binary (run_via_wasmtime_component). witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.6 / 49.0.3). Upgrade to witness >=0.45.0."
+  },
+  "RUSTSEC-2026-0361": {
+    "state": "exploitable",
+    "detail": "wasmtime 47.0.3 (v0.43.0) / 48.0.1 (v0.44.0): panic when pending calls run after a trap leaves the Store poisoned. witness's component backend deliberately traps at the end of every export (inject_export_traps) and then keeps using the same Store for the next --invoke (the loop over options.invoke in run_via_wasmtime_component), so a store used after a trap is the normal path; the panic additionally needs a pending async call, which a hostile async component can arrange (component-model-async is in wasmtime's default features and, with default Config, concurrency support (CM_ASYNC) is on, and witness does not disable it (run_via_wasmtime_component sets only coredump_on_trap), so async-ABI components are accepted by Component::from_binary (run_via_wasmtime_component).). Lower likelihood than the others; DoS only. witness <=0.44.0 links wasmtime 47.0.3/48.0.1; witness 0.45.0 ships wasmtime 49.0.3 (Cargo.lock), which contains the fix (48.0.6 / 49.0.3). Upgrade to witness >=0.45.0."
+  }
 }
