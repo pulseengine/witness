@@ -16,6 +16,14 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   leave an irreversible crates.io publish behind. The manual `workflow_dispatch(tag)`
   backfill path is unchanged. (REQ-075)
 
+### Fixed
+
+- **The release's rivet import PR could never merge:** `main` requires signed commits, and
+  the import job's plain `git commit` by github-actions[bot] was unsigned (v0.45.0's #270
+  was blocked and re-signed by hand). The job now commits through GitHub's GraphQL
+  `createCommitOnBranch` (`tools/gh_signed_commit.py`), which GitHub signs. Proven on a
+  throwaway branch with the org app: `verified: true (valid)`. (REQ-078)
+
 ## [0.45.0] — 2026-10-15
 
 Headline: **the release pipeline now proves itself.** Static musl assets (#234),
