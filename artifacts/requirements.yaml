@@ -1340,7 +1340,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: Linux release assets include static musl builds beside gnu
-    status: implemented
+    status: verified
     description: >
       The v0.43.0 Linux assets are dynamically linked with a glibc 2.39
       floor (the runner image's), excluding Ubuntu 22.04, Debian 12,
@@ -1353,6 +1353,7 @@ artifacts:
       — musl beside gnu — decided by the maintainer on the issue,
       2026-09-24). witness reads files and writes reports: musl's
       no-NSS/no-dlopen limits do not apply.
+      VERIFIED 2026-10-15 from the v0.45.0 release, per the post-tag verification rule: musl-static-x86_64-unknown-linux-musl.txt and musl-static-aarch64-unknown-linux-musl.txt record witness and witness-viz as static (static-pie linked / statically linked) with 0 GLIBC_ symbols; both records match the cosign-verified SHA256SUMS.txt.
     tags: [v0.45, release, portability]
     fields:
       priority: must
@@ -1365,7 +1366,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: Each release publishes a CycloneDX VEX for its shipped lockfiles
-    status: implemented
+    status: verified
     description: >
       An SBOM says what is in the product; it cannot say what an
       advisory MEANS for it. Each release shall publish
@@ -1383,6 +1384,7 @@ artifacts:
       while the sums file is immutable — one lifecycle per document.
       (#235; consumed by varve's supply-chain-document ingestion,
       pulseengine/varve#179.)
+      VERIFIED 2026-10-15 from the v0.45.0 release, per the post-tag verification rule: witness-0.45.0.vex.json verifies with cosign verify-blob against its per-asset .sig/.cert (release.yml identity), records advisory-db.commit edb58f5974b8 (not unknown), and reports 0 vulnerabilities for the shipped lockfiles.
     tags: [v0.45, release, supply-chain, vex]
     fields:
       priority: must
@@ -1395,7 +1397,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: Shipped releases' VEX documents are re-issued when new advisories land
-    status: implemented
+    status: verified
     description: >
       A VEX is only worth reading six months later if it is re-asserted
       when the advisory database moves (#235 part 4). A weekly
@@ -1408,6 +1410,7 @@ artifacts:
       for any match with no judgement in security/vex-judgements.json.
       The re-issue obligation is the commitment half: when it fires,
       a human classifies.
+      VERIFIED 2026-10-15, per the post-tag verification rule: vex-reissue.yml run 38745736537 reported v0.45.0 VEX unchanged, first-issued signed VEX for v0.44.0 and v0.43.0, and opened classification issues for their unjudged advisories.
     tags: [v0.45, release, supply-chain, vex]
     fields:
       priority: must
@@ -1508,7 +1511,7 @@ artifacts:
     release: v0.45.0
     type: requirement
     title: Each release runs the full verification suite and imports the signed JUnit into rivet
-    status: implemented
+    status: verified
     description: >
       The release workflow shall run every rivet test-case at the tag
       (verification-evidence job, ubuntu-latest, pinned rivet) and emit
@@ -1523,6 +1526,7 @@ artifacts:
       on rivet-results/<TAG> through the org GitHub App token. The PR
       imports evidence only: no status changes, no auto-merge. It can only
       be proven after the tag exists.
+      VERIFIED 2026-10-15 from the v0.45.0 release, per the post-tag verification rule: witness-v0.45.0-verification.junit.xml (58 tests, 0 failures, 0 skipped) is covered by the signed SHA256SUMS.txt; the release run opened PR #270 via pulseengine-actions-helper, importing 58 results whose artifact ids are all exact rivet ids.
     tags: [v0.45, release, supply-chain, traceability]
     fields:
       priority: must
