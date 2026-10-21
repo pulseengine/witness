@@ -1567,3 +1567,27 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+  - id: REQ-080
+    release: v0.46.0
+    type: requirement
+    title: instrument never writes a module that fails validation; it refuses with the validator's message
+    status: implemented
+    description: >
+      The #207 guard budgets globals arithmetically, but the emitted module can
+      be rejected on another 1,000,000-capped quantity while globals and exports
+      are both under their limits: 166,649 `if` statements over 34 exported
+      functions instrument to 999,894 globals and 999,932 exports, exit 0, and
+      the output fails validation with "effective type size exceeds the limit"
+      (166,666 fails on the exports count). Witness shall validate the
+      serialized output (core module, or the re-spliced component for
+      --in-place) before creating the output file, and on rejection exit
+      non-zero with the validator's message and the branch count, writing
+      nothing. The up-front global budget stays as the fast path. (Issues #311,
+      #207.)
+    tags: [instrument, soundness, scaling]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001

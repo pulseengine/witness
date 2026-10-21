@@ -5,6 +5,13 @@
 //! size", then "exports count") while globals stay under their limit.
 //! Contract: instrumentation either errors, or the bytes it wrote validate.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::arithmetic_side_effects
+)]
+
 use std::fmt::Write as _;
 use std::path::Path;
 

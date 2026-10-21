@@ -18,6 +18,12 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`witness instrument` no longer exits 0 on a module that fails validation (#311).** The
+  #207 guard budgets globals only; 166,649 `if`s over 34 functions stayed under the global and
+  export limits yet produced a 46 MB module the validator rejects ("effective type size exceeds
+  the limit", and "exports count" at 166,666). The serialized output is now validated before the
+  file is created; on rejection instrument exits non-zero with the validator's message and the
+  branch count and writes nothing. (REQ-080)
 - **The release's rivet import PR could never merge:** `main` requires signed commits, and
   the import job's plain `git commit` by github-actions[bot] was unsigned (v0.45.0's #270
   was blocked and re-signed by hand). The job now commits through GitHub's GraphQL
