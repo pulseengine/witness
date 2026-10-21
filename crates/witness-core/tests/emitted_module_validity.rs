@@ -75,3 +75,33 @@ fn instrument_output_validates_at_exports_limit() {
     // 166,666 passes the guard (999,996 globals) yet exports exceed 1,000,000.
     instrument_and_check(dir.path(), 166_666);
 }
+
+/// The validity check is for implementation limits, not feature gating:
+/// output using a feature wasmparser leaves off by default (legacy
+/// exceptions) must not be refused.
+#[test]
+fn instrument_does_not_refuse_default_off_features() {
+    let wat = r#"(module
+        (tag $e)
+        (func (export "f") (param i32) (result i32)
+            try (result i32)
+                local.get 0
+                if (result i32)
+                    throw $e
+                else
+                    i32.const 1
+                end
+            catch $e
+                i32.const 2
+            end))"#;
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.wasm");
+    let output = dir.path().join("out.wasm");
+    std::fs::write(
+        &input,
+        wat::parse_str(wat).expect("legacy try/catch WAT parses"),
+    )
+    .unwrap();
+    instrument_file(&input, &output).expect("legacy-exceptions module must instrument");
+    assert!(output.exists());
+}
