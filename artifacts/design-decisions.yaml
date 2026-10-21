@@ -1742,13 +1742,13 @@ artifacts:
     title: Release-pipeline requirements are verified after tagging, from records the release saves
     status: accepted
     description: >
-      Requirements whose only proof is a real release run (REQ-072, REQ-073)
-      or a post-release scheduled run (REQ-074) may be tagged at
-      `status: implemented`, and only these three for v0.45.0. Every other
+      Requirements whose only proof is a real release run (REQ-072, REQ-073,
+      REQ-078) or a post-release scheduled run (REQ-074) may be tagged at
+      `status: implemented`, and only these four for v0.45.0. Every other
       v0.45.0 requirement must be `verified` before the tag. Rule at cut
       time: tag only if the not-yet-verified set reported by
       `rivet release status v0.45.0` EQUALS exactly {REQ-072, REQ-073,
-      REQ-074}; anything else unverified is a real red gate. Post-tag
+      REQ-074, REQ-078}; anything else unverified is a real red gate. Post-tag
       evidence, pinned to the tag because `gh release download` defaults to
       the latest release: (REQ-072) `musl-static-<target>.txt` from the
       release assets, covered by the signed SHA256SUMS.txt
@@ -1756,18 +1756,24 @@ artifacts:
       (REQ-073) `cosign verify-blob` of `witness-<ver>.vex.json` with its
       `.sig`/`.cert`, using the command in the release notes; (REQ-074) a
       `vex-reissue.yml` workflow_dispatch after the release that first-issues
-      VEX for the prior releases and reports the new release unchanged. Once
-      that evidence is recorded the three flip to `verified`.
+      VEX for the prior releases and reports the new release unchanged;
+      (REQ-078) `gh release download v0.45.0 --pattern
+      '*-verification.junit.xml' --pattern SHA256SUMS.txt` yields
+      `witness-<TAG>-verification.junit.xml` whose sha256 is a line of the
+      signed SHA256SUMS.txt, and a PR exists on `rivet-results/<TAG>` whose
+      results file's `artifact:` values are all rivet IDs. Once that
+      evidence is recorded the four flip to `verified`.
       Decided by the maintainer, 2026-10-14.
     rationale: >
       A static-link property of published binaries, a signature over a
-      published asset, and a scheduled re-issue cannot exist before the tag.
+      published asset, a signed JUnit record plus its import PR, and a
+      scheduled re-issue cannot exist before the tag.
       Holding the tag for them is circular; verifying them with offline PR
       steps would be vacuous. The release itself saves the record (the musl
       job fails hard on a non-static binary and ships its evidence), so the
       exception is narrow, named, and checkable by an exact-set comparison.
     alternatives: >
-      Block the tag until all three are verified (impossible — the proof
+      Block the tag until all four are verified (impossible — the proof
       needs the tag); mark them verified from scratch-run evidence (rejected —
       a scratch run is not the released asset); loosen the gate to "any
       implemented requirement may ship" (rejected — it would hide real gaps).
@@ -1779,5 +1785,7 @@ artifacts:
         target: REQ-073
       - type: satisfies
         target: REQ-074
+      - type: satisfies
+        target: REQ-078
       - type: produced-by
         target: AS-001

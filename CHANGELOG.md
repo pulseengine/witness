@@ -7,8 +7,101 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **crates.io publishing now waits for a successful release.** `publish-to-crates-io.yml`
+  runs on `workflow_run` after the Release workflow completes successfully for a tag push,
+  instead of in parallel with it. It publishes the exact commit Release built (checked
+  against the tag), so a failing release, e.g. a red test suite at the tag, can no longer
+  leave an irreversible crates.io publish behind. The manual `workflow_dispatch(tag)`
+  backfill path is unchanged. (REQ-075)
+
+### Fixed
+
+- **The release's rivet import PR could never merge:** `main` requires signed commits, and
+  the import job's plain `git commit` by github-actions[bot] was unsigned (v0.45.0's #270
+  was blocked and re-signed by hand). The job now commits through GitHub's GraphQL
+  `createCommitOnBranch` (`tools/gh_signed_commit.py`), which GitHub signs. Proven on a
+  throwaway branch with the org app: `verified: true (valid)`. (REQ-078)
+
+## [0.45.0] — 2026-10-15
+
+Headline: **the release pipeline now proves itself.** Static musl assets (#234),
+a CycloneDX VEX with weekly re-issue (#235), CI-only crates.io publishing via
+OIDC, and a full-suite JUnit run at every tag that CI imports into rivet. Plus
+24 dependency advisories cleared across all three lockfiles, which CI now
+audits as a required check.
+
+Falsification statement: what was proven before the tag, and how.
+- Every musl leg of release.yml fails hard on a non-static binary. The check
+  was run against the real `file` output of both musl builds (`static-pie
+  linked` and `statically linked` pass) and against negatives (a dynamically
+  linked binary with an interpreter, and glibc symbols present), which fail.
+- The full 58-case rivet suite ran on a clean `ubuntu-latest` runner. The first
+  run went 57/1 and exposed an order-dependent case (TEST-CROSS-LANG-RUST
+  relied on fixtures only a later case built); the fixed re-run went 58/0.
+- The JUnit → `rivet import-results` round-trip is self-tested, and the
+  imported IDs are exactly the rivet IDs.
+- The VEX re-issue comparison is negative-controlled: reverting it to
+  compare provenance fails its self-test.
+- The org app token was minted in a throwaway run and reaches witness.
+- All 7 witness-viz release targets were cross-built with the patched
+  lockfile.
+
+NOT verified before the tag, by design (DEC-049): REQ-072 (musl assets),
+REQ-073 (VEX asset), REQ-074 (re-issue) and REQ-078 (JUnit import PR). Their
+proof is this release's own records (signed musl records, the VEX signature,
+the JUnit import PR) and the first VEX re-issue run, and they flip to verified
+from those afterwards.
+
+### Known limitation — read this if you build with rustc ≥ 1.99
+
+**rustc 1.99 can compile a real multi-condition decision into code witness
+cannot see, and witness then reports it as `0/0 full MC/DC`.** Side-effect-free
+short-circuit chains (`a || b || c`, `a && b`) are lowered to branch-free
+`i32.or`/`i32.and` arithmetic over comparisons, even at `opt-level = 1`.
+witness instruments conditional branches, so those decisions disappear from
+the report rather than showing as gaps.
+
+Measured on the canonical verdicts, with the same source and the same witness
+binary: `triangle` drops from 2 branches to 0 and `state_guard` from 3 to 0
+between rustc 1.98.1 and 1.99.0 (#268). This is not a regression in this
+release: v0.44.0 behaves identically on a 1.99-built binary.
+
+Until witness reports or measures these decisions (REQ-079, planned for
+v0.46.0): treat a `0/0` result on code you know has conditions as
+**unmeasured, not covered**. Build MC/DC evidence at `opt-level = 0`, or with
+rustc 1.98. Measured: under rustc 1.99 at `opt-level = 0`, `triangle` and
+`state_guard` keep all their branches (2 and 3).
+
+The verdict-suite CI job is pinned to rustc 1.98.1 so its regression gate
+measures witness against fixed fixtures. It now runs on every PR, too: as a
+main-only job it sat red on `main` from 2026-10-03 to 2026-10-15 unseen.
+
+### Behavior changes for consumers
+
+- **MSRV is now 1.96** (wasmtime 49 / cranelift 0.136).
+- **New Linux assets:** `*-linux-musl` (static) beside `*-linux-gnu`
+  (glibc ≥ 2.39). Take musl if in doubt.
+- **New release assets:** `witness-<ver>.vex.json` (+ `.sig`/`.cert`, outside
+  `SHA256SUMS.txt`, re-issued in place), `witness-<tag>-verification.junit.xml`
+  and `musl-static-<target>.txt` (both inside the signed sums).
+
 ### Added
 
+- **Per-release verification JUnit** (`witness-<TAG>-verification.junit.xml`):
+  `tools/run_verification.py --junit` emits one `<testcase>` per rivet
+  test-case, `name` = the rivet ID and no `classname`, so
+  `rivet import-results` maps results onto the trace graph. The release runs
+  the full suite at the tag (a failing case blocks the release), and the
+  JUnit ships before `SHA256SUMS.txt`, so the signed checksums and a
+  per-asset cosign signature cover it. Round-trip self-test:
+  `run_verification.py --junit-self-test`. (REQ-077, REQ-078)
+- **Automated rivet results import PR**: after the release, CI verifies the
+  published JUnit's sha256 against the signed `SHA256SUMS.txt`, runs
+  `rivet import-results`, and opens or updates a PR on
+  `rivet-results/<TAG>` through the org GitHub App. Evidence only: no status
+  changes, no auto-merge. (REQ-078)
 - **#234 — static musl Linux release assets** (`x86_64-unknown-linux-musl`,
   `aarch64-unknown-linux-musl`) beside the gnu ones, whose glibc-2.39 floor
   excluded Ubuntu 22.04 / Debian 12 / RHEL 9 / Alpine / distroless. Option 1
@@ -33,8 +126,24 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   laptop-token failure mode that stalled the v0.44.0 publish. One-time
   crates.io Trusted Publishing setup required per crate. (REQ-075)
 
+### Fixed
+
+- **VEX tooling (#253):** the weekly re-issue compared provenance (advisory-db
+  commit and count), so every RustSec update would have re-signed every
+  release; it now compares only the answer. The advisory-db commit is read from
+  cargo-audit's own `database.last-commit`, where it was previously recorded as
+  `unknown`. cargo-audit is pinned to 0.22.2, and `--dry-run` no longer starts
+  a keyless signing flow (#255).
+- **TEST-CROSS-LANG-RUST builds its own fixtures.** It instrumented the
+  verdict `.wasm` files without building them and passed only where they were
+  left over. The first full-suite run on a clean runner caught it. (#256)
+
 ### Changed
 
+- **Release-time verification records (DEC-049, #255):** the musl legs fail
+  the release on a non-static binary and ship `musl-static-<target>.txt`. The
+  release-pipeline requirements are verified after the tag, from these
+  records.
 - **wasmtime 48.0.4 → 49.0.2** — the deliberate 48→49 major migration
   (no witness API changes needed; verified clippy/test/component-check
   green at `--locked`). **MSRV is now 1.96** (cranelift 0.136 floor);
@@ -52,6 +161,23 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   callback result-count overflow, mis-typed tag imports, `call_ref` fuel
   drop). Patch-level on the same major; the 48→49 migration is tracked
   separately.
+- **wasmtime 49.0.2 → 49.0.3** — clears RUSTSEC-2026-0352..0364 (13
+  advisories published 2026-10-14): host panics around async-lifted calls,
+  traps, streams and component start functions; unaligned host data from
+  exception tags; per-instance-only handle-table caps; and a filesystem
+  sandbox escape via renamed symlinks with trailing slashes. (#263)
+- **witness-viz lockfile: 11 advisories cleared** (`crates/witness-viz/Cargo.lock`,
+  a standalone workspace that ships in every release tarball): quick-xml
+  0.39.4 → 0.42.0 via plist 1.9.0 → 1.10.1 (RUSTSEC-2026-0194/0195);
+  quinn-proto 0.11.14 → 0.11.19 (RUSTSEC-2026-0185/0338/0339/0340/0342);
+  rustls 0.23.40 → 0.23.46 (RUSTSEC-2026-0285/0346/0348/0349), which also
+  moves aws-lc-rs 1.17.0 → 1.18.2, aws-lc-sys 0.41.0 → 0.46.0 and
+  rustls-webpki 0.103.13 → 0.103.15. The cross-compiled targets (aarch64
+  gnu, both musl) were build-checked before merge. No `Cargo.toml` change.
+- **CI Security Audit now covers all three lockfiles** (root, witness-viz,
+  witness-component) with cargo-audit pinned to 0.22.2. Previously only the
+  root `Cargo.lock` was audited, which is why the witness-viz advisories
+  above went unnoticed.
 
 ## [0.44.0] — 2026-09-07
 

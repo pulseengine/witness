@@ -32,9 +32,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  # v0.45 — every job that ran on the self-hosted `rust-cpu` pool now runs
+  # on GitHub-hosted ubuntu-latest, for the reason Miri moved in v0.29: the
+  # pool is shared org-wide and was saturated for days (required checks sat
+  # QUEUED 75+ min and were cancelled before getting a runner). The full
+  # 58-case rivet suite was proven on ubuntu-latest before this move.
+  # Trade: GitHub-hosted minutes.
   clippy:
     name: Clippy
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       # Pinned (not @stable) so a moving stable can't surface NEW clippy
@@ -52,7 +58,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: [self-hosted, linux, x64, rust-cpu]
+          - os: ubuntu-latest
           # Stays on ubuntu-latest equivalents: smithy is Linux x86_64 only.
           - os: macos-latest
           - os: windows-latest
@@ -65,7 +71,7 @@ jobs:
 
   msrv:
     name: MSRV
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.96.0
@@ -128,13 +134,27 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: |
-          cargo install cargo-audit --locked
-          cargo audit
+      # Pinned: an unpinned install floats the advisory parser and audit
+      # semantics under us (same pin policy as release.yml).
+      - run: cargo install cargo-audit --locked --version 0.22.2
+      # witness-viz and witness-component are standalone workspaces with
+      # their own lockfiles that ship in releases; a bare `cargo audit`
+      # only sees the root one. No ignore list exists (no audit.toml;
+      # deny.toml `ignore = []`), so each run is a plain audit and any
+      # vulnerability in any lockfile fails the job.
+      - name: Audit all lockfiles
+        run: |
+          status=0
+          for lock in Cargo.lock crates/witness-viz/Cargo.lock crates/witness-component/Cargo.lock; do
+            echo "::group::cargo audit --file $lock"
+            cargo audit --file "$lock" || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
   proptest-extended:
     name: Proptest (extended cases)
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v7
@@ -159,7 +179,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     # Runs on PRs too, not only push-to-main. A coverage job that only runs
     # after a merge is an alarm, not a gate — it tells you coverage fell once
     # the fall is already on main. FreeRTOS's coverage-cop, the clearest public
@@ -216,7 +236,7 @@ jobs:
 
   dogfood:
     name: Dogfood — witness measures the fixture
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v7
@@ -269,7 +289,7 @@ jobs:
 
   wasm-component:
     name: Build witness-component (Component Model wasm) — v0.7.0+
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -339,11 +359,17 @@ jobs:
 
   verdict-suite:
     name: Verdict suite — end-to-end MC/DC on the canonical 7
-    runs-on: [self-hosted, linux, x64, rust-cpu]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Runs on PRs too: as a main-only job it sat red on main for two weeks
+    # (Oct 3–15 2026) with no PR ever showing it.
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to 1.98.1: rustc 1.99 lowers triangle/state_guard's
+      # short-circuit decisions to branch-free i32.or/i32.and arithmetic,
+      # so witness finds 0 branches and the gate below fails. Bumping the
+      # pin needs witness to measure branch-free-lowered decisions, or at
+      # least report them (REQ-079), and the gate list re-checked.
+      - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
