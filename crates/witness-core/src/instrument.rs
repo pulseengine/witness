@@ -876,7 +876,10 @@ fn instrument_file_impl(input: &Path, output: &Path, in_place: bool) -> Result<(
 /// while globals are under budget, so the serialized bytes are the
 /// authority. Runs before the output file is created.
 fn validate_emitted(bytes: &[u8], input: &Path, branch_count: usize) -> Result<()> {
-    wasmparser::validate(bytes).map(|_| ()).map_err(|e| {
+    // All features: input acceptance is walrus's job; this check is for
+    // implementation limits (#311), not feature gating.
+    let mut validator = wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all());
+    validator.validate_all(bytes).map(|_| ()).map_err(|e| {
         Error::Instrument(format!(
             "refusing to write instrumented output for {}: the module with \
              {branch_count} instrumented branches fails validation: {e}. \
