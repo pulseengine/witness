@@ -1097,3 +1097,24 @@ artifacts:
         target: REQ-078
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-080
+    type: test-case
+    title: Emitted module validates, or instrument refuses and writes nothing
+    description: >
+      crates/witness-core/tests/emitted_module_validity.rs generates the #311
+      reporter's fixture in-test (166,649 and 166,666 `if (local.get 0)`
+      statements over 34 exported functions, both under the #207 globals
+      budget) and drives instrument_file. The contract asserted is: either
+      instrumentation returns an error and no output file exists, or the written
+      bytes pass wasmparser validation. Both cases failed on v0.45 (exit 0,
+      invalid output). (REQ-080 / #311.)
+    tags: [verification, instrument, soundness]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc-core --test emitted_module_validity
+    links:
+      - type: verifies
+        target: REQ-080
+      - type: produced-by
+        target: AS-001
