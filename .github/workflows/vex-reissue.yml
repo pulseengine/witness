@@ -37,13 +37,13 @@ jobs:
   reissue:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # tools/vex_reissue.py reads each tag's lockfiles via
           # `git show <tag>:<path>` — needs full history + tags.
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
       - name: Install cargo-audit
         # Pinned: tools/generate_vex.py reads the `database.last-commit` and
@@ -53,7 +53,7 @@ jobs:
         run: cargo install cargo-audit --locked --version 0.22.1
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
         with:
           cosign-release: "v2.4.1"
 
