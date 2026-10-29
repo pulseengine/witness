@@ -70,7 +70,39 @@ wasmparser = "0.261"
 # (wasm-bindgen/walrus PR #316 / issue #315) we'd been carrying as a
 # fork pin since v0.21. crates.io publish is now unblocked.
 walrus = "0.27.2"
-wasmtime = "49"
+# default-features = false + wasmtime 49's full default set MINUS `cache`.
+# `cache` (on-disk compiled-module cache) pulls wasmtime-internal-cache ->
+# zstd 0.13 / zstd-safe 7 / zstd-sys 2.0, which carry RUSTSEC-2026-0391,
+# -0398, -0403, -0410 (and a run of unsound advisories) with no fix
+# reachable on the 0.13 line. witness never configures a module cache.
+# Keep this list in sync with wasmtime's `default` on every wasmtime bump.
+wasmtime = { version = "49", default-features = false, features = [
+    "anyhow",
+    "async",
+    "backtrace",
+    "gc",
+    "gc-copying",
+    "gc-drc",
+    "gc-null",
+    "wat",
+    "profiling",
+    "parallel-compilation",
+    "cranelift",
+    "pooling-allocator",
+    "demangle",
+    "addr2line",
+    "coredump",
+    "debug-builtins",
+    "runtime",
+    "component-model",
+    "component-model-async",
+    "threads",
+    "stack-switching",
+    "std",
+    "debug",
+    "compile-time-builtins",
+    "wit-parser",
+] }
 wasmtime-wasi = "49"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -18,6 +18,15 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The required Security Audit check was red on main and every PR after new RustSec advisories.**
+  wasmtime's default `cache` feature pulled `wasmtime-internal-cache` -> zstd 0.13 /
+  zstd-safe 7 / zstd-sys 2.0 (RUSTSEC-2026-0391, -0398, -0403, -0410, plus a run of
+  unsound advisories), with no fix reachable on that line. witness never configures a
+  module cache, so the workspace now takes wasmtime with `default-features = false` and
+  the full default feature set minus `cache`; zstd is gone from `Cargo.lock`. tokio is
+  bumped to 1.54.1 in the root and witness-viz lockfiles (RUSTSEC-2026-0386, unsound
+  `AsyncFd` constructors) and chacha20 0.10.0 (yanked) to 0.10.2. `unsafe-libyaml`
+  (RUSTSEC-2024-0449, unmaintained, warning only) remains via `serde_yaml`.
 - **`witness instrument` no longer exits 0 on a module that fails validation (#311).** The
   #207 guard budgets globals only; 166,649 `if`s over 34 functions stayed under the global and
   export limits yet produced a 46 MB module the validator rejects ("effective type size exceeds
