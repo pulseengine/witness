@@ -7,6 +7,42 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-11-05
+
+Headline: **witness now checks its own MC/DC against an independent reference, and stops
+over-claiming where that reference proved it wrong.** The new truth-table oracle (#350)
+found on its first run that witness reported `FullMcdc` and *proved* conditions it never
+observed (#352). This release ships the oracle as a required check, a guard that removes
+every confirmed over-claim, and a disclosure of what is still unmeasured. It also ships
+the #311 fix (no more exit-0 on invalid output) and two waves of security bumps.
+
+Falsification statement: what was verified before the tag, and how.
+- **#352 guard.** The 6 false-PROVED conditions were confirmed at execution level: the
+  uninstrumented modules return identical values for witness's old proving pairs, e.g.
+  `triangle` rows 1 and 3 both return 1. After the guard, the oracle's 12 matching ledger
+  entries went stale and were removed, and no new divergence appeared.
+  - `tests/no_overclaim.rs` fails on the pre-guard code and passes now, covering a direct
+    value tail, an indirect `call` tail, and a complete-chain control.
+  - `state_guard` keeps its 3 genuinely valid proofs.
+- **#350 oracle.** It is negative-controlled in both directions (a new divergence goes red,
+  and so does a stale ledger entry). It is green on `main` and required since 2026-11-05.
+- **#311.** The test reproduces the exit-0 invalid output on the old code and the refusal
+  on the new. The validator runs with all Wasm features, so valid legacy-exceptions
+  modules are not refused; a regression test shows default features would refuse them.
+
+NOT fixed in this release, and disclosed: witness still does not *measure* the last operand
+of a value-producing short-circuit chain (#352 steps 2–3, REQ-079 moved to v0.47.0). Such
+decisions are now reported `partial`, never `FullMcdc`. A value tail reached through a shape
+the scan does not recognise is the one remaining over-claim path.
+
+### Behavior changes for consumers
+
+- **Decisions with an unobserved trailing operand report `partial`, not `FullMcdc`.** This
+  affects `fn f(..) -> bool { a || b || c }` shapes. MC/DC baselines for such code will
+  drop; the old numbers were over-claims. New manifest field: `unobserved_tail_conditions`.
+  New condition reason: `outcome_unverified` (mcdc v3 envelope; v1/v2 strip them).
+- **`witness instrument` exits non-zero instead of writing an invalid module.**
+
 ### Added
 
 - **MC/DC verdicts are checked against the hand-derived truth tables on every PR.**
@@ -24,6 +60,11 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   against the tag), so a failing release, e.g. a red test suite at the tag, can no longer
   leave an irreversible crates.io publish behind. The manual `workflow_dispatch(tag)`
   backfill path is unchanged. (REQ-075)
+- **CI hardening (#328):** fork PRs are routed to hosted runners, and actions in
+  secret-holding jobs are pinned to commit SHAs.
+- **VEX judgements for v0.43.0/v0.44.0 (#308):** 24 `not_affected` / 11 `exploitable`, each
+  `not_affected` with file/function evidence, signed into the re-issued VEX documents. The 35
+  classification issues are closed.
 
 ### Fixed
 
@@ -41,7 +82,11 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   has a row without an observed outcome is a `gap` with `reason: outcome_unverified`.
   `triangle`, `leap_year`, `state_guard` and `safety_envelope` are now `partial`, and the 12
   matching entries are removed from `verdicts/TRUTH-TABLE-DIVERGENCES.json`. The unobserved
-  operand itself is still not measured (step 3). (REQ-082)
+  operand itself is still not measured (step 3). A tail whose value escapes indirectly
+  (`br`, `call`, `drop`) never uses the function's return value as the outcome: those rows carry
+  no outcome, so `json_lite` proves 35 conditions instead of 39. (REQ-082)
+- **Known limitation disclosed (#352, #353).** README, `docs/concepts.md` and paper §7.5
+  now state what `FullMcdc` covers, and `claims.yaml` gates the wording.
 - **The required Security Audit check was red on main and every PR after new RustSec advisories.**
   wasmtime's default `cache` feature pulled `wasmtime-internal-cache` -> zstd 0.13 /
   zstd-safe 7 / zstd-sys 2.0 (RUSTSEC-2026-0391, -0398, -0403, -0410, plus a run of
@@ -51,12 +96,19 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   bumped to 1.54.1 in the root and witness-viz lockfiles (RUSTSEC-2026-0386, unsound
   `AsyncFd` constructors) and chacha20 0.10.0 (yanked) to 0.10.2. `unsafe-libyaml`
   (RUSTSEC-2024-0449, unmaintained, warning only) remains via `serde_yaml`.
+- **wasmtime 49.0.3 → 49.0.4 → 49.0.5** (#314, #351): RUSTSEC-2026-0378/0379 (0379 is a
+  Cranelift aarch64 `br_table` miscompile, on a target witness ships) and
+  RUSTSEC-2026-0422/0423/0424. Lock-only patch bumps; 50.x needs rustc 1.97 and is a separate
+  change. witness-viz: rustls-webpki 0.103.16 and webpki-root-certs 1.0.10
+  (RUSTSEC-2026-0382/0383, dev-only TLS stack).
 - **`witness instrument` no longer exits 0 on a module that fails validation (#311).** The
   #207 guard budgets globals only; 166,649 `if`s over 34 functions stayed under the global and
   export limits yet produced a 46 MB module the validator rejects ("effective type size exceeds
   the limit", and "exports count" at 166,666). The serialized output is now validated before the
   file is created; on rejection instrument exits non-zero with the validator's message and the
-  branch count and writes nothing. (REQ-080)
+  branch count and writes nothing. Validation runs with every Wasm feature enabled
+  (input acceptance is walrus's job; this check guards implementation limits), so valid modules
+  using e.g. legacy exceptions are never refused. (REQ-080)
 - **The release's rivet import PR could never merge:** `main` requires signed commits, and
   the import job's plain `git commit` by github-actions[bot] was unsigned (v0.45.0's #270
   was blocked and re-signed by hand). The job now commits through GitHub's GraphQL
