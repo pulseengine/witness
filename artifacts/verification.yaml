@@ -1138,3 +1138,27 @@ artifacts:
         target: REQ-081
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-082
+    type: test-case
+    title: Value-tail decisions are never FullMcdc and never proved by an unchanged real outcome
+    description: >
+      crates/witness/tests/no_overclaim.rs instruments rustc's lowering of the
+      Myers triangle predicate (two br_ifs for three operands, third operand
+      returned as a value; real row outcomes 0,1,1,1), runs four rows, and
+      asserts the unobserved tail is detected, the decision is not FullMcdc
+      (status_reason unobserved_tail_conditions), every row outcome equals the
+      real return value, and no condition is proved by a pair with equal real
+      outcomes. A complete-chain control keeps FullMcdc. Unit tests in
+      mcdc_report.rs cover the cap and the outcome_unverified reason. The
+      value-tail test fails on v0.45 (FullMcdc reported). (REQ-082 / #352.)
+    tags: [verification, mcdc, soundness]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc --test no_overclaim
+        - run: cargo test -p witness-mcdc-core mcdc_report
+    links:
+      - type: verifies
+        target: REQ-082
+      - type: produced-by
+        target: AS-001

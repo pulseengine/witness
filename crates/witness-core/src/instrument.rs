@@ -289,6 +289,17 @@ pub struct Decision {
     /// Pre-v0.12 manifests stay valid via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inline_context: Option<InlineContext>,
+    /// #352 — number of trailing short-circuit operands that produce the
+    /// decision's VALUE and so have no `br_if` for witness to observe
+    /// (`fn f() -> bool { a || b || c }`: `c` is the returned value).
+    /// Set (0 or 1) when the last `br_if` of the decision falls through
+    /// into code that computes a value which escapes as the function
+    /// result. The reporter never reports such a decision `FullMcdc`, and
+    /// row outcomes come from the real return value. Absent (0) on
+    /// pre-v0.46 manifests; the detection is conservative (it may flag a
+    /// non-value tail, it must not miss a value tail it can recognise).
+    #[serde(default, skip_serializing_if = "crate::run_record::is_zero_u32")]
+    pub unobserved_tail_conditions: u32,
 }
 
 /// v0.12.0 — call-site context for an inlined source decision. The
@@ -845,6 +856,8 @@ fn instrument_file_impl(input: &Path, output: &Path, in_place: bool) -> Result<(
     // v0.8: classify each decision's chain direction (And/Or/Mixed/Unknown)
     // using the per-branch hints captured during instrument_module.
     apply_chain_kinds(&mut decisions);
+    // #352: flag decisions whose last operand is an unobserved value tail.
+    apply_unobserved_tails(&mut decisions);
 
     // v0.10.0 — record the pre-instrumentation digest so the
     // predicate-builder can name the original module as a Statement
@@ -973,6 +986,8 @@ pub fn instrument_module(module: &mut Module, module_source: &str) -> Result<Vec
     // into `entries`). Consumed by `chain_hints_for_branches` after the
     // function returns.
     let mut chain_hints: HashMap<u32, BranchHint> = HashMap::new();
+    // #352: absolute branch ids whose fall-through is a value tail.
+    let mut value_tails: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for scan in &scans {
         for (idx_in_scan, branch) in scan.branches.iter().enumerate() {
             let id = u32::try_from(entries.len())
@@ -980,6 +995,9 @@ pub fn instrument_module(module: &mut Module, module_source: &str) -> Result<Vec
             // v0.8: propagate the per-branch hint to the absolute id space.
             if let Some(&hint) = scan.hints.get(&idx_in_scan) {
                 chain_hints.insert(id, hint);
+            }
+            if scan.value_tail.contains(&idx_in_scan) {
+                value_tails.insert(id);
             }
             // v0.32 (DEC-039) — i64 so a hot branch's hit count cannot
             // wrap/sign-flip past i32::MAX at real-application scale.
@@ -1126,6 +1144,9 @@ pub fn instrument_module(module: &mut Module, module_source: &str) -> Result<Vec
     LAST_CHAIN_HINTS.with(|cell| {
         *cell.borrow_mut() = chain_hints;
     });
+    LAST_VALUE_TAILS.with(|cell| {
+        *cell.borrow_mut() = value_tails;
+    });
 
     Ok(entries)
 }
@@ -1137,6 +1158,28 @@ thread_local! {
     /// multiple threads against the same module is unsupported.
     static LAST_CHAIN_HINTS: std::cell::RefCell<HashMap<u32, BranchHint>> =
         std::cell::RefCell::new(HashMap::new());
+}
+
+thread_local! {
+    /// #352 value-tail stash. Set by `instrument_module`; read by
+    /// `apply_unobserved_tails`. Same single-threaded contract as
+    /// `LAST_CHAIN_HINTS`.
+    static LAST_VALUE_TAILS: std::cell::RefCell<std::collections::HashSet<u32>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+/// #352 — flag each decision whose LAST `br_if` falls through into a value
+/// tail (see `value_tail_sites`) with `unobserved_tail_conditions = 1`.
+/// Only the last condition is examined: an interior `br_if` falling into
+/// another `br_if` is an ordinary chain.
+pub fn apply_unobserved_tails(decisions: &mut [Decision]) {
+    let tails = LAST_VALUE_TAILS.with(|cell| cell.borrow().clone());
+    for d in decisions {
+        d.unobserved_tail_conditions = match d.conditions.last() {
+            Some(last) if tails.contains(last) => 1,
+            _ => 0,
+        };
+    }
 }
 
 /// v0.8 — apply chain_kind to each Decision based on the per-branch
@@ -1975,6 +2018,11 @@ struct FunctionScan {
     /// Computed during `walk_collect`; consumed by `apply_chain_kinds`
     /// after DWARF decision reconstruction.
     hints: HashMap<usize, BranchHint>,
+    /// #352 — indices (into `branches`) of `br_if` sites whose fall-through
+    /// continuation computes the function's returned VALUE, i.e. the
+    /// operand after this `br_if` has no `br_if` of its own. Only ever
+    /// populated for functions with a single `i32` result.
+    value_tail: std::collections::HashSet<usize>,
 }
 
 fn collect_scans(module: &Module) -> Vec<FunctionScan> {
@@ -1982,10 +2030,17 @@ fn collect_scans(module: &Module) -> Vec<FunctionScan> {
     for (index, (fid, lf)) in module.funcs.iter_local().enumerate() {
         let mut sites = Vec::new();
         let mut hints = HashMap::new();
-        walk_collect(lf, lf.entry_block(), &mut sites, &mut hints);
+        let mut lin: Vec<Lin> = Vec::new();
+        walk_collect(lf, lf.entry_block(), &mut sites, &mut hints, &mut lin);
         if sites.is_empty() {
             continue;
         }
+        let returns_i32 = module.types.get(lf.ty()).results() == [ValType::I32];
+        let value_tail = if returns_i32 {
+            value_tail_sites(&lin)
+        } else {
+            std::collections::HashSet::new()
+        };
         let function_index = u32::try_from(index).unwrap_or(u32::MAX);
         let function_name = module.funcs.get(fid).name.clone();
         out.push(FunctionScan {
@@ -1994,6 +2049,7 @@ fn collect_scans(module: &Module) -> Vec<FunctionScan> {
             function_name,
             branches: sites,
             hints,
+            value_tail,
         });
     }
     out
@@ -2004,6 +2060,7 @@ fn walk_collect(
     seq_id: InstrSeqId,
     out: &mut Vec<BranchSite>,
     hints: &mut HashMap<usize, BranchHint>,
+    lin: &mut Vec<Lin>,
 ) {
     let seq = func.block(seq_id);
     for (index, (instr, loc)) in seq.instrs.iter().enumerate() {
@@ -2045,6 +2102,7 @@ fn walk_collect(
                     BranchHint::BranchesOnTrue
                 };
                 hints.insert(out.len(), hint);
+                lin.push(Lin::Site(out.len()));
                 out.push(BranchSite {
                     seq_id,
                     instr_index: i,
@@ -2057,6 +2115,7 @@ fn walk_collect(
                 consequent,
                 alternative,
             }) => {
+                lin.push(Lin::Branch);
                 out.push(BranchSite {
                     seq_id,
                     instr_index: i,
@@ -2071,10 +2130,11 @@ fn walk_collect(
                     target_index: None,
                     byte_offset,
                 });
-                walk_collect(func, *consequent, out, hints);
-                walk_collect(func, *alternative, out, hints);
+                walk_collect(func, *consequent, out, hints, lin);
+                walk_collect(func, *alternative, out, hints, lin);
             }
             Instr::BrTable(bt) => {
+                lin.push(Lin::Branch);
                 let n = u32::try_from(bt.blocks.len()).unwrap_or(u32::MAX);
                 for t in 0..n {
                     out.push(BranchSite {
@@ -2093,11 +2153,112 @@ fn walk_collect(
                     byte_offset,
                 });
             }
-            Instr::Block(b) => walk_collect(func, b.seq, out, hints),
-            Instr::Loop(l) => walk_collect(func, l.seq, out, hints),
-            _ => {}
+            Instr::Block(b) => walk_collect(func, b.seq, out, hints, lin),
+            Instr::Loop(l) => {
+                lin.push(Lin::Branch);
+                walk_collect(func, l.seq, out, hints, lin);
+            }
+            other => lin.push(classify_instr(other)),
         }
     }
+}
+
+/// #352 — coarse linearisation of a function body (program order, blocks
+/// flattened), used only to recognise a value-producing tail operand.
+#[derive(Debug, Clone, Copy)]
+enum Lin {
+    /// A `br_if` site; the payload is its index in the scan's `branches`.
+    Site(usize),
+    /// Control flow that consumes the pending value as a branch condition
+    /// or begins unrelated control flow (`if`, `br_table`, `loop`,
+    /// `unreachable`, memory stores): a window ending here is NOT a tail.
+    Branch,
+    /// `return`: the value escapes as the function result; a window ending
+    /// here may be a value tail (same as falling off the function end).
+    Return,
+    /// `br` / `call`: the value escapes to a join or a callee; a window
+    /// ending here may be a value tail only if it computed something.
+    Escape,
+    /// An instruction that computes a value from operands: comparison,
+    /// arithmetic, load, select.
+    Compute,
+    LocalGet(u32),
+    LocalSet(u32),
+    Other,
+}
+
+#[allow(clippy::wildcard_enum_match_arm)]
+fn classify_instr(instr: &Instr) -> Lin {
+    match instr {
+        Instr::Binop(_) | Instr::Unop(_) | Instr::Load(_) | Instr::Select(_) => Lin::Compute,
+        Instr::LocalGet(g) => Lin::LocalGet(local_key(g.local)),
+        Instr::LocalSet(s) => Lin::LocalSet(local_key(s.local)),
+        Instr::LocalTee(t) => Lin::LocalSet(local_key(t.local)),
+        Instr::Return(_) => Lin::Return,
+        Instr::Br(_) | Instr::Call(_) | Instr::CallIndirect(_) => Lin::Escape,
+        Instr::Unreachable(_) | Instr::Store(_) => Lin::Branch,
+        _ => Lin::Other,
+    }
+}
+
+fn local_key(id: LocalId) -> u32 {
+    // walrus ids are opaque; the index of the arena slot is stable per module.
+    u32::try_from(id.index()).unwrap_or(u32::MAX)
+}
+
+/// #352 — for each `br_if` site, decide whether its fall-through
+/// continuation is a value tail: the next instructions compute a value
+/// (comparison / arithmetic / load / select, or a read of a variable not
+/// defined in the window) and that value escapes (function end, `return`,
+/// `br` to a join) WITHOUT first being consumed by another `br_if`/`if`.
+/// Such an operand is the decision's last operand: its value is the
+/// result and rustc emits no `br_if` for it, so witness never observes it.
+///
+/// Deliberately a superset: it may flag a non-value continuation (the
+/// decision is then capped at `Partial`, an under-claim); the reverse —
+/// missing a recognisable value tail — is the unsound direction.
+fn value_tail_sites(lin: &[Lin]) -> std::collections::HashSet<usize> {
+    let mut out = std::collections::HashSet::new();
+    for (pos, item) in lin.iter().enumerate() {
+        let Lin::Site(site) = item else { continue };
+        let mut has_compute = false;
+        let mut set_in_window: Vec<u32> = Vec::new();
+        let mut reads_free_var = false;
+        let mut ended_by_branch = false;
+        let mut ended_by_escape_call = false;
+        for next in lin.iter().skip(pos.saturating_add(1)) {
+            match next {
+                Lin::Site(_) | Lin::Branch => {
+                    ended_by_branch = true;
+                    break;
+                }
+                Lin::Escape => {
+                    ended_by_escape_call = true;
+                    break;
+                }
+                Lin::Return => break,
+                Lin::Compute => has_compute = true,
+                Lin::LocalSet(l) => set_in_window.push(*l),
+                Lin::LocalGet(l) => {
+                    if !set_in_window.contains(l) {
+                        reads_free_var = true;
+                    }
+                }
+                Lin::Other => {}
+            }
+        }
+        if ended_by_branch {
+            continue;
+        }
+        // Window ended at `return`/`br`/`call` (escape) or at function end.
+        // A bare free-variable read only counts at function end / `return`
+        // (`a && b` with `b` a plain bool); before a call it is an argument.
+        let is_tail = has_compute || (reads_free_var && !ended_by_escape_call);
+        if is_tail {
+            out.insert(*site);
+        }
+    }
+    out
 }
 
 /// `counter_offset` is the position of `sites[0]`'s counter within the
@@ -2534,6 +2695,7 @@ mod tests {
             source_file: file.map(String::from),
             source_line: Some(1),
             chain_kind: ChainKind::default(),
+            unobserved_tail_conditions: 0,
             inline_context: None,
         }
     }

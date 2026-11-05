@@ -1616,3 +1616,31 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+  - id: REQ-082
+    release: v0.46.0
+    type: requirement
+    title: witness never reports a condition proved by a pair whose actual decision outcome did not change, and never reports FullMcdc with an unobserved condition
+    status: implemented
+    description: >
+      For a value-producing short-circuit decision (`fn f() -> bool { a || b || c }`)
+      rustc emits no br_if for the last operand, so witness cannot observe it.
+      Before this guard witness derived each row's outcome from the last
+      observed condition value, which is wrong whenever the chain falls through
+      into that tail, so six conditions in the verdict suite (all four in
+      safety_envelope, one each in triangle and leap_year) were reported proved
+      by row pairs whose real return value did not change, and the decisions
+      were reported FullMcdc. Witness shall (G2) detect a decision whose last
+      br_if falls into a value tail, record unobserved_tail_conditions in the
+      manifest and report, and cap the decision at Partial with the reason
+      unobserved_tail_conditions; and (G1) for such a decision take every row
+      outcome from the real return value, never from condition values, and
+      report a condition as a gap with reason outcome_unverified when the only
+      differing pair has a row with no observed outcome. Step 1 of #352; the
+      unobserved last operand itself is not yet measured (step 3). (Issue #352.)
+    tags: [mcdc, soundness, over-claim, report]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001

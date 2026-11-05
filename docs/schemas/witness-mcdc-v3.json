@@ -102,6 +102,16 @@
           "description": "v0.13.0 — per-context verdict drill-down (Variant B). One entry per distinct non-`null` `inline_context` observed across the decision's rows that has at least 2 rows. Each entry runs the MC/DC kernel against just that context's rows so reviewers can see 'this Decision is FullMcdc when inlined from validate.rs:5 but Partial when inlined from audit.rs:10' without losing the unified-Decision shape. Empty when no rows carry inline_context tags or when every tagged row shares one context (the headline already covers it).",
           "type": "array",
           "items": { "$ref": "#/$defs/PerContextVerdict" }
+        },
+        "status_reason": {
+          "description": "#352 — machine-readable reason `status` was capped below what the row pairs alone give. `unobserved_tail_conditions`: the decision's last operand produces its value and has no branch, so witness never observes it; the decision is capped at `partial`. Absent when nothing was capped.",
+          "type": "string",
+          "enum": ["unobserved_tail_conditions"]
+        },
+        "unobserved_tail_conditions": {
+          "description": "#352 — number of trailing short-circuit operands witness cannot observe. Absent when 0.",
+          "type": "integer",
+          "minimum": 1
         }
       }
     },
@@ -233,6 +243,11 @@
         "gap_closure": {
           "description": "Recommended row to close the missing pair when status is `gap`. Absent for `proved` and `dead`.",
           "$ref": "#/$defs/GapClosure"
+        },
+        "reason": {
+          "description": "#352 — machine-readable reason a condition is not `proved`. `outcome_unverified`: a row pair that differs on this condition exists, but at least one of its rows has no observed decision outcome, so independent effect cannot be certified. Absent otherwise.",
+          "type": "string",
+          "enum": ["outcome_unverified"]
         }
       }
     },
