@@ -1,4 +1,26 @@
 version: 2
+# One PR per logical release across all directories: the wasm-tools family is
+# version-locked (wasmparser 0.262 in / and /crates/witness-component split
+# into #319+#320), serde_json split into #258+#259, and the playwright pair
+# into #260+#261. Group them so each lands as one PR.
+groups:
+  wasm-tools-family:
+    patterns:
+      - "wasmparser"
+      - "wasm-encoder"
+      - "wasmprinter"
+      - "wit-component"
+      - "wit-parser"
+      - "wasm-metadata"
+      - "wat"
+  serde-json:
+    patterns:
+      - "serde_json"
+  playwright:
+    package-ecosystem: npm
+    patterns:
+      - "@playwright/*"
+      - "@types/node"
 updates:
   - package-ecosystem: github-actions
     directory: /
