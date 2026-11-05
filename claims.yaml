@@ -61,3 +61,27 @@ claims:
     evidence:
       - kind: verbatim
         text: "does not prove"
+
+  # #352: witness does not observe the last operand of a value-producing
+  # short-circuit chain (no br_if for it), yet can report FullMcdc over the
+  # observed conditions. Found by the #350 truth-table oracle. Keep the
+  # disclosure in the README and the paper's lifting section until #352 is
+  # fixed, when it should be reworded deliberately, never dropped silently.
+  - id: WITNESS-DISCLOSES-UNOBSERVED-LAST-OPERAND
+    doc: README.md
+    text: "does not observe the last operand of a"
+    evidence:
+      - kind: verbatim
+        text: "issues/352"
+  - id: WITNESS-PAPER-LIFTING-CORRECTION-352
+    doc: docs/paper/v0.2-mcdc-wasm.md
+    text: "The lifting argument therefore does not cover the last operand of value-producing short-circuit decisions."
+    evidence:
+      - kind: verbatim
+        text: "issues/352"
+  - id: WITNESS-DISCLOSES-FALSE-PROVED-352
+    doc: README.md
+    text: "It can also mark a condition proved by a row"
+    evidence:
+      - kind: verbatim
+        text: "issues/352"
