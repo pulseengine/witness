@@ -1571,7 +1571,7 @@ artifacts:
     release: v0.46.0
     type: requirement
     title: instrument never writes a module that fails validation; it refuses with the validator's message
-    status: implemented
+    status: verified
     description: >
       The #207 guard budgets globals arithmetically, but the emitted module can
       be rejected on another 1,000,000-capped quantity while globals and exports
@@ -1595,7 +1595,7 @@ artifacts:
     release: v0.46.0
     type: requirement
     title: MC/DC verdicts are checked against the hand-derived source-level truth tables on every PR; known divergences are ledgered
-    status: implemented
+    status: verified
     description: >
       MC/DC correctness rested on hand-derived verdicts/*/TRUTH-TABLE.md files
       that no executed test compared with witness's reporter. The verdict-suite
@@ -1620,7 +1620,7 @@ artifacts:
     release: v0.46.0
     type: requirement
     title: witness never reports a condition proved by a pair whose actual decision outcome did not change, and never reports FullMcdc with an unobserved condition
-    status: implemented
+    status: verified
     description: >
       For a value-producing short-circuit decision (`fn f() -> bool { a || b || c }`)
       rustc emits no br_if for the last operand, so witness cannot observe it.
