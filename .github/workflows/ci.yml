@@ -382,6 +382,11 @@ jobs:
         run: |
           chmod +x verdicts/run-suite.sh
           ./verdicts/run-suite.sh build/verdict-evidence
+      - name: Check MC/DC reports against the truth tables (self-test, then evidence)
+        run: |
+          set -euo pipefail
+          python3 tools/check_truth_tables.py --self-test
+          python3 tools/check_truth_tables.py --evidence build/verdict-evidence
       - name: Regression gate — verdicts that should produce decisions
         run: |
           set -euo pipefail

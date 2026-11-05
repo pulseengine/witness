@@ -7,6 +7,15 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **MC/DC verdicts are checked against the hand-derived truth tables on every PR.**
+  `tools/check_truth_tables.py` compares witness's report for each verdict with its
+  `TRUTH-TABLE.md` (condition count, per-condition verdict, pair rows, interpretation);
+  known source-vs-wasm divergences are ledgered in `verdicts/TRUTH-TABLE-DIVERGENCES.json`
+  and the check requires the observed set to equal the ledger exactly. Divergences are
+  tracked in #352. (REQ-081, #350)
+
 ### Changed
 
 - **crates.io publishing now waits for a successful release.** `publish-to-crates-io.yml`
