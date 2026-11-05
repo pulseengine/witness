@@ -72,6 +72,53 @@ const TRIANGLE_WAT: &str = r#"
 )
 "#;
 
+/// `log(a + b <= c || a + c <= b || b + c <= a); 0`: the decision's value goes
+/// to a call and the function returns the constant 0 on every row. The
+/// function result is NOT the decision's value, so it must never be used as
+/// the row outcome (it would read 0 for every row).
+const CALLED_TAIL_WAT: &str = r#"
+(module
+  (func $log (param i32))
+  (func $f (param i32 i32 i32) (result i32)
+    (local i32)
+    block
+      local.get 1
+      local.get 0
+      i32.add
+      local.get 2
+      i32.gt_u
+      br_if 0
+      i32.const 1
+      call $log
+      i32.const 0
+      return
+    end
+    i32.const 1
+    local.set 3
+    block
+      local.get 2
+      local.get 0
+      i32.add
+      local.get 1
+      i32.le_u
+      br_if 0
+      local.get 2
+      local.get 1
+      i32.add
+      local.get 0
+      i32.le_u
+      local.set 3
+    end
+    local.get 3
+    call $log
+    i32.const 0)
+  (func (export "run_row_0") (result i32) i32.const 3 i32.const 4 i32.const 5 call $f)
+  (func (export "run_row_1") (result i32) i32.const 1 i32.const 2 i32.const 5 call $f)
+  (func (export "run_row_2") (result i32) i32.const 5 i32.const 1 i32.const 2 call $f)
+  (func (export "run_row_3") (result i32) i32.const 1 i32.const 5 i32.const 2 call $f)
+)
+"#;
+
 /// `a && b` as a COMPLETE chain: both operands have a `br_if`, the
 /// fall-through is a constant. Nothing is unobserved, so the derived
 /// (short-circuit) outcome is sound and FullMcdc must stay reachable.
@@ -121,6 +168,7 @@ fn run(wat: &str, rows: usize) -> (McdcReport, Decision) {
         chain_kind: ChainKind::default(),
         inline_context: None,
         unobserved_tail_conditions: 0,
+        unobserved_tail_indirect: false,
     }];
     // Same two passes `instrument_file` runs on DWARF-reconstructed decisions.
     // The instrument-time stashes they read are still set on this thread.
@@ -215,4 +263,45 @@ fn complete_chain_keeps_full_mcdc() {
         d.status
     );
     assert!(d.status_reason.is_none());
+}
+
+#[test]
+fn tail_passed_to_a_call_never_uses_the_return_value() {
+    let (report, decision) = run(CALLED_TAIL_WAT, 4);
+    assert_eq!(decision.unobserved_tail_conditions, 1);
+    assert!(
+        decision.unobserved_tail_indirect,
+        "a tail whose value is passed to a call is not a direct return"
+    );
+    let d = &report.decisions[0];
+    // Nothing is proved, so the honest status is NoWitness (Partial needs a
+    // proved condition); it must never be FullMcdc.
+    assert!(
+        matches!(
+            d.status,
+            DecisionStatus::Partial | DecisionStatus::NoWitness
+        ),
+        "{:?}",
+        d.status
+    );
+    for r in &d.truth_table {
+        assert_eq!(
+            r.outcome, None,
+            "row {} carries the function's constant return as the decision outcome",
+            r.row_id
+        );
+    }
+    for c in &d.conditions {
+        assert!(
+            !matches!(c.status, ConditionStatus::Proved),
+            "c{} proved from the function's return value, which is not the decision",
+            c.index
+        );
+    }
+    assert!(
+        d.conditions
+            .iter()
+            .any(|c| c.reason.as_deref() == Some("outcome_unverified")),
+        "expected outcome_unverified gaps"
+    );
 }

@@ -586,6 +586,7 @@ fn group_into_decisions(
                     // walrus dependencies.
                     chain_kind: crate::instrument::ChainKind::default(),
                     unobserved_tail_conditions: 0,
+                    unobserved_tail_indirect: false,
                     inline_context,
                 });
                 *next_decision_id = next_decision_id.saturating_add(1);
@@ -660,6 +661,7 @@ fn group_into_decisions(
             // the truth-table view here.
             chain_kind: crate::instrument::ChainKind::default(),
             unobserved_tail_conditions: 0,
+            unobserved_tail_indirect: false,
             inline_context,
         });
         next_decision_id = next_decision_id.saturating_add(1);

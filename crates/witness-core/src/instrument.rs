@@ -300,6 +300,14 @@ pub struct Decision {
     /// non-value tail, it must not miss a value tail it can recognise).
     #[serde(default, skip_serializing_if = "crate::run_record::is_zero_u32")]
     pub unobserved_tail_conditions: u32,
+    /// #352 — the unobserved tail's value reaches the function result only
+    /// indirectly (through `br`, `call`, `drop`, or a shape not provably the
+    /// result), so the function's return value is NOT the decision's value.
+    /// The runner records no outcome for such a decision; conditions whose
+    /// only differing pair needs one report `outcome_unverified`. Absent
+    /// (false) for direct tails and on pre-v0.46 manifests.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unobserved_tail_indirect: bool,
 }
 
 /// v0.12.0 — call-site context for an inlined source decision. The
@@ -987,7 +995,7 @@ pub fn instrument_module(module: &mut Module, module_source: &str) -> Result<Vec
     // function returns.
     let mut chain_hints: HashMap<u32, BranchHint> = HashMap::new();
     // #352: absolute branch ids whose fall-through is a value tail.
-    let mut value_tails: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut value_tails: HashMap<u32, bool> = HashMap::new();
     for scan in &scans {
         for (idx_in_scan, branch) in scan.branches.iter().enumerate() {
             let id = u32::try_from(entries.len())
@@ -996,8 +1004,8 @@ pub fn instrument_module(module: &mut Module, module_source: &str) -> Result<Vec
             if let Some(&hint) = scan.hints.get(&idx_in_scan) {
                 chain_hints.insert(id, hint);
             }
-            if scan.value_tail.contains(&idx_in_scan) {
-                value_tails.insert(id);
+            if let Some(&indirect) = scan.value_tail.get(&idx_in_scan) {
+                value_tails.insert(id, indirect);
             }
             // v0.32 (DEC-039) — i64 so a hot branch's hit count cannot
             // wrap/sign-flip past i32::MAX at real-application scale.
@@ -1164,8 +1172,8 @@ thread_local! {
     /// #352 value-tail stash. Set by `instrument_module`; read by
     /// `apply_unobserved_tails`. Same single-threaded contract as
     /// `LAST_CHAIN_HINTS`.
-    static LAST_VALUE_TAILS: std::cell::RefCell<std::collections::HashSet<u32>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
+    static LAST_VALUE_TAILS: std::cell::RefCell<HashMap<u32, bool>> =
+        std::cell::RefCell::new(HashMap::new());
 }
 
 /// #352 — flag each decision whose LAST `br_if` falls through into a value
@@ -1175,10 +1183,13 @@ thread_local! {
 pub fn apply_unobserved_tails(decisions: &mut [Decision]) {
     let tails = LAST_VALUE_TAILS.with(|cell| cell.borrow().clone());
     for d in decisions {
-        d.unobserved_tail_conditions = match d.conditions.last() {
-            Some(last) if tails.contains(last) => 1,
-            _ => 0,
-        };
+        let tail = d
+            .conditions
+            .last()
+            .and_then(|last| tails.get(last))
+            .copied();
+        d.unobserved_tail_conditions = u32::from(tail.is_some());
+        d.unobserved_tail_indirect = tail == Some(true);
     }
 }
 
@@ -2022,7 +2033,7 @@ struct FunctionScan {
     /// continuation computes the function's returned VALUE, i.e. the
     /// operand after this `br_if` has no `br_if` of its own. Only ever
     /// populated for functions with a single `i32` result.
-    value_tail: std::collections::HashSet<usize>,
+    value_tail: HashMap<usize, bool>,
 }
 
 fn collect_scans(module: &Module) -> Vec<FunctionScan> {
@@ -2039,7 +2050,7 @@ fn collect_scans(module: &Module) -> Vec<FunctionScan> {
         let value_tail = if returns_i32 {
             value_tail_sites(&lin)
         } else {
-            std::collections::HashSet::new()
+            HashMap::new()
         };
         let function_index = u32::try_from(index).unwrap_or(u32::MAX);
         let function_name = module.funcs.get(fid).name.clone();
@@ -2195,7 +2206,7 @@ fn classify_instr(instr: &Instr) -> Lin {
         Instr::LocalSet(s) => Lin::LocalSet(local_key(s.local)),
         Instr::LocalTee(t) => Lin::LocalSet(local_key(t.local)),
         Instr::Return(_) => Lin::Return,
-        Instr::Br(_) | Instr::Call(_) | Instr::CallIndirect(_) => Lin::Escape,
+        Instr::Br(_) | Instr::Call(_) | Instr::CallIndirect(_) | Instr::Drop(_) => Lin::Escape,
         Instr::Unreachable(_) | Instr::Store(_) => Lin::Branch,
         _ => Lin::Other,
     }
@@ -2207,25 +2218,31 @@ fn local_key(id: LocalId) -> u32 {
 }
 
 /// #352 — for each `br_if` site, decide whether its fall-through
-/// continuation is a value tail: the next instructions compute a value
-/// (comparison / arithmetic / load / select, or a read of a variable not
-/// defined in the window) and that value escapes (function end, `return`,
-/// `br` to a join) WITHOUT first being consumed by another `br_if`/`if`.
-/// Such an operand is the decision's last operand: its value is the
-/// result and rustc emits no `br_if` for it, so witness never observes it.
+/// continuation is a value tail, and HOW the value leaves. Returns a map
+/// from site index to `indirect`:
+/// - `false` (direct): the window ends at `return` or the function end,
+///   nothing consumed the value on the way (no `drop`/`call`/`br`), and the
+///   last thing pushed is the computed value itself (a comparison /
+///   arithmetic result, a local assigned in the window, or a bare read of a
+///   variable). The value IS the function result.
+/// - `true` (indirect): a value is computed but escapes through `br`,
+///   `call`, `drop`, or ends in something that is not provably the result
+///   (e.g. a constant after the computation). The function result is then
+///   NOT known to be the decision's value; the runner must not use it.
 ///
-/// Deliberately a superset: it may flag a non-value continuation (the
-/// decision is then capped at `Partial`, an under-claim); the reverse —
-/// missing a recognisable value tail — is the unsound direction.
-fn value_tail_sites(lin: &[Lin]) -> std::collections::HashSet<usize> {
-    let mut out = std::collections::HashSet::new();
+/// Anything not provably direct is indirect. A site whose window ends at
+/// another `br_if` / `if` / `br_table` / loop is not a tail.
+fn value_tail_sites(lin: &[Lin]) -> HashMap<usize, bool> {
+    let mut out = HashMap::new();
     for (pos, item) in lin.iter().enumerate() {
         let Lin::Site(site) = item else { continue };
         let mut has_compute = false;
+        let mut has_set = false;
         let mut set_in_window: Vec<u32> = Vec::new();
         let mut reads_free_var = false;
         let mut ended_by_branch = false;
-        let mut ended_by_escape_call = false;
+        let mut ended_by_escape = false;
+        let mut last: Option<Lin> = None;
         for next in lin.iter().skip(pos.saturating_add(1)) {
             match next {
                 Lin::Site(_) | Lin::Branch => {
@@ -2233,12 +2250,15 @@ fn value_tail_sites(lin: &[Lin]) -> std::collections::HashSet<usize> {
                     break;
                 }
                 Lin::Escape => {
-                    ended_by_escape_call = true;
+                    ended_by_escape = true;
                     break;
                 }
                 Lin::Return => break,
                 Lin::Compute => has_compute = true,
-                Lin::LocalSet(l) => set_in_window.push(*l),
+                Lin::LocalSet(l) => {
+                    has_set = true;
+                    set_in_window.push(*l);
+                }
                 Lin::LocalGet(l) => {
                     if !set_in_window.contains(l) {
                         reads_free_var = true;
@@ -2246,17 +2266,26 @@ fn value_tail_sites(lin: &[Lin]) -> std::collections::HashSet<usize> {
                 }
                 Lin::Other => {}
             }
+            if !matches!(next, Lin::Other) {
+                last = Some(*next);
+            }
         }
         if ended_by_branch {
             continue;
         }
-        // Window ended at `return`/`br`/`call` (escape) or at function end.
-        // A bare free-variable read only counts at function end / `return`
-        // (`a && b` with `b` a plain bool); before a call it is an argument.
-        let is_tail = has_compute || (reads_free_var && !ended_by_escape_call);
-        if is_tail {
-            out.insert(*site);
+        // A bare free-variable read is only a tail at function end/`return`
+        // (`a && b` with `b` a plain bool); before a call/br it is an
+        // argument or a join value.
+        let is_tail = has_compute || (reads_free_var && !ended_by_escape);
+        if !is_tail {
+            continue;
         }
+        let last_is_value = match last {
+            Some(Lin::Compute) => true,
+            Some(Lin::LocalGet(l)) => set_in_window.contains(&l) || (!has_set && !has_compute),
+            _ => false,
+        };
+        out.insert(*site, ended_by_escape || !last_is_value);
     }
     out
 }
@@ -2696,6 +2725,7 @@ mod tests {
             source_line: Some(1),
             chain_kind: ChainKind::default(),
             unobserved_tail_conditions: 0,
+            unobserved_tail_indirect: false,
             inline_context: None,
         }
     }

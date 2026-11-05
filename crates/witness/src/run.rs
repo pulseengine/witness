@@ -511,6 +511,12 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     // #352: decisions whose last operand is an unobserved value tail. For
     // these, condition values cannot determine the outcome, so the
     // chain-derived outcome is never used (see `parse_trace_records`).
+    let indirect_decisions: std::collections::HashSet<u32> = manifest
+        .decisions
+        .iter()
+        .filter(|d| d.unobserved_tail_indirect)
+        .map(|d| d.id)
+        .collect();
     let tail_decisions: std::collections::HashSet<u32> = manifest
         .decisions
         .iter()
@@ -691,7 +697,13 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                 let dec_lookup: Option<&Decision> =
                     manifest.decisions.iter().find(|d| d.id == dec_id);
                 for (evaluated, iter_outcome) in iters {
-                    let row_outcome = iter_outcome.or(outcome);
+                    // #352: an indirect value tail means the function result is NOT
+                    // the decision's value; record no outcome at all.
+                    let row_outcome = if indirect_decisions.contains(&dec_id) {
+                        None
+                    } else {
+                        iter_outcome.or(outcome)
+                    };
                     // v0.13.0 — tag each row with its modal inline
                     // context. Falls out to None for pre-v0.13
                     // manifests (empty branch_inline_contexts) or
@@ -751,7 +763,11 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                     .push(DecisionRow {
                         row_id,
                         evaluated,
-                        outcome,
+                        outcome: if d.unobserved_tail_indirect {
+                            None
+                        } else {
+                            outcome
+                        },
                         raw_brvals,
                         inline_context: row_ctx,
                         inline_chain: row_chain,
@@ -1223,6 +1239,12 @@ fn harness_v2_to_run_record(
     // #352: decisions whose last operand is an unobserved value tail. For
     // these, condition values cannot determine the outcome, so the
     // chain-derived outcome is never used (see `parse_trace_records`).
+    let indirect_decisions: std::collections::HashSet<u32> = manifest
+        .decisions
+        .iter()
+        .filter(|d| d.unobserved_tail_indirect)
+        .map(|d| d.id)
+        .collect();
     let tail_decisions: std::collections::HashSet<u32> = manifest
         .decisions
         .iter()
@@ -1300,7 +1322,13 @@ fn harness_v2_to_run_record(
                 let dec_lookup: Option<&Decision> =
                     manifest.decisions.iter().find(|d| d.id == dec_id);
                 for (evaluated, iter_outcome) in iters {
-                    let row_outcome = iter_outcome.or(outcome);
+                    // #352: an indirect value tail means the function result is NOT
+                    // the decision's value; record no outcome at all.
+                    let row_outcome = if indirect_decisions.contains(&dec_id) {
+                        None
+                    } else {
+                        iter_outcome.or(outcome)
+                    };
                     let row_ctx = dec_lookup
                         .map(|d| row_modal_context(&evaluated, d, branch_inline_contexts))
                         .unwrap_or(None);
@@ -1357,7 +1385,11 @@ fn harness_v2_to_run_record(
                     .push(DecisionRow {
                         row_id,
                         evaluated,
-                        outcome,
+                        outcome: if d.unobserved_tail_indirect {
+                            None
+                        } else {
+                            outcome
+                        },
                         raw_brvals,
                         inline_context: row_ctx,
                         inline_chain: row_chain,
