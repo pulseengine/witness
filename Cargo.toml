@@ -76,7 +76,7 @@ walrus = "0.27.2"
 # -0398, -0403, -0410 (and a run of unsound advisories) with no fix
 # reachable on the 0.13 line. witness never configures a module cache.
 # Keep this list in sync with wasmtime's `default` on every wasmtime bump.
-wasmtime = { version = "49", default-features = false, features = [
+wasmtime = { version = "50", default-features = false, features = [
     "anyhow",
     "async",
     "backtrace",
@@ -103,7 +103,7 @@ wasmtime = { version = "49", default-features = false, features = [
     "compile-time-builtins",
     "wit-parser",
 ] }
-wasmtime-wasi = "49"
+wasmtime-wasi = "50"
 clap = { version = "4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
