@@ -222,6 +222,7 @@ mod tests {
             invoked: vec![],
             branches: vec![],
             decisions: vec![DecisionRecord {
+                unobserved_tail_conditions: 0,
                 id: 0,
                 source_file: Some("leap_year.rs".to_string()),
                 source_line: Some(20),

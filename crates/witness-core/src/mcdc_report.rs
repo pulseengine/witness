@@ -139,6 +139,16 @@ pub struct DecisionVerdict {
     /// row tagged the same context (the headline already covers it).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub per_context: Vec<PerContextVerdict>,
+    /// #352 — machine-readable reason the status was capped below what
+    /// the row pairs alone would give. `unobserved_tail_conditions`: the
+    /// decision's last operand produces its value and has no `br_if`, so
+    /// it is never observed. Absent when nothing was capped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_reason: Option<String>,
+    /// #352 — trailing operands witness cannot observe (see
+    /// `Decision::unobserved_tail_conditions`). Absent when 0.
+    #[serde(default, skip_serializing_if = "crate::run_record::is_zero_u32")]
+    pub unobserved_tail_conditions: u32,
 }
 
 /// v0.13.0 — per-call-site verdict view within a unified Decision.
@@ -270,6 +280,13 @@ pub struct ConditionVerdict {
     /// existing row this is paired with".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gap_closure: Option<GapClosure>,
+    /// #352 — machine-readable reason a condition is not `Proved`.
+    /// `outcome_unverified`: a row pair that differs on this condition
+    /// exists, but its decision outcomes were not observed (they would
+    /// have had to be inferred from condition values, which is unsound for
+    /// a decision with an unobserved trailing operand). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -321,6 +338,17 @@ pub struct RowView {
     pub inline_chain: Option<Vec<crate::instrument::InlineContext>>,
 }
 
+/// #352 — the guard's reason fields exist only in the v3 envelope (v1/v2 are
+/// frozen with `additionalProperties: false`). The status itself is already
+/// capped, so stripping loses only the explanation, never the honesty.
+fn strip_v3_guard_fields(d: &mut DecisionVerdict) {
+    d.status_reason = None;
+    d.unobserved_tail_conditions = 0;
+    for c in &mut d.conditions {
+        c.reason = None;
+    }
+}
+
 impl McdcReport {
     /// v0.13.0 — schema-aware report builder. v2 keeps the new
     /// per-context drill-down + per-row inline_context tags;
@@ -333,6 +361,7 @@ impl McdcReport {
             McdcSchemaVersion::V1 => {
                 report.schema = MCDC_SCHEMA_URL.to_string();
                 for d in &mut report.decisions {
+                    strip_v3_guard_fields(d);
                     d.per_context.clear();
                     for r in &mut d.truth_table {
                         r.inline_context = None;
@@ -344,6 +373,7 @@ impl McdcReport {
                 report.schema = MCDC_SCHEMA_URL_V2.to_string();
                 // v2 strips v3-only fields; keeps v2 fields intact.
                 for d in &mut report.decisions {
+                    strip_v3_guard_fields(d);
                     for r in &mut d.truth_table {
                         r.inline_chain = None;
                     }
@@ -457,6 +487,14 @@ impl McdcReport {
                 d.source_line.map(|l| format!(":{l}")).unwrap_or_default(),
                 d.status,
             ));
+            if d.unobserved_tail_conditions > 0 {
+                out.push_str(&format!(
+                    "  NOTE: {} trailing operand(s) of this decision produce its value and have no \
+                     branch, so witness never observes them; status is capped at Partial \
+                     (reason: {UNOBSERVED_TAIL_REASON}). Row outcomes come from the real return value, never inferred from conditions.\n",
+                    d.unobserved_tail_conditions
+                ));
+            }
             out.push_str("  truth table:\n");
             for r in &d.truth_table {
                 let cells = r
@@ -499,6 +537,9 @@ impl McdcReport {
                                 " — try a row {{{}}} (outcome must differ from row {})",
                                 cells, gap.paired_with_row,
                             ));
+                        }
+                        if let Some(reason) = &c.reason {
+                            out.push_str(&format!(" [reason: {reason}]"));
                         }
                         out.push('\n');
                     }
@@ -763,6 +804,7 @@ fn analyse_decision(
                     (ConditionStatus::Dead, None)
                 };
                 ConditionVerdict {
+                    reason: None,
                     index: u32::try_from(i).unwrap_or(u32::MAX),
                     branch_id: bid,
                     status,
@@ -800,6 +842,8 @@ fn analyse_decision(
         // br_table-shape decisions don't have boolean MC/DC pair-
         // finding to filter per context; per_context stays empty.
         return DecisionVerdict {
+            status_reason: None,
+            unobserved_tail_conditions: 0,
             id: d.id,
             source_file: d.source_file.clone(),
             source_line: d.source_line,
@@ -815,6 +859,8 @@ fn analyse_decision(
 
     if d.rows.is_empty() {
         return DecisionVerdict {
+            status_reason: None,
+            unobserved_tail_conditions: 0,
             id: d.id,
             source_file: d.source_file.clone(),
             source_line: d.source_line,
@@ -825,6 +871,7 @@ fn analyse_decision(
                 .iter()
                 .enumerate()
                 .map(|(i, &bid)| ConditionVerdict {
+                    reason: None,
                     index: u32::try_from(i).unwrap_or(u32::MAX),
                     branch_id: bid,
                     status: ConditionStatus::Dead,
@@ -847,6 +894,7 @@ fn analyse_decision(
         let condition_evaluated_anywhere = d.rows.iter().any(|r| r.evaluated.contains_key(&i));
         if !condition_evaluated_anywhere {
             conditions.push(ConditionVerdict {
+                reason: None,
                 index: i,
                 branch_id,
                 status: ConditionStatus::Dead,
@@ -860,6 +908,7 @@ fn analyse_decision(
         match find_independent_effect_pair(&d.rows, i, n) {
             Some((r1, r2, interpretation)) => {
                 conditions.push(ConditionVerdict {
+                    reason: None,
                     index: i,
                     branch_id,
                     status: ConditionStatus::Proved,
@@ -871,6 +920,7 @@ fn analyse_decision(
             None => {
                 let gap = recommend_gap_closure(&d.rows, i);
                 conditions.push(ConditionVerdict {
+                    reason: unverified_reason(&d.rows, i),
                     index: i,
                     branch_id,
                     status: ConditionStatus::Gap,
@@ -888,7 +938,7 @@ fn analyse_decision(
     let any_proved = conditions
         .iter()
         .any(|c| matches!(c.status, ConditionStatus::Proved));
-    let status = match (any_proved, any_gap) {
+    let mut status = match (any_proved, any_gap) {
         (true, false) => DecisionStatus::FullMcdc,
         (true, true) => DecisionStatus::Partial,
         (false, true) => DecisionStatus::NoWitness,
@@ -897,6 +947,16 @@ fn analyse_decision(
         // 2026-06). Report NoWitness so it never inflates the numerator.
         (false, false) => DecisionStatus::NoWitness,
     };
+    // #352 (G2) — an unobserved trailing operand has no condition and no
+    // proving pair, so the decision cannot be fully covered however clean
+    // the observed conditions look. Cap, with a machine-readable reason.
+    let status_reason =
+        if d.unobserved_tail_conditions > 0 && matches!(status, DecisionStatus::FullMcdc) {
+            status = DecisionStatus::Partial;
+            Some(UNOBSERVED_TAIL_REASON.to_string())
+        } else {
+            None
+        };
 
     // v0.13.0 — per-context drill-down. Filter rows by their
     // `inline_context` tag and re-run the kernel against each
@@ -905,6 +965,8 @@ fn analyse_decision(
     // headline shape.
     let per_context = derive_per_context(d, &conditions);
     DecisionVerdict {
+        status_reason,
+        unobserved_tail_conditions: d.unobserved_tail_conditions,
         id: d.id,
         source_file: d.source_file.clone(),
         source_line: d.source_line,
@@ -1024,6 +1086,7 @@ fn derive_per_context(
                 // since this is a subset of headline rows).
                 let _ = headline_conditions;
                 conditions.push(ConditionVerdict {
+                    reason: None,
                     index: i,
                     branch_id,
                     status: ConditionStatus::Dead,
@@ -1037,6 +1100,7 @@ fn derive_per_context(
             match find_independent_effect_pair(&ctx_rows, i, n) {
                 Some((r1, r2, interpretation)) => {
                     conditions.push(ConditionVerdict {
+                        reason: None,
                         index: i,
                         branch_id,
                         status: ConditionStatus::Proved,
@@ -1049,6 +1113,7 @@ fn derive_per_context(
                 None => {
                     let gap = recommend_gap_closure(&ctx_rows, i);
                     conditions.push(ConditionVerdict {
+                        reason: unverified_reason(&ctx_rows, i),
                         index: i,
                         branch_id,
                         status: ConditionStatus::Gap,
@@ -1061,7 +1126,7 @@ fn derive_per_context(
             }
         }
         let any_gap = gap_count > 0 || dead_count > 0;
-        let status = match (proved_count > 0, any_gap) {
+        let mut status = match (proved_count > 0, any_gap) {
             (true, false) => DecisionStatus::FullMcdc,
             (true, true) => DecisionStatus::Partial,
             (false, true) => DecisionStatus::NoWitness,
@@ -1069,6 +1134,10 @@ fn derive_per_context(
             // NoWitness, not a vacuous FullMcdc (soundness audit 2026-06).
             (false, false) => DecisionStatus::NoWitness,
         };
+        // #352 (G2): same cap as the headline verdict.
+        if d.unobserved_tail_conditions > 0 && matches!(status, DecisionStatus::FullMcdc) {
+            status = DecisionStatus::Partial;
+        }
         let row_ids: Vec<u32> = ctx_rows.iter().map(|r| r.row_id).collect();
         // v0.16.0 — the bucket key is now the full chain
         // (`chain_key`, with single-element Vec for v0.13-leaf-only
@@ -1250,6 +1319,42 @@ fn find_independent_effect_pair(
         .map(|(a, b, interp)| (a, b, interp.to_string()))
 }
 
+/// #352 — `DecisionVerdict::status_reason` value for the unobserved-tail cap.
+pub const UNOBSERVED_TAIL_REASON: &str = "unobserved_tail_conditions";
+/// #352 — `ConditionVerdict::reason` value when a would-be proving pair has
+/// a row whose decision outcome was not observed.
+pub const OUTCOME_UNVERIFIED_REASON: &str = "outcome_unverified";
+
+/// #352 (G1) — `Some("outcome_unverified")` when `target_idx` has a pair of
+/// rows that differs on it (masking-compatible elsewhere) but at least one
+/// of the pair has no observed outcome. The pair kernel rejects such rows;
+/// this only explains why, so a reader does not mistake the gap for a
+/// missing test. `None` when there is no such pair.
+fn unverified_reason(rows: &[DecisionRow], target_idx: u32) -> Option<String> {
+    for (ai, a) in rows.iter().enumerate() {
+        let Some(&av) = a.evaluated.get(&target_idx) else {
+            continue;
+        };
+        for b in rows.iter().skip(ai.saturating_add(1)) {
+            let Some(&bv) = b.evaluated.get(&target_idx) else {
+                continue;
+            };
+            if av == bv || (a.outcome.is_some() && b.outcome.is_some()) {
+                continue;
+            }
+            let compatible = a
+                .evaluated
+                .iter()
+                .filter(|(k, _)| **k != target_idx)
+                .all(|(k, v)| b.evaluated.get(k).is_none_or(|bv2| bv2 == v));
+            if compatible {
+                return Some(OUTCOME_UNVERIFIED_REASON.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// When no proving pair exists, recommend a row that would close the
 /// missing pair by flipping the target condition's value relative to an
 /// existing row.
@@ -1303,6 +1408,8 @@ mod tests {
             call_line: 682,
         };
         let d = DecisionVerdict {
+            status_reason: None,
+            unobserved_tail_conditions: 0,
             id: 9,
             // today's (wrong) attribution: the innermost leaf file.
             source_file: Some("option.rs".to_string()),
@@ -1322,6 +1429,8 @@ mod tests {
         assert_eq!(attribution_file(&d, Attribution::Innermost), "option.rs");
         // With no chain, both fall back to source_file (nothing to attribute up).
         let d2 = DecisionVerdict {
+            status_reason: None,
+            unobserved_tail_conditions: 0,
             inline_chain: None,
             ..d.clone()
         };
@@ -1347,6 +1456,7 @@ mod tests {
     #[test]
     fn conditionless_reached_decision_is_not_full_mcdc() {
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("x.rs".to_string()),
             source_line: Some(1),
@@ -1381,6 +1491,7 @@ mod tests {
         // Decision: (c1 && c2) || c3
         // Rows from verdicts/leap_year/TRUTH-TABLE.md (4 rows, full MC/DC).
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("leap_year.rs".to_string()),
             source_line: Some(20),
@@ -1411,6 +1522,7 @@ mod tests {
     fn range_overlap_proves_with_two_pairs() {
         // Decision: c1 && c2 (range_overlap)
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: None,
             source_line: None,
@@ -1430,6 +1542,7 @@ mod tests {
     fn incomplete_suite_emits_gap() {
         // leap_year minus row 3 (the c1=T, c2=F, c3=T row).
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: None,
             source_line: None,
@@ -1456,6 +1569,7 @@ mod tests {
     #[test]
     fn unreached_decision_marked() {
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: None,
             source_line: None,
@@ -1477,6 +1591,7 @@ mod tests {
     fn dead_condition_when_never_evaluated() {
         // Two rows, both short-circuit before reaching c3.
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: None,
             source_line: None,
@@ -1537,6 +1652,7 @@ mod tests {
             });
         }
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("switch.rs".to_string()),
             source_line: Some(10),
@@ -1609,6 +1725,7 @@ mod tests {
             });
         }
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("switch.rs".to_string()),
             source_line: Some(10),
@@ -1670,6 +1787,7 @@ mod tests {
             });
         }
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: None,
             source_line: None,
@@ -1708,6 +1826,7 @@ mod tests {
         // tags; the per_context drill-down should stay empty so the
         // headline carries the verdict alone.
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("lib.rs".to_string()),
             source_line: Some(1),
@@ -1747,6 +1866,7 @@ mod tests {
             inline_chain: None,
         };
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("lib.rs".to_string()),
             source_line: Some(1),
@@ -1799,6 +1919,7 @@ mod tests {
         // c0 is false, c1 is short-circuited and absent from the
         // evaluated map.
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("lib.rs".to_string()),
             source_line: Some(1),
@@ -1892,6 +2013,7 @@ mod tests {
             }
         };
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("lib.rs".to_string()),
             source_line: Some(1),
@@ -2007,6 +2129,7 @@ mod tests {
             }
         };
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 0,
             source_file: Some("predicate.rs".to_string()),
             source_line: Some(42),
@@ -2053,6 +2176,7 @@ mod tests {
     #[test]
     fn text_format_smoke() {
         let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
             id: 7,
             source_file: Some("x.rs".to_string()),
             source_line: Some(99),
@@ -2069,5 +2193,73 @@ mod tests {
         assert!(text.contains("decision #7"));
         assert!(text.contains("x.rs:99"));
         assert!(text.contains("truth table"));
+    }
+
+    // #352 (G2) — a decision whose pairs are all valid is still capped at
+    // Partial when it carries an unobserved trailing operand, and the
+    // cap is machine-readable. v1/v2 envelopes drop the new fields.
+    #[test]
+    fn unobserved_tail_caps_full_mcdc_at_partial() {
+        let mk = |tail: u32| DecisionRecord {
+            unobserved_tail_conditions: tail,
+            id: 0,
+            source_file: None,
+            source_line: None,
+            inline_context: None,
+            condition_branch_ids: vec![1, 2],
+            rows: vec![
+                row(0, &[(0, true), (1, true)], Some(true)),
+                row(1, &[(0, false)], Some(false)),
+                row(2, &[(0, true), (1, false)], Some(false)),
+            ],
+        };
+        let free = McdcReport::from_record(&record_with_decision(mk(0)));
+        assert!(matches!(free.decisions[0].status, DecisionStatus::FullMcdc));
+        assert!(free.decisions[0].status_reason.is_none());
+
+        let capped = McdcReport::from_record(&record_with_decision(mk(1)));
+        assert!(matches!(
+            capped.decisions[0].status,
+            DecisionStatus::Partial
+        ));
+        assert_eq!(
+            capped.decisions[0].status_reason.as_deref(),
+            Some(UNOBSERVED_TAIL_REASON)
+        );
+        assert_eq!(capped.overall.decisions_full_mcdc, 0);
+        assert!(capped.to_text().contains(UNOBSERVED_TAIL_REASON));
+
+        let v2 = McdcReport::from_record_with_schema(
+            &record_with_decision(mk(1)),
+            McdcSchemaVersion::V2,
+        );
+        assert!(matches!(v2.decisions[0].status, DecisionStatus::Partial));
+        assert!(v2.decisions[0].status_reason.is_none());
+    }
+
+    // #352 (G1) — a pair whose rows lack an observed outcome never proves a
+    // condition; the report says why.
+    #[test]
+    fn pair_without_observed_outcome_is_outcome_unverified() {
+        let d = DecisionRecord {
+            unobserved_tail_conditions: 0,
+            id: 0,
+            source_file: None,
+            source_line: None,
+            inline_context: None,
+            condition_branch_ids: vec![1],
+            rows: vec![
+                row(0, &[(0, true)], None),
+                row(1, &[(0, false)], Some(true)),
+            ],
+        };
+        let report = McdcReport::from_record(&record_with_decision(d));
+        let c = &report.decisions[0].conditions[0];
+        assert!(matches!(c.status, ConditionStatus::Gap));
+        assert_eq!(c.reason.as_deref(), Some(OUTCOME_UNVERIFIED_REASON));
+        assert!(!matches!(
+            report.decisions[0].status,
+            DecisionStatus::FullMcdc
+        ));
     }
 }

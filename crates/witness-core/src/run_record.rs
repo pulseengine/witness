@@ -71,6 +71,18 @@ pub struct DecisionRecord {
     pub inline_context: Option<crate::instrument::InlineContext>,
     pub condition_branch_ids: Vec<u32>,
     pub rows: Vec<DecisionRow>,
+    /// #352 — number of trailing short-circuit operands witness cannot
+    /// observe (rustc emits no `br_if` for the last operand of a
+    /// value-producing chain). Copied from the manifest `Decision`.
+    /// Non-zero caps the decision below `FullMcdc` and means row outcomes
+    /// must come from the real return value, never from condition values.
+    /// Absent (0) on pre-v0.46 records.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub unobserved_tail_conditions: u32,
+}
+
+pub(crate) fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 /// One observation of a decision's condition vector + outcome under

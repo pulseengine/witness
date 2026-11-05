@@ -585,6 +585,8 @@ fn group_into_decisions(
                     // ChainKind::Unknown here keeps decisions.rs free of
                     // walrus dependencies.
                     chain_kind: crate::instrument::ChainKind::default(),
+                    unobserved_tail_conditions: 0,
+                    unobserved_tail_indirect: false,
                     inline_context,
                 });
                 *next_decision_id = next_decision_id.saturating_add(1);
@@ -658,6 +660,8 @@ fn group_into_decisions(
             // derive-outcome-from-conditions path. Per-arm counters are
             // the truth-table view here.
             chain_kind: crate::instrument::ChainKind::default(),
+            unobserved_tail_conditions: 0,
+            unobserved_tail_indirect: false,
             inline_context,
         });
         next_decision_id = next_decision_id.saturating_add(1);

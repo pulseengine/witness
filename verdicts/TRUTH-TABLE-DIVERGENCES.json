@@ -12,15 +12,6 @@
     },
     {
       "verdict": "leap_year",
-      "kind": "pair-differs",
-      "condition": "c1",
-      "expected": "[0,1]",
-      "actual": "[0,2]",
-      "reason": "witness pairs at wasm br_if level with early-exit outcomes; the unobserved last operand shifts which rows form the pair",
-      "issue": 352
-    },
-    {
-      "verdict": "leap_year",
       "kind": "interpretation-differs",
       "condition": "c2",
       "expected": "masking",
@@ -53,42 +44,6 @@
       "expected": "5",
       "actual": "4",
       "reason": "witness sees one br_if fewer than source operands (last operand unobserved)",
-      "issue": 352
-    },
-    {
-      "verdict": "safety_envelope",
-      "kind": "pair-differs",
-      "condition": "c1",
-      "expected": "[0,5]",
-      "actual": "[0,3]",
-      "reason": "witness pairs at wasm br_if level with early-exit outcomes; the unobserved last operand shifts which rows form the pair",
-      "issue": 352
-    },
-    {
-      "verdict": "safety_envelope",
-      "kind": "pair-differs",
-      "condition": "c2",
-      "expected": "[1,5]",
-      "actual": "[1,3]",
-      "reason": "witness pairs at wasm br_if level with early-exit outcomes; the unobserved last operand shifts which rows form the pair",
-      "issue": 352
-    },
-    {
-      "verdict": "safety_envelope",
-      "kind": "pair-differs",
-      "condition": "c3",
-      "expected": "[2,5]",
-      "actual": "[2,3]",
-      "reason": "witness pairs at wasm br_if level with early-exit outcomes; the unobserved last operand shifts which rows form the pair",
-      "issue": 352
-    },
-    {
-      "verdict": "safety_envelope",
-      "kind": "pair-differs",
-      "condition": "c4",
-      "expected": "[3,5]",
-      "actual": "[3,4]",
-      "reason": "witness pairs at wasm br_if level with early-exit outcomes; the unobserved last operand shifts which rows form the pair",
       "issue": 352
     },
     {
@@ -147,15 +102,6 @@
     },
     {
       "verdict": "triangle",
-      "kind": "pair-differs",
-      "condition": "c1",
-      "expected": "[0,1]",
-      "actual": "[1,3]",
-      "reason": "witness pairs at wasm br_if level with early-exit outcomes; the unobserved last operand shifts which rows form the pair",
-      "issue": 352
-    },
-    {
-      "verdict": "triangle",
       "kind": "interpretation-differs",
       "condition": "c2",
       "expected": "masking",
@@ -170,60 +116,6 @@
       "expected": "proved pair [0,2] unique-cause",
       "actual": "absent",
       "reason": "final operand of a short-circuit chain compiles to a value, not a br_if, so witness has no condition for it",
-      "issue": 352
-    },
-    {
-      "verdict": "leap_year",
-      "kind": "false-proved",
-      "condition": "c1",
-      "expected": "pair with differing source outcomes",
-      "actual": "pair [0,2] source outcomes row 0=F, row 2=F",
-      "reason": "witness marks the condition proved on a pair whose rows have equal source-level outcomes (and equal values from the uninstrumented module); the pair cannot show independent effect",
-      "issue": 352
-    },
-    {
-      "verdict": "safety_envelope",
-      "kind": "false-proved",
-      "condition": "c1",
-      "expected": "pair with differing source outcomes",
-      "actual": "pair [0,3] source outcomes row 0=F, row 3=F",
-      "reason": "witness marks the condition proved on a pair whose rows have equal source-level outcomes (and equal values from the uninstrumented module); the pair cannot show independent effect",
-      "issue": 352
-    },
-    {
-      "verdict": "safety_envelope",
-      "kind": "false-proved",
-      "condition": "c2",
-      "expected": "pair with differing source outcomes",
-      "actual": "pair [1,3] source outcomes row 1=F, row 3=F",
-      "reason": "witness marks the condition proved on a pair whose rows have equal source-level outcomes (and equal values from the uninstrumented module); the pair cannot show independent effect",
-      "issue": 352
-    },
-    {
-      "verdict": "safety_envelope",
-      "kind": "false-proved",
-      "condition": "c3",
-      "expected": "pair with differing source outcomes",
-      "actual": "pair [2,3] source outcomes row 2=F, row 3=F",
-      "reason": "witness marks the condition proved on a pair whose rows have equal source-level outcomes (and equal values from the uninstrumented module); the pair cannot show independent effect",
-      "issue": 352
-    },
-    {
-      "verdict": "safety_envelope",
-      "kind": "false-proved",
-      "condition": "c4",
-      "expected": "pair with differing source outcomes",
-      "actual": "pair [3,4] source outcomes row 3=F, row 4=F",
-      "reason": "witness marks the condition proved on a pair whose rows have equal source-level outcomes (and equal values from the uninstrumented module); the pair cannot show independent effect",
-      "issue": 352
-    },
-    {
-      "verdict": "triangle",
-      "kind": "false-proved",
-      "condition": "c1",
-      "expected": "pair with differing source outcomes",
-      "actual": "pair [1,3] source outcomes row 1=T, row 3=T",
-      "reason": "witness marks the condition proved on a pair whose rows have equal source-level outcomes (and equal values from the uninstrumented module); the pair cannot show independent effect",
       "issue": 352
     }
   ]
