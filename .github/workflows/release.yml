@@ -88,11 +88,11 @@ jobs:
             os: windows-latest
             archive: zip
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: release-${{ matrix.target }}
 
@@ -191,14 +191,14 @@ jobs:
           cd staging && 7z a "../$ARCHIVE" . && cd ..
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binary-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
 
       # Separate artifact: a widened path would fail the gnu/windows legs,
       # which have no record file.
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: endsWith(matrix.target, '-linux-musl')
         with:
           name: musl-static-${{ matrix.target }}
@@ -216,7 +216,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # Need the tag's commit, not the merge ref, so the timestamp
           # is the user-visible commit timestamp.
@@ -232,7 +232,7 @@ jobs:
           echo "SOURCE_DATE_EPOCH=${EPOCH}" >> "$GITHUB_ENV"
           echo "::notice::Reproducible-build clock SOURCE_DATE_EPOCH=${EPOCH} (tag commit)"
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - uses: ./.github/actions/compliance
         id: evidence
         with:
@@ -256,7 +256,7 @@ jobs:
       #     --bundle <name>/predicate.rekor.bundle \
       #     <name>/predicate.json
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
         with:
           cosign-release: 'v2.4.1'
       - name: Rekor-log every predicate.json via keyless cosign
@@ -294,7 +294,7 @@ jobs:
             ls -la "${ARCHIVE_NAME}"
           fi
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: compliance-evidence
           path: ${{ env.REPACKED_ARCHIVE || steps.evidence.outputs.archive-path }}
@@ -303,11 +303,11 @@ jobs:
     name: Build witness-component (real Component Model wasm) — v0.7.0+
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: release-wasm32-wasip2
 
@@ -332,7 +332,7 @@ jobs:
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
           echo "::notice::witness-reporter-component built ($(wc -c < $ASSET) bytes); WASI 0.2.9 reporter component, NOT an instrumentable target — see release notes"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wasm-component
           path: ${{ env.ASSET }}
@@ -352,11 +352,11 @@ jobs:
       TAG: ${{ github.ref_name }}
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.ref }}
       - name: Cache rivet binary
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cargo/bin/rivet
           key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
@@ -378,7 +378,7 @@ jobs:
               rivet-cli
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Run full verification suite
         run: |
           # Fixed timestamp (tag commit, UTC) + tag in the suite name make
@@ -392,7 +392,7 @@ jobs:
             --timestamp "$TS"
       - name: Upload JUnit
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: verification-junit
           path: |

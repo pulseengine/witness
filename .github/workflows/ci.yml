@@ -25,7 +25,7 @@ jobs:
     # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Pinned (not @stable) so a moving stable can't surface rustfmt
       # diffs a developer's stable never saw. Bump deliberately, in
       # lockstep with the clippy job. NOT a repo-wide rust-toolchain.toml
@@ -45,14 +45,14 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Pinned (not @stable) so a moving stable can't surface NEW clippy
       # lints a developer's stable never saw — the skew that bit v0.32.
       # Bump deliberately, in lockstep with the fmt job.
       - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo clippy --all-targets --locked -- -D warnings
 
   test:
@@ -67,18 +67,18 @@ jobs:
           - os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo test --all-targets --locked
 
   msrv:
     name: MSRV
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@1.96.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo check --all-targets --locked
 
   miri:
@@ -94,11 +94,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Run miri on the lib
         env:
           MIRIFLAGS: "-Zmiri-disable-isolation -Zmiri-tree-borrows"
@@ -115,7 +115,7 @@ jobs:
     name: Cargo Deny
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
       # Smithy workaround: EmbarkStudios/cargo-deny-action launches a
       # rootless container which fails under our hardened runner unit
@@ -134,9 +134,9 @@ jobs:
     # 0.22.1+.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # Pinned: an unpinned install floats the advisory parser and audit
       # semantics under us (same pin policy as release.yml).
       - run: cargo install cargo-audit --locked --version 0.22.2
@@ -160,9 +160,9 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo test --test properties --locked
         env:
           PROPTEST_CASES: "2048"
@@ -173,9 +173,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: |
           cargo install cargo-mutants --locked
           cargo mutants --no-shuffle --timeout-multiplier 3 -j 2 || true
@@ -294,11 +294,11 @@ jobs:
     name: Build witness-component (Component Model wasm) — v0.7.0+
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Build witness-component (wasm32-wasip2)
         working-directory: crates/witness-component
         run: cargo build --release --locked --target wasm32-wasip2
@@ -310,7 +310,7 @@ jobs:
           cargo install wasm-tools --quiet || true
           wasm-tools validate crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm
           wasm-tools component wit crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm | head -25
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: witness-component-wasm
           path: crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm
@@ -327,13 +327,13 @@ jobs:
     needs: verdict-suite
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install jsonschema
         run: |
           python3 -m pip install jsonschema --quiet
           python3 -m jsonschema --version
       - name: Download verdict evidence
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: verdict-evidence
           path: build/verdict-evidence
@@ -366,7 +366,7 @@ jobs:
     # Runs on PRs too: as a main-only job it sat red on main for two weeks
     # (Oct 3–15 2026) with no PR ever showing it.
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Pinned to 1.98.1: rustc 1.99 lowers triangle/state_guard's
       # short-circuit decisions to branch-free i32.or/i32.and arithmetic,
       # so witness finds 0 branches and the gate below fails. Bumping the
@@ -375,7 +375,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Build witness binary
         run: cargo build --release --locked -p witness-mcdc
       - name: Run verdict suite
@@ -419,7 +419,7 @@ jobs:
             exit 1
           fi
           echo "ok: httparse has $p proved condition(s)"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: verdict-evidence
           path: build/verdict-evidence/
