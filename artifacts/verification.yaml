@@ -1118,3 +1118,23 @@ artifacts:
         target: REQ-080
       - type: produced-by
         target: AS-001
+  - id: TEST-REQ-081
+    type: test-case
+    title: Truth-table checker self-test, including negative controls and ledger exact-set semantics
+    description: >
+      tools/check_truth_tables.py --self-test runs offline on fixtures: a
+      matching table is green; a swapped pair row, flipped verdict, dropped
+      condition, changed interpretation and an unparseable table are red; a new
+      unledgered divergence and a stale ledger entry are both red. CI also runs
+      the checker over the verdict-suite evidence against
+      verdicts/TRUTH-TABLE-DIVERGENCES.json. (REQ-081 / #350, #352.)
+    tags: [verification, mcdc, soundness]
+    fields:
+      method: automated-test
+      steps:
+        - run: python3 tools/check_truth_tables.py --self-test
+    links:
+      - type: verifies
+        target: REQ-081
+      - type: produced-by
+        target: AS-001

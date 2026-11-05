@@ -7,8 +7,10 @@ Usage:
   check_truth_tables.py [--evidence DIR] [--verdicts DIR]   check real evidence
   check_truth_tables.py --self-test                         fixtures + negative controls
 
-Exit: 0 = every table matches, 1 = mismatch (per-verdict, per-condition diff
-printed), 2 = a table could not be parsed / evidence missing (never skipped).
+Exit: 0 = observed divergences EQUAL the ledger verdicts/TRUTH-TABLE-DIVERGENCES.json
+exactly; 1 = a divergence missing from the ledger (new) or a ledger entry that no
+longer diverges (stale; witness changed, update the ledger); 2 = a table could not
+be parsed / evidence missing (never skipped).  Known divergences: witness#352.
 
 What "matches" means (decision-tier tables)
 -------------------------------------------
@@ -124,8 +126,25 @@ def _crosscheck_markdown(name, text, pairs):
                 f"{name}: {m.group(1)} markdown pair {sorted(md)} != JSON pair {sorted(pairs[m.group(1)][0])}")
 
 
+def _d(kind, condition=None, expected=None, actual=None):
+    return {"kind": kind, "condition": condition, "expected": expected, "actual": actual}
+
+
+def _fmt_pair(p):
+    return "[" + ",".join(str(x) for x in sorted(p)) + "]"
+
+
+def _d(kind, condition=None, expected=None, actual=None):
+    return {"kind": kind, "condition": condition, "expected": expected, "actual": actual}
+
+
+def _fmt_pair(p):
+    return "[" + ",".join(str(x) for x in sorted(p)) + "]"
+
+
 def compare(name, table, report, run):
-    """Return list of mismatch strings (empty = match) and note lines."""
+    """Return (divergences, notes). A divergence is a dict with keys
+    kind, condition, expected, actual (all JSON scalars/strings)."""
     diffs, notes = [], []
     tier = table["tier"]
     decisions = report.get("decisions", [])
@@ -134,39 +153,80 @@ def compare(name, table, report, run):
         return diffs, notes
     if tier == "zero-decision":
         if decisions:
-            diffs.append(f"decisions: expected 0 ({ZERO_DECISION[name]}), witness reports {len(decisions)}")
+            diffs.append(_d("decision-count", None, "0", str(len(decisions))))
         else:
             notes.append(f"0 decisions as expected: {ZERO_DECISION[name]}")
         return diffs, notes
     if tier == "intent":
         rows = [i for i in run.get("invoked", []) if i.startswith("run_row_")]
         if len(rows) != table["row_count"]:
-            diffs.append(f"rows: table row_count {table['row_count']}, witness invoked {len(rows)}")
+            diffs.append(_d("row-count", None, str(table["row_count"]), str(len(rows))))
         notes.append("NOT-COMPARABLE per condition: table states intent only (no per-condition pairs)")
         return diffs, notes
-    # decision tier
     if len(decisions) != 1:
-        diffs.append(f"decision count: table describes 1 decision, witness reports {len(decisions)}")
+        diffs.append(_d("decision-count", None, "1", str(len(decisions))))
         return diffs, notes
     wconds = decisions[0]["conditions"]
     n = len(table["conditions"])
     if len(wconds) != n:
-        diffs.append(f"condition count: table {n}, witness {len(wconds)}")
+        diffs.append(_d("condition-count", None, str(n), str(len(wconds))))
     for k, cid in enumerate(table["conditions"]):
         want_pair, want_interp = table["pairs"][cid]
         if k >= len(wconds):
-            diffs.append(f"{cid} (witness index {k}): missing in witness; table says PROVED pair {sorted(want_pair)} {want_interp}")
+            diffs.append(_d("missing-last-operand" if k == n - 1 else "missing-condition", cid,
+                            f"proved pair {_fmt_pair(want_pair)} {want_interp}", "absent"))
             continue
         w = wconds[k]
         if w["status"] != "proved":
-            diffs.append(f"{cid} (witness index {k}): status table PROVED, witness {w['status']}")
+            diffs.append(_d("status-differs", cid, "proved", w["status"]))
             continue
         got_pair = frozenset(w.get("pair", []))
         if got_pair != want_pair:
-            diffs.append(f"{cid} (witness index {k}): pair table {sorted(want_pair)}, witness {sorted(got_pair)}")
+            diffs.append(_d("pair-differs", cid, _fmt_pair(want_pair), _fmt_pair(got_pair)))
         if w.get("interpretation") != want_interp:
-            diffs.append(f"{cid} (witness index {k}): interpretation table {want_interp}, witness {w.get('interpretation')}")
+            diffs.append(_d("interpretation-differs", cid, want_interp, str(w.get("interpretation"))))
     return diffs, notes
+
+
+def key(name, d):
+    return (name, d["kind"], d["condition"], d["expected"], d["actual"])
+
+
+def fmt(name, d):
+    c = f" {d['condition']}" if d["condition"] else ""
+    return f"{name}: {d['kind']}{c}: table {d['expected']}, witness {d['actual']}"
+
+
+def load_ledger(path):
+    try:
+        data = json.loads(pathlib.Path(path).read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        raise TableError(f"divergence ledger {path} unreadable: {e}")
+    out = {}
+    for i, e in enumerate(data.get("divergences", [])):
+        for f in ("verdict", "kind", "condition", "expected", "actual", "reason", "issue"):
+            if f not in e:
+                raise TableError(f"ledger entry {i} lacks {f!r}")
+        k = (e["verdict"], e["kind"], e["condition"], e["expected"], e["actual"])
+        if k in out:
+            raise TableError(f"ledger entry {i} duplicates {k}")
+        out[k] = e
+    return out
+
+
+def reconcile(results, ledger):
+    """Return (new, stale): observed-but-unledgered, ledgered-but-not-observed."""
+    observed = {}
+    for name, (tier, diffs, notes) in results.items():
+        for d in diffs:
+            observed[key(name, d)] = d
+    new = [fmt(k[0], observed[k]) for k in sorted(observed, key=str) if k not in ledger]
+    stale = []
+    for k in sorted(ledger, key=str):
+        if k not in observed:
+            e = ledger[k]
+            stale.append(fmt(e["verdict"], e))
+    return new, stale
 
 
 def check_all(verdicts_dir, evidence_dir):
@@ -192,18 +252,22 @@ def check_all(verdicts_dir, evidence_dir):
     return results, errors
 
 
-def render(results, errors):
+def render(results, errors, new, stale, ledger):
     out = []
     for name, (tier, diffs, notes) in sorted(results.items()):
-        out.append(f"{'FAIL' if diffs else 'ok  '} {name:<16} [{tier}]")
-        for d in diffs:
-            out.append(f"       MISMATCH {d}")
+        unledg = [d for d in diffs if key(name, d) in ledger]
+        tag = "ok  " if not diffs else "LEDG" if len(unledg) == len(diffs) else "FAIL"
+        out.append(f"{tag} {name:<16} [{tier}]" + (f" {len(diffs)} ledgered divergence(s) (witness#352)" if unledg else ""))
         for n in notes:
             out.append(f"       note: {n}")
+    for x in new:
+        out.append(f"NEW DIVERGENCE (not in ledger): {x}")
+    for x in stale:
+        out.append(f"STALE LEDGER ENTRY, witness changed; update the ledger: {x}")
     for e in errors:
         out.append(f"ERROR {e}")
-    bad = sum(1 for v in results.values() if v[1])
-    out.append(f"{len(results)} verdicts: {len(results) - bad} match, {bad} mismatch, {len(errors)} error")
+    out.append(f"{len(results)} verdicts; {sum(len(v[1]) for v in results.values())} divergences observed, "
+               f"{len(ledger)} ledgered, {len(new)} new, {len(stale)} stale, {len(errors)} error")
     return "\n".join(out)
 
 
@@ -240,29 +304,30 @@ def self_test():
     r["decisions"][0]["conditions"][1]["pair"] = [1, 2]
     d, _ = compare("fx", table, r, {})
     expect("NEG swapped pair row -> exactly one mismatch naming c2 and both pairs",
-           len(d) == 1 and d[0].startswith("c2") and "[0, 2]" in d[0] and "[1, 2]" in d[0])
-    print("       ->", d[0] if d else "(none)")
+           len(d) == 1 and d[0]["kind"] == "pair-differs" and d[0]["condition"] == "c2"
+           and d[0]["expected"] == "[0,2]" and d[0]["actual"] == "[1,2]")
+    print("       ->", fmt("fx", d[0]) if d else "(none)")
 
     r = copy.deepcopy(FIX_REPORT)
     r["decisions"][0]["conditions"][0]["status"] = "gap"
     d, _ = compare("fx", table, r, {})
     expect("NEG flipped verdict (proved->gap) -> mismatch on c1 status",
-           len(d) == 1 and "c1" in d[0] and "status" in d[0])
-    print("       ->", d[0] if d else "(none)")
+           len(d) == 1 and d[0]["kind"] == "status-differs" and d[0]["condition"] == "c1")
+    print("       ->", fmt("fx", d[0]) if d else "(none)")
 
     r = copy.deepcopy(FIX_REPORT)
     r["decisions"][0]["conditions"].pop()
     d, _ = compare("fx", table, r, {})
     expect("NEG dropped condition -> count + missing c2",
-           any("condition count" in x for x in d) and any(x.startswith("c2") for x in d))
+           any(x["kind"] == "condition-count" for x in d) and any(x["kind"] == "missing-last-operand" and x["condition"] == "c2" for x in d))
 
     r = copy.deepcopy(FIX_REPORT)
     r["decisions"][0]["conditions"][0]["interpretation"] = "unique-cause"
     d, _ = compare("fx", table, r, {})
-    expect("NEG interpretation changed -> mismatch", len(d) == 1 and "interpretation" in d[0])
+    expect("NEG interpretation changed -> mismatch", len(d) == 1 and d[0]["kind"] == "interpretation-differs")
 
     d, _ = compare("fx", table, {"decisions": []}, {})
-    expect("NEG zero decisions for a decision table -> mismatch", len(d) == 1 and "decision count" in d[0])
+    expect("NEG zero decisions for a decision table -> mismatch", len(d) == 1 and d[0]["kind"] == "decision-count")
 
     # markdown/JSON disagreement must be an error
     bad_md = FIX_TABLE.replace("```json", "### c1\n\nPair: row 0 vs row 1.\n\n```json", 1)
@@ -291,6 +356,31 @@ def self_test():
     d, _ = compare("range_overlap", zt, FIX_REPORT, {})
     expect("NEG zero-decision verdict that gains a decision -> mismatch", len(d) == 1)
 
+    # ---- ledger semantics (exact-set)
+    def ledger_of(name, ds):
+        return {key(name, d): {"verdict": name, **d, "reason": "fixture", "issue": 352} for d in ds}
+
+    r = copy.deepcopy(FIX_REPORT)
+    r["decisions"][0]["conditions"][1]["pair"] = [1, 2]
+    known, _ = compare("fx", table, r, {})
+    led = ledger_of("fx", known)
+    new, stale = reconcile({"fx": ("decision", known, [])}, led)
+    expect("ledger: divergence present and ledgered -> green", new == [] and stale == [])
+
+    r2 = copy.deepcopy(r)
+    r2["decisions"][0]["conditions"][0]["interpretation"] = "unique-cause"
+    obs, _ = compare("fx", table, r2, {})
+    new, stale = reconcile({"fx": ("decision", obs, [])}, led)
+    expect("NEG perturbed: new unledgered divergence -> red",
+           len(new) == 1 and "interpretation-differs c1" in new[0] and len(stale) == 0)
+    print("       ->", new[0] if new else "(none)")
+
+    clean, _ = compare("fx", table, FIX_REPORT, {})
+    new, stale = reconcile({"fx": ("decision", clean, [])}, led)
+    expect("NEG stale: ledger entry whose divergence is gone -> red",
+           new == [] and len(stale) == 1 and "pair-differs c2" in stale[0])
+    print("       ->", stale[0] if stale else "(none)")
+
     if failures:
         print(f"self-test FAILED: {len(failures)} check(s)")
         return 1
@@ -302,19 +392,22 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--evidence", default="build/verdict-evidence")
     ap.add_argument("--verdicts", default="verdicts")
+    ap.add_argument("--ledger", default="verdicts/TRUTH-TABLE-DIVERGENCES.json")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
         return self_test()
     try:
         results, errors = check_all(a.verdicts, a.evidence)
+        ledger = load_ledger(a.ledger)
     except TableError as e:
         print(f"ERROR {e}")
         return 2
-    print(render(results, errors))
+    new, stale = reconcile(results, ledger)
+    print(render(results, errors, new, stale, ledger))
     if errors:
         return 2
-    return 1 if any(v[1] for v in results.values()) else 0
+    return 1 if (new or stale) else 0
 
 
 if __name__ == "__main__":
