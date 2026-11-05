@@ -1591,3 +1591,28 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+  - id: REQ-081
+    release: v0.46.0
+    type: requirement
+    title: MC/DC verdicts are checked against the hand-derived source-level truth tables on every PR; known divergences are ledgered
+    status: implemented
+    description: >
+      MC/DC correctness rested on hand-derived verdicts/*/TRUTH-TABLE.md files
+      that no executed test compared with witness's reporter. The verdict-suite
+      CI job shall run tools/check_truth_tables.py over the suite's evidence:
+      per decision it compares condition count, per-condition verdict, pair
+      rows and interpretation against the table's machine-readable block. The
+      tables stay source-level and authoritative; where witness's wasm-level
+      report differs (unobserved last operand of a short-circuit chain, shifted
+      pairs, split decisions) the difference is recorded in
+      verdicts/TRUTH-TABLE-DIVERGENCES.json. The check passes iff observed
+      divergences equal the ledger exactly: a new divergence and a stale ledger
+      entry both fail. A table that cannot be parsed fails loudly. (Issues
+      #350, #352.)
+    tags: [verification, mcdc, soundness]
+    fields:
+      priority: must
+      category: correctness
+    links:
+      - type: produced-by
+        target: AS-001
