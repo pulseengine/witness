@@ -23,6 +23,10 @@ against it.  For the single decision the table describes, witness's
   3. per condition cK <-> witness index K-1:    (status)  PROVED  <-> proved
   4. per condition: identical pair of row ids   (pair; unordered)
   5. per condition: identical interpretation    (masking / unique-cause)
+  6. false-proved (independent of 4): for every condition witness reports
+     proved, the two rows of ITS pair must have DIFFERENT source-level
+     outcomes in the table's Outcome column; equal outcomes cannot show
+     independent effect, so witness's `proved` is unsound for that condition.
 Row ids are comparable because witness numbers rows in `--invoke` order and
 the verdict crates number `run_row_N` like the table.  Row *vectors* (T/F
 cells) are NOT compared: witness's cells use wasm early-exit polarity
@@ -95,9 +99,14 @@ def parse_table(name, text):
             if p.get("interpretation") not in ("masking", "unique-cause"):
                 raise TableError(f"{name}: {cid} interpretation malformed: {p.get('interpretation')!r}")
             pairs[cid] = (frozenset(pr), p["interpretation"])
+        outcomes = {}
+        for r in j["passing_rows"]:
+            if not isinstance(r.get("row"), int) or not isinstance(r.get("outcome"), bool):
+                raise TableError(f"{name}: passing_rows entry lacks int row / bool outcome: {r!r}")
+            outcomes[r["row"]] = r["outcome"]
         _crosscheck_markdown(name, text, pairs)
         tier = "zero-decision" if name in ZERO_DECISION else "decision"
-        return {"tier": tier, "conditions": conds, "pairs": pairs,
+        return {"tier": tier, "conditions": conds, "pairs": pairs, "outcomes": outcomes,
                 "rows": len(j["passing_rows"])}
     if "expected_outcomes" in j and "row_count" in j:
         eo = j["expected_outcomes"]
@@ -128,6 +137,10 @@ def _crosscheck_markdown(name, text, pairs):
 
 def _d(kind, condition=None, expected=None, actual=None):
     return {"kind": kind, "condition": condition, "expected": expected, "actual": actual}
+
+
+def _b(v):
+    return "T" if v else "F"
 
 
 def _fmt_pair(p):
@@ -181,6 +194,15 @@ def compare(name, table, report, run):
             diffs.append(_d("status-differs", cid, "proved", w["status"]))
             continue
         got_pair = frozenset(w.get("pair", []))
+        # false-proved: independent of pair-differs.  A pair whose two rows have
+        # EQUAL source-level outcomes cannot show independent effect.
+        outs = [table["outcomes"].get(r) for r in sorted(got_pair)]
+        if len(got_pair) != 2 or any(o is None for o in outs):
+            diffs.append(_d("pair-row-unknown", cid, "two rows present in table", _fmt_pair(got_pair)))
+        elif outs[0] == outs[1]:
+            a, b = sorted(got_pair)
+            diffs.append(_d("false-proved", cid, "pair with differing source outcomes",
+                            f"pair {_fmt_pair(got_pair)} source outcomes row {a}={_b(outs[0])}, row {b}={_b(outs[1])}"))
         if got_pair != want_pair:
             diffs.append(_d("pair-differs", cid, _fmt_pair(want_pair), _fmt_pair(got_pair)))
         if w.get("interpretation") != want_interp:
@@ -276,7 +298,7 @@ FIX_TABLE = """# fx
 
 ```json
 {"verdict": "fx", "conditions": [{"id":"c1","source":"a"},{"id":"c2","source":"b"}],
- "passing_rows": [{"row":0},{"row":1},{"row":2}],
+ "passing_rows": [{"row":0,"outcome":false},{"row":1,"outcome":false},{"row":2,"outcome":true}],
  "independent_effect_proofs": {
    "c1": {"pair": [1, 2], "interpretation": "masking"},
    "c2": {"pair": [0, 2], "interpretation": "unique-cause"}}}
@@ -355,6 +377,27 @@ def self_test():
     expect("zero-decision verdict with 0 decisions -> match", d == [])
     d, _ = compare("range_overlap", zt, FIX_REPORT, {})
     expect("NEG zero-decision verdict that gains a decision -> mismatch", len(d) == 1)
+
+    # ---- false-proved
+    # table outcomes: row0=F row1=F row2=T.  Pair [0,1] has equal outcomes (F,F).
+    r = copy.deepcopy(FIX_REPORT)
+    r["decisions"][0]["conditions"][0]["pair"] = [0, 1]
+    d, _ = compare("fx", table, r, {})
+    expect("NEG witness-proved pair with equal table outcomes -> false-proved (plus pair-differs)",
+           sorted(x["kind"] for x in d) == ["false-proved", "pair-differs"])
+    d = [x for x in d if x["kind"] == "false-proved"]
+    print("       ->", fmt("fx", d[0]))
+    led_fp = {key("fx", x): {"verdict": "fx", **x, "reason": "fixture", "issue": 352} for x in d}
+    new, stale = reconcile({"fx": ("decision", d, [])}, {})
+    expect("NEG unledgered false-proved -> red", len(new) == 1 and "false-proved" in new[0])
+    new, stale = reconcile({"fx": ("decision", d, [])}, led_fp)
+    expect("ledgered false-proved -> green", new == [] and stale == [])
+
+    r = copy.deepcopy(FIX_REPORT)
+    r["decisions"][0]["conditions"][0]["pair"] = [0, 2]       # valid (F,T), differs from table [1,2]
+    d, _ = compare("fx", table, r, {})
+    expect("valid pair with different rows -> only pair-differs, NOT false-proved",
+           [x["kind"] for x in d] == ["pair-differs"])
 
     # ---- ledger semantics (exact-set)
     def ledger_of(name, ds):
