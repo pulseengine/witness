@@ -127,7 +127,12 @@ conditions have a proving pair; nothing missing; nothing unreached.
 line DWARF attributes the chain to (where the `(year % 4 == 0`
 opens). `FullMcdc` is the decision's status — alternatives are
 `Partial`, `NoWitness` (decision reached but no proving pair could
-form), `Unreached` (zero rows). With v0.9.11's typed-args form this
+form), `Unreached` (zero rows). `FullMcdc` covers the conditions witness
+*observes*. When the decision's value is returned or stored rather than
+branched on, the last operand of a short-circuit chain gets no `br_if`, so
+witness does not observe it, and `FullMcdc` can be reported with that source
+condition unmeasured
+([#352](https://github.com/pulseengine/witness/issues/352)). With v0.9.11's typed-args form this
 line attribution is stable across edits; pre-v0.9.11 fixtures using
 `core::hint::black_box` attributed to `hint.rs:491` instead.
 
