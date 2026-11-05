@@ -27,6 +27,21 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **witness no longer reports a condition `proved` by a pair whose real decision outcome did not change, nor `FullMcdc` for a decision with an operand it never observed (#352, step 1 guard).**
+  For value-producing short-circuit decisions (`fn f() -> bool { a || b || c }`) rustc emits no
+  `br_if` for the last operand. witness derived each row's outcome from the last observed
+  condition value, which is wrong whenever the chain falls through into that tail, so six
+  conditions in the verdict suite (all four in `safety_envelope`, one in `triangle`, one in
+  `leap_year`) were reported proved by row pairs whose actual return value was unchanged, and the
+  decisions were reported `FullMcdc`. Now (G2) instrumentation detects a last `br_if` that falls
+  into a value tail and records `unobserved_tail_conditions` in the manifest; such a decision is
+  capped at `partial` with `status_reason: unobserved_tail_conditions` (mcdc v3 envelope) and a
+  plain note in the text report; and (G1) for such a decision every row outcome is the real
+  return value, never inferred from condition values, and a condition whose only differing pair
+  has a row without an observed outcome is a `gap` with `reason: outcome_unverified`.
+  `triangle`, `leap_year`, `state_guard` and `safety_envelope` are now `partial`, and the 12
+  matching entries are removed from `verdicts/TRUTH-TABLE-DIVERGENCES.json`. The unobserved
+  operand itself is still not measured (step 3). (REQ-082)
 - **The required Security Audit check was red on main and every PR after new RustSec advisories.**
   wasmtime's default `cache` feature pulled `wasmtime-internal-cache` -> zstd 0.13 /
   zstd-safe 7 / zstd-sys 2.0 (RUSTSEC-2026-0391, -0398, -0403, -0410, plus a run of
