@@ -14,8 +14,12 @@ predicate.
 > operands a `br_if` but not the last operand, whose value *is* the result.
 > witness instruments branches, so it does not observe the last operand of a
 > short-circuit chain, and the decision can still be reported `FullMcdc` over
-> the conditions it did see. Until #352 is fixed, read `FullMcdc` as
-> "full MC/DC over the observed conditions", not over every source condition.
+> the conditions it did see. **It can also mark a condition proved by a row
+> pair whose decision outcome did not change.** Executing the verdict modules
+> shows rows that return identical values recorded with different outcomes
+> (`triangle`, `safety_envelope`, `leap_year`). Until #352 is fixed, do not
+> rely on `FullMcdc` or on per-condition `proved` for short-circuit decisions
+> whose value is returned or stored.
 
 > **New here?** [`docs/quickstart.md`](docs/quickstart.md) walks the install
 > through first MC/DC truth table in 10 minutes. [`docs/concepts.md`](docs/concepts.md)

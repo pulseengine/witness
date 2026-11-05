@@ -79,3 +79,9 @@ claims:
     evidence:
       - kind: verbatim
         text: "issues/352"
+  - id: WITNESS-DISCLOSES-FALSE-PROVED-352
+    doc: README.md
+    text: "It can also mark a condition proved by a row"
+    evidence:
+      - kind: verbatim
+        text: "issues/352"
