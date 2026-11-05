@@ -34,3 +34,7 @@ verification-results.json
 
 *.wasm.map
 crates/*/target
+
+# Python bytecode (tools/*.py run locally)
+__pycache__/
+*.pyc
