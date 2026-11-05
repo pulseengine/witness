@@ -1539,7 +1539,7 @@ artifacts:
         target: AS-001
 
   - id: REQ-079
-    release: v0.46.0
+    release: v0.47.0
     type: requirement
     title: Decisions lowered to branch-free arithmetic are never reported as clean
     status: approved
