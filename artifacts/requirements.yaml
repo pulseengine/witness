@@ -1424,27 +1424,7 @@ artifacts:
     type: requirement
     title: crates.io publishing runs in CI via OIDC trusted publishing
     status: verified
-    description: >
-      The v0.44.0 cut stalled for a month on an expired laptop
-      crates.io token — the exact failure mode the org release
-      standard's Track B exists to remove. Publishing the four crates
-      (witness-mcdc-checker -> witness-mcdc-core -> witness-mcdc ->
-      witness-mcdc-viz, dependency order, viz from its own workspace)
-      shall run in a dedicated publish-to-crates-io.yml on the v* tag
-      push via rust-lang/crates-io-auth-action (OIDC trusted
-      publishing, no long-lived token anywhere), with a
-      workflow_dispatch(tag) path for backfilling an already-tagged
-      release. Already-published versions are skipped so partial
-      publishes and re-runs are safe. One-time setup: each crate's
-      crates.io Trusted Publishing settings must name this repo +
-      workflow file. VERIFIED 2026-10-14: workflow_dispatch(tag=v0.44.0)
-      run 38616109301 authenticated via OIDC and published all four
-      crates; the crates.io API reports 0.44.0 for witness-mcdc-checker,
-      witness-mcdc-core, witness-mcdc and witness-mcdc-viz. The
-      tag-push trigger runs the same job and is first exercised at v0.45.0.
-      Since 2026-10-15 the tag publish waits for the Release workflow to succeed
-      (workflow_run), and publishes the exact commit Release built, so a failing
-      release can no longer leave an irreversible crates.io publish behind.
+    description: "The v0.44.0 cut stalled for a month on an expired laptop crates.io token — the exact failure mode the org release standard's Track B exists to remove. Publishing the four crates (witness-mcdc-checker -> witness-mcdc-core -> witness-mcdc -> witness-mcdc-viz, dependency order, viz from its own workspace) shall run in a dedicated publish-to-crates-io.yml on the v* tag push via rust-lang/crates-io-auth-action (OIDC trusted publishing, no long-lived token anywhere), with a workflow_dispatch(tag) path for backfilling an already-tagged release. Already-published versions are skipped so partial publishes and re-runs are safe. One-time setup: each crate's crates.io Trusted Publishing settings must name this repo + workflow file. VERIFIED 2026-10-14: workflow_dispatch(tag=v0.44.0) run 38616109301 authenticated via OIDC and published all four crates; the crates.io API reports 0.44.0 for witness-mcdc-checker, witness-mcdc-core, witness-mcdc and witness-mcdc-viz. The tag-push trigger runs the same job and is first exercised at v0.45.0. CORRECTED 2026-11-08 (witness#361): the 2026-10-15 change made the tag publish wait for the Release workflow via a workflow_run trigger, and crates.io Trusted Publishing rejects workflow_run (HTTP 400, run 42485019105), so that path never published. v0.46.0 was published by workflow_dispatch run 42079122087. REQ-083 moves the gated publish into release.yml."
     tags: [v0.45, release, supply-chain, distribution]
     fields:
       priority: must
@@ -1644,3 +1624,21 @@ artifacts:
     links:
       - type: produced-by
         target: AS-001
+
+  - id: REQ-083
+    type: requirement
+    title: crates.io publish runs inside the Release workflow, after verification and independent of Pages
+    status: implemented
+    description: "witness#361. crates.io Trusted Publishing rejects the workflow_run trigger, so the post-Release publish added for #307 could never run. The publish shall be a job in release.yml, triggered by the v* tag push, with needs: [create-github-release]. create-github-release itself needs build-binaries, compliance, wasm-component and verification-evidence, so a failed verification never publishes. The publish-pages job shall not be a dependency, so a GitHub-side Pages failure (three on v0.46.0) cannot block crates.io. publish-to-crates-io.yml remains as a workflow_dispatch-only backfill. One-time setup: each of the four crates names release.yml as a crates.io trusted publisher. Verified after the tag (DEC-049) from the v0.47.0 Release run: the job authenticates by OIDC and the crates.io API reports 0.47.0 for all four crates."
+    tags: [v0.47, release, supply-chain, distribution]
+    fields:
+      category: non-functional
+      priority: must
+    links:
+      - type: produced-by
+        target: AS-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-08T15:03:33Z
+    release: v0.47.0
