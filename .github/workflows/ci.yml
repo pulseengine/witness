@@ -329,9 +329,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install jsonschema
+        # The runner's system Python is externally managed (PEP 668), so a
+        # bare `pip install` fails and this job never validated anything.
+        # Install into a venv and put it first on PATH for later steps.
+        # Falls back to --break-system-packages where the venv module
+        # (Debian's python3-venv) isn't installed on the runner.
         run: |
-          python3 -m pip install jsonschema --quiet
-          python3 -m jsonschema --version
+          set -euo pipefail
+          V="$RUNNER_TEMP/schemas-venv"
+          if python3 -m venv "$V" 2>/dev/null; then
+            "$V/bin/python" -m pip install jsonschema --quiet
+            echo "$V/bin" >> "$GITHUB_PATH"
+            "$V/bin/python" -m jsonschema --version
+          else
+            python3 -m pip install --user --break-system-packages jsonschema --quiet
+            python3 -m jsonschema --version
+          fi
       - name: Download verdict evidence
         uses: actions/download-artifact@v8
         with:
