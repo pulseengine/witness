@@ -8,6 +8,19 @@ against it, and emits a coverage report you can read, compare, or feed into
 and into [sigil](https://github.com/pulseengine/sigil) as an in-toto coverage
 predicate.
 
+> **Known limitation ([#352](https://github.com/pulseengine/witness/issues/352)):**
+> when a short-circuit decision's *value* is returned or stored rather than
+> branched on (`fn f(..) -> bool { a || b || c }`), rustc gives the first N-1
+> operands a `br_if` but not the last operand, whose value *is* the result.
+> witness instruments branches, so it does not observe the last operand of a
+> short-circuit chain, and the decision can still be reported `FullMcdc` over
+> the conditions it did see. **It can also mark a condition proved by a row
+> pair whose decision outcome did not change.** Executing the verdict modules
+> shows rows that return identical values recorded with different outcomes
+> (`triangle`, `safety_envelope`, `leap_year`). Until #352 is fixed, do not
+> rely on `FullMcdc` or on per-condition `proved` for short-circuit decisions
+> whose value is returned or stored.
+
 > **New here?** [`docs/quickstart.md`](docs/quickstart.md) walks the install
 > through first MC/DC truth table in 10 minutes. [`docs/concepts.md`](docs/concepts.md)
 > defines every term used in this README — *MC/DC, masking, unique-cause,
