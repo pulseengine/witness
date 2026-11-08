@@ -58,11 +58,15 @@ jobs:
         with:
           ref: ${{ steps.tag.outputs.ref }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to commit SHAs: this job holds id-token: write and a crates.io
+      # publish token, so a moved tag must not be able to swap the code.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
 
       - name: Authenticate to crates.io (OIDC trusted publishing)
         id: auth
-        uses: rust-lang/crates-io-auth-action@v1
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
 
       - name: Publish crates in dependency order
         env:
