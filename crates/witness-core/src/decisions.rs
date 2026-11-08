@@ -250,9 +250,13 @@ fn extract_dwarf_sections(wasm_bytes: &[u8]) -> Option<DwarfSections<'_>> {
 fn code_section_offset(wasm_bytes: &[u8]) -> Option<u64> {
     let parser = wasmparser::Parser::new(0);
     for payload in parser.parse_all(wasm_bytes) {
-        if let Ok(wasmparser::Payload::CodeSectionStart { range, .. }) = payload {
-            // wasmparser 0.258 — payload ranges are already `Range<u64>`.
-            return Some(range.start);
+        if let Ok(wasmparser::Payload::CodeSectionStart {
+            unchecked_range, ..
+        }) = payload
+        {
+            // wasmparser 0.262 renamed the field to `unchecked_range` (streaming
+            // support); the range is still `Range<u64>` of absolute offsets.
+            return Some(unchecked_range.start);
         }
     }
     None
