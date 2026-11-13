@@ -9,9 +9,11 @@ The `test-case` type is defined in schemas/witness-verification.yaml — see the
 schema for the recognised fields (`method`, `steps`).
 
 Usage:
-    tools/run_verification.py [--filter '<sexp>'] [--results-json PATH] [--shell SHELL]
+    tools/run_verification.py [--filter '<sexp>'] [--must-cover '<sexp>']
+                              [--results-json PATH] [--shell SHELL]
                               [--junit PATH --suite-name NAME --timestamp ISO8601]
     tools/run_verification.py --junit-self-test
+    tools/run_verification.py --gate-self-test
 
 Defaults:
     --filter '(= type "test-case")'
@@ -19,8 +21,15 @@ Defaults:
     --shell        bash
 
 Exit code:
-    0  if every matched artifact's steps passed (or were skipped)
-    1  if any artifact failed
+    0  if every matched artifact's steps passed (or were skipped) and at
+       least one artifact ran a step
+    1  if any artifact failed, if every matched artifact was skipped, or if
+       --must-cover names an artifact the filter did not match
+    2  if rivet itself could not be queried
+
+A step fails if it exits non-zero, or if its output carries cargo-style
+`test result:` lines whose passed counts sum to 0 (a test-name filter that
+matched nothing). The gate fails closed (witness#372).
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -157,8 +167,19 @@ def junit_self_test() -> int:
     return 0
 
 
+TEST_RESULT = re.compile(r"^test result: \w+\. (\d+) passed", re.MULTILINE)
+
+
+def zero_tests_ran(output: str) -> bool:
+    """True iff the output has cargo `test result:` lines and their passed
+    counts sum to 0, i.e. the step's test filter matched nothing."""
+    counts = [int(n) for n in TEST_RESULT.findall(output)]
+    return bool(counts) and sum(counts) == 0
+
+
 def run_one_step(cmd: str, shell: str) -> bool:
-    """Return True iff exit code is 0. On failure, captures last 2 KB of
+    """Return True iff exit code is 0 and the step ran at least one test
+    when it reports test results. On failure, captures last 2 KB of
     combined stdout/stderr and echoes it so the CI log surfaces what
     actually broke instead of just `failed: <cmd>`."""
     proc = subprocess.run(
@@ -166,6 +187,10 @@ def run_one_step(cmd: str, shell: str) -> bool:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
+    output = proc.stdout.decode("utf-8", errors="replace") if proc.stdout else ""
+    if proc.returncode == 0 and zero_tests_ran(output):
+        print("         > every `test result:` line reports 0 passed: the step ran no tests")
+        return False
     if proc.returncode != 0:
         tail = proc.stdout[-2048:].decode("utf-8", errors="replace") if proc.stdout else ""
         if tail:
@@ -198,11 +223,19 @@ def main() -> int:
         "--timestamp",
         help="testsuite timestamp (ISO-8601 UTC); pass a fixed value for reproducible output",
     )
+    parser.add_argument(
+        "--must-cover",
+        help="rivet s-expression; every artifact it matches must also match --filter "
+        "(a per-PR filter may widen the default set, never narrow it)",
+    )
     parser.add_argument("--junit-self-test", action="store_true")
+    parser.add_argument("--gate-self-test", action="store_true")
     args = parser.parse_args()
 
     if args.junit_self_test:
         return junit_self_test()
+    if args.gate_self_test:
+        return gate_self_test()
     if args.junit and not args.timestamp:
         parser.error("--junit requires --timestamp (rivet derives the run id from it)")
     cases: list[Case] = []
@@ -229,6 +262,21 @@ def main() -> int:
 
     print(f"matched {len(ids)} artifacts")
     print()
+
+    if args.must_cover:
+        try:
+            required = rivet_list_ids(args.must_cover)
+        except subprocess.CalledProcessError as e:
+            print(f"rivet list (--must-cover) failed: {e.stderr}", file=sys.stderr)
+            return 2
+        missing = sorted(set(required) - set(ids))
+        if missing:
+            print(f"--filter drops {len(missing)} artifact(s) that --must-cover requires:")
+            for mid in missing:
+                print(f"  - {mid}")
+            print(f"must-cover: {args.must_cover}")
+            args.results_json.write_text(json.dumps(asdict(result), indent=2))
+            return 1
     result.total = len(ids)
 
     for artifact_id in ids:
@@ -287,7 +335,64 @@ def main() -> int:
         for fid in result.failed:
             print(f"  - {fid}")
 
-    return 0 if result.failed_count == 0 else 1
+    if result.failed_count:
+        return 1
+    if result.passed_count == 0:
+        print("no matched artifact ran a step: a gate that ran nothing has verified nothing")
+        return 1
+    return 0
+
+
+GATE_RIVET_STUB = """#!/usr/bin/env python3
+import json, os, sys
+spec = json.load(open(os.environ["GATE_STUB"]))
+if sys.argv[1] == "list":
+    ids = spec["filters"].get(sys.argv[sys.argv.index("--filter") + 1], [])
+    print(json.dumps({"artifacts": [{"id": i} for i in ids]}))
+elif sys.argv[1] == "get":
+    print(json.dumps({"fields": {"steps": [{"run": r} for r in spec["steps"][sys.argv[2]]]}}))
+"""
+
+
+def gate_self_test() -> int:
+    """Negative and positive controls for the fail-closed rules (witness#372),
+    run end-to-end through main() with rivet replaced by a stub."""
+    ok_summary = "echo 'test result: ok. 3 passed; 0 failed'; echo 'test result: ok. 0 passed; 0 failed'"
+    zero_summary = "echo 'test result: ok. 0 passed; 0 failed'; echo 'test result: ok. 0 passed; 0 failed'"
+    steps = {"PASS": ["true"], "FAIL": ["false"], "SKIP": [], "ZERO": [zero_summary], "SOME": [ok_summary]}
+    filters = {"pass": ["PASS"], "fail": ["PASS", "FAIL"], "allskip": ["SKIP"], "mixskip": ["PASS", "SKIP"],
+               "zero": ["ZERO"], "some": ["SOME"], "default": ["PASS", "SOME"], "narrow": ["PASS"],
+               "wide": ["PASS", "SOME", "SKIP"]}
+    table = [  # (case, argv, expected exit)
+        ("one passing step", ["--filter", "pass"], 0),
+        ("a failing step", ["--filter", "fail"], 1),
+        ("every matched artifact skipped", ["--filter", "allskip"], 1),
+        ("skips beside a pass", ["--filter", "mixskip"], 0),
+        ("every test result reports 0 passed", ["--filter", "zero"], 1),
+        ("one binary passes, doctests report 0", ["--filter", "some"], 0),
+        ("Verify-Filter narrows the default set", ["--filter", "narrow", "--must-cover", "default"], 1),
+        ("Verify-Filter widens the default set", ["--filter", "wide", "--must-cover", "default"], 0),
+    ]
+    failures = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = Path(tmp) / "bin"
+        bindir.mkdir()
+        stub = bindir / "rivet"
+        stub.write_text(GATE_RIVET_STUB)
+        stub.chmod(0o755)
+        spec = Path(tmp) / "spec.json"
+        spec.write_text(json.dumps({"filters": filters, "steps": steps}))
+        env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}", GATE_STUB=str(spec))
+        for name, argv, want in table:
+            got = subprocess.run(
+                [sys.executable, __file__, *argv, "--results-json", str(Path(tmp) / "r.json"), "--shell", "bash"],
+                env=env, capture_output=True,
+            ).returncode
+            verdict = "PASS" if got == want else "FAIL"
+            failures += got != want
+            print(f"{verdict}  {name}: exit {got} (want {want})")
+    print(f"{len(table) - failures}/{len(table)} gate controls hold")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
