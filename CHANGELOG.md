@@ -15,6 +15,8 @@ source. Features merged on main since v0.46.0 are not in it.
 
 ### Changed
 
+- **MSRV 1.96 -> 1.97** (#371 cherry-picked): wasmtime 50 and its cranelift
+  crates require rustc 1.97. The pinned fmt, clippy and MSRV toolchains move with it.
 - **No x86_64-apple-darwin (Intel macOS) release asset** from v0.46.1 on (fleet
   decision 2026-11-20). On an Intel Mac, build from source (`cargo install --locked
   --git https://github.com/pulseengine/witness --tag <tag> witness-mcdc`); the
