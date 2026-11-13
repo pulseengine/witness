@@ -15,8 +15,9 @@ name: Verification Gate
 # Or scoped:
 #     tools/run_verification.py --filter '(and (= type "test-case") (has-tag "unit-tests"))'
 #
-# Per-PR scoping via the PR body:
-#     Verify-Filter: (and (= type "test-case") (has-tag "cross-language"))
+# Per-PR scoping via the PR body (widen-only: the run fails if the
+# override drops any artifact the default filter matches, witness#372):
+#     Verify-Filter: (or <default filter> (has-tag "cross-language"))
 
 on:
   pull_request:
@@ -44,6 +45,7 @@ jobs:
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -D warnings
       CARGO_INCREMENTAL: 0
+      DEFAULT_FILTER: '(and (= type "test-case") (or (has-tag "unit-tests") (has-tag "static-analysis") (has-tag "security")))'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -80,12 +82,11 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          DEFAULT='(and (= type "test-case") (or (has-tag "unit-tests") (has-tag "static-analysis") (has-tag "security")))'
           OVERRIDE=$(printf '%s' "$PR_BODY" | grep -m1 -E '^Verify-Filter:' | sed 's/^Verify-Filter:[[:space:]]*//' || true)
           if [ -n "${OVERRIDE:-}" ]; then
             printf 'filter=%s\n' "$OVERRIDE" >>"$GITHUB_OUTPUT"
           else
-            printf 'filter=%s\n' "$DEFAULT" >>"$GITHUB_OUTPUT"
+            printf 'filter=%s\n' "$DEFAULT_FILTER" >>"$GITHUB_OUTPUT"
           fi
 
       - name: Run rivet verification gate
@@ -96,6 +97,7 @@ jobs:
         run: |
           tools/run_verification.py \
             --filter "$FILTER" \
+            --must-cover "$DEFAULT_FILTER" \
             --results-json verification-results.json
 
       - name: Upload results artifact

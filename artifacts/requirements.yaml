@@ -1642,3 +1642,20 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-11-08T15:03:33Z
     release: v0.47.0
+
+  - id: REQ-084
+    type: requirement
+    title: The verification gate fails closed when it ran nothing, ran zero tests, or was narrowed
+    status: implemented
+    description: "witness#372. tools/run_verification.py shall exit 1 when no matched test-case artifact ran a step (all skipped), when a step's cargo `test result:` lines report 0 passed in total (a test-name filter that matched nothing), and when --must-cover names an artifact that --filter did not match. The Verification Gate workflow passes its default filter as --must-cover, so a Verify-Filter line in a PR body may widen the gated set but never narrow it (the widen-only rule spar adopted as REQ-VERIFY-GATE-SCOPE-001). Before this, the all-skipped and 0-passed negative controls both exited 0 on main 3247f1a."
+    tags: [verification, ci, gate-potency]
+    fields:
+      category: non-functional
+      priority: must
+    links:
+      - type: produced-by
+        target: AS-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-13T20:00:00Z

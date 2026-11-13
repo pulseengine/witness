@@ -1162,3 +1162,25 @@ artifacts:
         target: REQ-082
       - type: produced-by
         target: AS-001
+
+  - id: TEST-REQ-084
+    type: test-case
+    title: Verification gate negative controls turn red; positive controls stay green
+    description: >
+      run_verification.py --gate-self-test runs main() end-to-end with rivet
+      replaced by a stub over an eight-row table: one passing step (0), a
+      failing step (1), every artifact skipped (1), skips beside a pass (0),
+      every test result reports 0 passed (1), one binary passes while the
+      doctests report 0 (0), a filter that drops a must-cover artifact (1)
+      and a filter that widens it (0). Removing any one of the three
+      fail-closed rules turns exactly one row red. (REQ-084 / #372.)
+    tags: [verification, unit-tests, ci]
+    fields:
+      method: automated-test
+      steps:
+        - run: python3 tools/run_verification.py --gate-self-test
+    links:
+      - type: verifies
+        target: REQ-084
+      - type: produced-by
+        target: AS-001
