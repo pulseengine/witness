@@ -7,6 +7,10 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **MSRV is now 1.97** (wasmtime 0.137 / cranelift floor): `rust-version`, clippy `msrv`, and the CI Clippy/MSRV/test toolchain pin.
+
 ## [0.46.0] — 2026-11-05
 
 Headline: **witness now checks its own MC/DC against an independent reference, and stops
