@@ -23,7 +23,7 @@ jobs:
     # Routes fork PRs to GitHub-hosted runners by default. This is NOT a security
     # boundary: a fork PR can edit this file. Isolation is enforced by the org's
     # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Pinned (not @stable) so a moving stable can't surface rustfmt
@@ -113,7 +113,7 @@ jobs:
 
   deny:
     name: Cargo Deny
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -133,7 +133,7 @@ jobs:
     # 2026-11-08 (smithy ansible/group_vars/all.yml, meld#571), which parses
     # CVSS 4.0 advisories; the version check below fails the job if an older
     # cargo-audit is ever the one `cargo audit` resolves to.
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -175,7 +175,7 @@ jobs:
 
   mutants:
     name: Mutation testing (informational)
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","lean-mem"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","lean-mem"]') || 'ubuntu-latest' }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     steps:
@@ -324,7 +324,7 @@ jobs:
 
   schemas:
     name: Schemas — validate fixtures against shipped JSON Schema docs (informational)
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
     # v0.10.0 item 5 — published schemas live at docs/schemas/. CI proves
     # the shipped report.json / predicate.json fixtures match those
     # schemas. Informational while the schema work settles; will gate
