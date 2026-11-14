@@ -128,11 +128,12 @@ jobs:
 
   audit:
     name: Security Audit
-    # Stays on ubuntu-latest: smithy ships cargo-audit v0.21.2 whose
-    # bundled rustsec parser rejects CVSS 4.0 advisories
-    # (RUSTSEC-2026-0037). Move back once smithy bumps cargo-audit to
-    # 0.22.1+.
-    runs-on: ubuntu-latest
+    # Light job on smithy (fork PRs stay on GitHub-hosted, same routing and
+    # caveat as `fmt`). smithy's runners ship cargo-audit 0.22.2 since
+    # 2026-11-08 (smithy ansible/group_vars/all.yml, meld#571), which parses
+    # CVSS 4.0 advisories; the version check below fails the job if an older
+    # cargo-audit is ever the one `cargo audit` resolves to.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -140,6 +141,11 @@ jobs:
       # Pinned: an unpinned install floats the advisory parser and audit
       # semantics under us (same pin policy as release.yml).
       - run: cargo install cargo-audit --locked --version 0.22.2
+      - name: Check cargo-audit version
+        run: |
+          cargo audit --version
+          cargo audit --version | grep -qE '(^| )0\.22\.2$' \
+            || { echo "::error::cargo audit resolves to $(cargo audit --version), want 0.22.2"; exit 1; }
       # witness-viz and witness-component are standalone workspaces with
       # their own lockfiles that ship in releases; a bare `cargo audit`
       # only sees the root one. No ignore list exists (no audit.toml;

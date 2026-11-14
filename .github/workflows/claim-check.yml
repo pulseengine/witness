@@ -13,10 +13,16 @@ on:
 jobs:
   claim-check:
     name: Claim check (README/SECURITY ↔ evidence)
-    runs-on: ubuntu-latest
+    # Light job on smithy; fork PRs stay on GitHub-hosted. Not a security
+    # boundary: see the routing note on `fmt` in ci.yml.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A venv, because the system pip on smithy's Ubuntu 24.04 refuses
+      # installs into the system Python (PEP 668).
       - name: Install PyYAML
-        run: pip install --quiet pyyaml
+        run: |
+          python3 -m venv "$RUNNER_TEMP/claim-venv"
+          "$RUNNER_TEMP/claim-venv/bin/pip" install --quiet pyyaml
       - name: Gate load-bearing doc claims against source
-        run: python3 tools/claim-check.py claims.yaml
+        run: '"$RUNNER_TEMP/claim-venv/bin/python" tools/claim-check.py claims.yaml'
