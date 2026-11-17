@@ -1,0 +1,13 @@
+# Planted controls for witness CI checks, run by pulseengine/plant in the
+# "Rivet validate" job (.github/workflows/ci.yml). Each control runs its check
+# on a copy of HEAD (must pass) and on a copy with the plant overlaid (must
+# fail). Locally: `plant` from the repository root, with rivet on PATH.
+
+[[control]]
+id = "rivet-broken-link"
+check = "Rivet validate"
+run = "rivet validate"
+plant = "ci-controls/rivet-broken-link"
+expect = "fail"
+stderr_or_stdout_matches = 'REQ-PLANTED-BROKEN-LINK.*AS-DOES-NOT-EXIST'
+timeout = 300

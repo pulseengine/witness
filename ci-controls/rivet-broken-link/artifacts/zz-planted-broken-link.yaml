@@ -1,0 +1,9 @@
+artifacts:
+  - id: REQ-PLANTED-BROKEN-LINK
+    type: requirement
+    title: Planted control for the rivet validate gate (#327)
+    status: draft
+    description: Links to an artifact id that does not exist; rivet validate must fail.
+    links:
+      - type: produced-by
+        target: AS-DOES-NOT-EXIST

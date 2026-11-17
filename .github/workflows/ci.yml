@@ -35,6 +35,44 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  # witness#327: the artifact graph is gated. `rivet validate` fails on a
+  # broken link, an unknown type or a malformed artifact. The plant step runs
+  # ci-controls.toml, which overlays ci-controls/rivet-broken-link/ (an artifact
+  # linking to an id that does not exist) onto a copy of HEAD and requires
+  # `rivet validate` to pass on the copy and fail on the planted copy, so this
+  # check is shown to be able to fail. rivet is pinned to v0.38.0, the version
+  # the control was measured with; the Verification Gate keeps its own pin.
+  rivet-validate:
+    name: Rivet validate
+    # Same fail-closed routing as Format: fork PRs go to GitHub-hosted runners
+    # (plant executes the manifest's run commands).
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    env:
+      RIVET_REV: a9ca696643dde6299fa54cd9fd430ab66ec6ed03 # rivet v0.38.0
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: rivet-a9ca6966
+      - name: Install rivet at the pinned rev
+        run: |
+          if command -v rivet >/dev/null 2>&1 && rivet --version | grep -q "${RIVET_REV:0:8}"; then
+            echo "rivet already present: $(rivet --version)"
+          else
+            cargo install --locked --force --git https://github.com/pulseengine/rivet \
+              --rev "$RIVET_REV" --bin rivet rivet-cli
+          fi
+          rivet --version | grep -q "${RIVET_REV:0:8}" || { echo "::error::rivet is not at $RIVET_REV"; exit 1; }
+      - name: rivet validate
+        run: rivet validate
+      - name: Planted broken artifact must fail rivet validate
+        uses: pulseengine/plant@418aa8d931755de40f2426bf92de85bb209bb79e # pre-1.0
+        with:
+          manifest: ci-controls.toml
+
   # v0.45 — every job that ran on the self-hosted `rust-cpu` pool now runs
   # on GitHub-hosted ubuntu-latest, for the reason Miri moved in v0.29: the
   # pool is shared org-wide and was saturated for days (required checks sat
