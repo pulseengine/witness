@@ -69,7 +69,7 @@ jobs:
       - name: rivet validate
         run: rivet validate
       - name: Planted broken artifact must fail rivet validate
-        uses: pulseengine/plant@418aa8d931755de40f2426bf92de85bb209bb79e # pre-1.0
+        uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
         with:
           manifest: ci-controls.toml
 
