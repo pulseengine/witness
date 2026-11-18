@@ -54,18 +54,25 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Job-local install root, cached by rev: smithy runners share ~/.cargo
+      # across jobs and repos, so a rivet there can be any version.
+      - name: Cache rivet binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: rivet-a9ca6966
-      - name: Install rivet at the pinned rev
+          path: ${{ runner.temp }}/rivet-root
+          key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
+      - name: Install rivet at the pinned rev (job-local)
         run: |
-          if command -v rivet >/dev/null 2>&1 && rivet --version | grep -q "${RIVET_REV:0:8}"; then
-            echo "rivet already present: $(rivet --version)"
-          else
-            cargo install --locked --force --git https://github.com/pulseengine/rivet \
-              --rev "$RIVET_REV" --bin rivet rivet-cli
+          root="$RUNNER_TEMP/rivet-root"
+          if [ ! -x "$root/bin/rivet" ]; then
+            cargo install --locked --git https://github.com/pulseengine/rivet \
+              --rev "$RIVET_REV" --root "$root" --bin rivet rivet-cli
           fi
-          rivet --version | grep -q "${RIVET_REV:0:8}" || { echo "::error::rivet is not at $RIVET_REV"; exit 1; }
+          echo "$root/bin" >> "$GITHUB_PATH"
+          "$root/bin/rivet" --version | grep -q "${RIVET_REV:0:8}" || { echo "::error::rivet is not at $RIVET_REV"; exit 1; }
+      - name: Check rivet on PATH is the pinned one
+        run: |
+          [ "$(command -v rivet)" = "$RUNNER_TEMP/rivet-root/bin/rivet" ] || { echo "::error::rivet resolves to $(command -v rivet)"; exit 1; }
       - name: rivet validate
         run: rivet validate
       - name: Planted broken artifact must fail rivet validate
@@ -161,8 +168,16 @@ jobs:
       # Skip `advisories` here — that check stays on the hosted `audit`
       # job until smithy ships cargo-audit 0.22.1+ (RUSTSEC-2026-0037
       # CVSS 4.0 parser issue).
-      - run: cargo install cargo-deny --locked --version 0.16.4 || true
-      - run: cargo deny check bans licenses sources
+      # Job-local install, called by path: smithy runners share ~/.cargo, and
+      # runner8 held a job-installed cargo-deny there (smithy, 2026-11-18).
+      # No `|| true`: a failed install fails the job instead of falling back
+      # to whatever cargo-deny the runner has.
+      - name: Install cargo-deny 0.16.4 (job-local)
+        run: cargo install cargo-deny --locked --version 0.16.4 --root "$RUNNER_TEMP/cargo-deny"
+      - run: |
+          deny="$RUNNER_TEMP/cargo-deny/bin/cargo-deny"
+          "$deny" --version | grep -qE '(^| )0\.16\.4$' || { echo "::error::cargo-deny is $("$deny" --version), want 0.16.4"; exit 1; }
+          "$deny" check bans licenses sources
 
   audit:
     name: Security Audit
