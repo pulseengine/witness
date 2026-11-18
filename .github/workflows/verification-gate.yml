@@ -35,7 +35,7 @@ permissions:
 jobs:
   rivet-verification:
     name: Verification Gate (rivet-driven)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # First runs need ~6min for the rivet source install + ~24min for
     # the gated tests. Subsequent runs hit the Swatinem rust-cache and
     # skip the rivet install (see the guard below), running in ~25min.

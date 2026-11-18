@@ -23,7 +23,7 @@ jobs:
     # Routes fork PRs to GitHub-hosted runners by default. This is NOT a security
     # boundary: a fork PR can edit this file. Isolation is enforced by the org's
     # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Pinned (not @stable) so a moving stable can't surface rustfmt
@@ -46,7 +46,7 @@ jobs:
     name: Rivet validate
     # Same fail-closed routing as Format: fork PRs go to GitHub-hosted runners
     # (plant executes the manifest's run commands).
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     timeout-minutes: 30
     env:
       RIVET_REV: a9ca696643dde6299fa54cd9fd430ab66ec6ed03 # rivet v0.38.0
@@ -81,7 +81,7 @@ jobs:
   # Trade: GitHub-hosted minutes.
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Pinned (not @stable) so a moving stable can't surface NEW clippy
@@ -99,7 +99,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
           # Stays on ubuntu-latest equivalents: smithy is Linux x86_64 only.
           - os: macos-latest
           - os: windows-latest
@@ -112,7 +112,7 @@ jobs:
 
   msrv:
     name: MSRV
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@f08ac54821369508305fcb9e0121ec6e30ae9ada # 1.97.0
@@ -129,7 +129,7 @@ jobs:
     # pool. Miri here only interprets a handful of pure-Rust module tests
     # (report/decisions/predicate) — well within a hosted runner's 16 GB.
     # Trade: a few GitHub-hosted minutes per run.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -151,7 +151,7 @@ jobs:
 
   deny:
     name: Cargo Deny
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -171,7 +171,7 @@ jobs:
     # 2026-11-08 (smithy ansible/group_vars/all.yml, meld#571), which parses
     # CVSS 4.0 advisories; the version check below fails the job if an older
     # cargo-audit is ever the one `cargo audit` resolves to.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -201,7 +201,7 @@ jobs:
 
   proptest-extended:
     name: Proptest (extended cases)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -213,7 +213,7 @@ jobs:
 
   mutants:
     name: Mutation testing (informational)
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","lean-mem"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","lean-mem"]') || 'ubuntu-24.04' }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     steps:
@@ -226,7 +226,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Runs on PRs too, not only push-to-main. A coverage job that only runs
     # after a merge is an alarm, not a gate — it tells you coverage fell once
     # the fall is already on main. FreeRTOS's coverage-cop, the clearest public
@@ -283,7 +283,7 @@ jobs:
 
   dogfood:
     name: Dogfood — witness measures the fixture
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -336,7 +336,7 @@ jobs:
 
   wasm-component:
     name: Build witness-component (Component Model wasm) — v0.7.0+
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -362,7 +362,7 @@ jobs:
 
   schemas:
     name: Schemas — validate fixtures against shipped JSON Schema docs (informational)
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     # v0.10.0 item 5 — published schemas live at docs/schemas/. CI proves
     # the shipped report.json / predicate.json fixtures match those
     # schemas. Informational while the schema work settles; will gate
@@ -419,7 +419,7 @@ jobs:
 
   verdict-suite:
     name: Verdict suite — end-to-end MC/DC on the canonical 7
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Runs on PRs too: as a main-only job it sat red on main for two weeks
     # (Oct 3–15 2026) with no PR ever showing it.
     steps:
