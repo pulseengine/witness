@@ -178,12 +178,18 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Pinned: an unpinned install floats the advisory parser and audit
       # semantics under us (same pin policy as release.yml).
-      - run: cargo install cargo-audit --locked --version 0.22.2
+      # Installed into a job-local root and called by path: smithy runners
+      # share ~/.cargo across jobs, and on runner8 (2026-11-18) its
+      # .crates.toml recorded 0.22.2 while ~/.cargo/bin/cargo-audit was
+      # 0.23.0, so `cargo install` skipped and `cargo audit` ran 0.23.0.
+      - name: Install cargo-audit 0.22.2 (job-local)
+        run: cargo install cargo-audit --locked --version 0.22.2 --root "$RUNNER_TEMP/cargo-audit"
       - name: Check cargo-audit version
         run: |
-          cargo audit --version
-          cargo audit --version | grep -qE '(^| )0\.22\.2$' \
-            || { echo "::error::cargo audit resolves to $(cargo audit --version), want 0.22.2"; exit 1; }
+          audit="$RUNNER_TEMP/cargo-audit/bin/cargo-audit"
+          "$audit" audit --version
+          "$audit" audit --version | grep -qE '(^| )0\.22\.2$' \
+            || { echo "::error::cargo-audit is $("$audit" audit --version), want 0.22.2"; exit 1; }
       # witness-viz and witness-component are standalone workspaces with
       # their own lockfiles that ship in releases; a bare `cargo audit`
       # only sees the root one. No ignore list exists (no audit.toml;
@@ -194,7 +200,7 @@ jobs:
           status=0
           for lock in Cargo.lock crates/witness-viz/Cargo.lock crates/witness-component/Cargo.lock; do
             echo "::group::cargo audit --file $lock"
-            cargo audit --file "$lock" || status=1
+            "$RUNNER_TEMP/cargo-audit/bin/cargo-audit" audit --file "$lock" || status=1
             echo "::endgroup::"
           done
           exit "$status"
