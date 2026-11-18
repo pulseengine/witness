@@ -83,6 +83,11 @@
           "description": "v0.12.0 — inlined call-site context. When the source decision was reconstructed from an inlined-subroutine instance (e.g. `is_safe()` inlined from `validate.rs:5`), this field carries the call site coordinates so reviewers can disambiguate two Decisions that share the same `source_file` / `source_line` but originate from different physical call sites. Absent when the decision is at top level or DWARF didn't supply inlining info.",
           "$ref": "#/$defs/InlineContext"
         },
+        "inline_chain": {
+          "description": "v0.41 (#182, REQ-065) — the decision's full inlined call chain, outermost to innermost, taken from its rows. `inline_context` is the leaf; the first frame is the user's own call site, which the per-file rollup books the decision to. Absent when no row carried a chain. Stripped under v1/v2 schemas.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/InlineContext" }
+        },
         "conditions": {
           "description": "Per-condition verdicts in evaluation order (index 0..N-1).",
           "type": "array",

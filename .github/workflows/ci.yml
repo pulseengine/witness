@@ -79,6 +79,33 @@ jobs:
         uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
         with:
           manifest: ci-controls.toml
+          only: rivet-broken-link
+
+  # The committed report fixture must validate against the schema it declares,
+  # and a copy with one undeclared decision property must not (plant control
+  # report-schema-extra-property). Runs on PRs; the main-only Schemas job
+  # below applies the same checker to the verdict suite's real evidence.
+  report-schema-fixtures:
+    name: Report schemas (fixtures)
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: Install jsonschema (venv)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/schema-venv"
+          "$RUNNER_TEMP/schema-venv/bin/python" -m pip install --quiet jsonschema
+          echo "$RUNNER_TEMP/schema-venv/bin" >> "$GITHUB_PATH"
+      - name: Fixture validates against its declared schema
+        run: python3 tools/check_report_schemas.py tests/fixtures/report-schema
+      - name: Planted undeclared property must fail validation
+        uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
+        with:
+          manifest: ci-controls.toml
+          only: report-schema-extra-property
 
   # v0.45 — every job that ran on the self-hosted `rust-cpu` pool now runs
   # on GitHub-hosted ubuntu-latest, for the reason Miri moved in v0.29: the
@@ -415,28 +442,11 @@ jobs:
         with:
           name: verdict-evidence
           path: build/verdict-evidence
-      - name: Validate report.json against witness-mcdc/v1
-        run: |
-          set -euo pipefail
-          schema=docs/schemas/witness-mcdc-v1.json
-          for v in leap_year triangle state_guard safety_envelope parser_dispatch nom_numbers state_machine json_lite; do
-            f="build/verdict-evidence/$v/report.json"
-            if [ -f "$f" ]; then
-              echo "validate $f"
-              python3 -m jsonschema -i "$f" "$schema"
-            fi
-          done
-      - name: Validate predicate.json against witness-coverage/v1
-        run: |
-          set -euo pipefail
-          schema=docs/schemas/witness-coverage-v1.json
-          for v in leap_year triangle state_guard safety_envelope parser_dispatch nom_numbers state_machine json_lite; do
-            f="build/verdict-evidence/$v/predicate.json"
-            if [ -f "$f" ]; then
-              echo "validate $f"
-              python3 -m jsonschema -i "$f" "$schema"
-            fi
-          done
+      # Each file is validated against the schema it declares (`schema` for
+      # report.json, `predicateType` for predicate.json), not a fixed v1:
+      # the verdict suite emits witness-mcdc/v3.
+      - name: Validate report.json and predicate.json against their declared schemas
+        run: python3 tools/check_report_schemas.py build/verdict-evidence
 
   verdict-suite:
     name: Verdict suite — end-to-end MC/DC on the canonical 7

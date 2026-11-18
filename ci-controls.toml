@@ -11,3 +11,12 @@ plant = "ci-controls/rivet-broken-link"
 expect = "fail"
 stderr_or_stdout_matches = 'REQ-PLANTED-BROKEN-LINK.*AS-DOES-NOT-EXIST'
 timeout = 300
+
+[[control]]
+id = "report-schema-extra-property"
+check = "Report schemas (fixtures)"
+run = "python3 tools/check_report_schemas.py tests/fixtures/report-schema"
+plant = "ci-controls/report-schema-extra-property"
+expect = "fail"
+stderr_or_stdout_matches = "'planted_undeclared_field' was unexpected"
+timeout = 120

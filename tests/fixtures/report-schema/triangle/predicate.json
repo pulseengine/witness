@@ -1,0 +1,69 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "instrumented.wasm",
+      "digest": {
+        "sha256": "59774dfe94d802eaae3bbeeaab5f0dfb2c4afd552d0faee550f89232280fe296"
+      }
+    },
+    {
+      "name": "source.wasm",
+      "digest": {
+        "sha256": "0611c99b76755f2524e74854669fc1e3ca91d85968baf7f220e4667eb4cc2051"
+      }
+    }
+  ],
+  "predicateType": "https://pulseengine.eu/witness-coverage/v1",
+  "predicate": {
+    "coverage": {
+      "covered_branches": 2,
+      "module": "build/verdict-evidence/triangle/instrumented.wasm",
+      "per_function": [
+        {
+          "covered": 2,
+          "function_index": 0,
+          "function_name": "verdict_triangle::not_a_triangle",
+          "total": 2
+        }
+      ],
+      "schema_version": "2",
+      "total_branches": 2,
+      "uncovered": [],
+      "witness_version": "0.46.0"
+    },
+    "measurement": {
+      "harness": null,
+      "measured_at": "2026-11-18T08:37:57Z",
+      "test_cases": [
+        {
+          "invocation": "run_row_0",
+          "row_id": 0
+        },
+        {
+          "invocation": "run_row_1",
+          "row_id": 1
+        },
+        {
+          "invocation": "run_row_2",
+          "row_id": 2
+        },
+        {
+          "invocation": "run_row_3",
+          "row_id": 3
+        }
+      ],
+      "toolchain": {
+        "rust_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "wasmtime_version": "44"
+      },
+      "witness_version": "0.46.0"
+    },
+    "original_module": {
+      "digest": {
+        "sha256": "0611c99b76755f2524e74854669fc1e3ca91d85968baf7f220e4667eb4cc2051"
+      },
+      "name": "source.wasm"
+    }
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "schema": "https://pulseengine.eu/witness-mcdc/v3",
+  "witness_version": "0.46.0",
+  "module": "build/verdict-evidence/triangle/instrumented.wasm",
+  "overall": {
+    "decisions_total": 1,
+    "decisions_full_mcdc": 0,
+    "conditions_total": 2,
+    "conditions_proved": 2,
+    "conditions_gap": 0,
+    "conditions_dead": 0
+  },
+  "decisions": [
+    {
+      "id": 0,
+      "source_file": "src/lib.rs",
+      "source_line": 27,
+      "inline_context": {
+        "call_file": "src/lib.rs",
+        "call_line": 40
+      },
+      "inline_chain": [
+        {
+          "call_file": "src/lib.rs",
+          "call_line": 12
+        },
+        {
+          "call_file": "src/lib.rs",
+          "call_line": 40
+        }
+      ],
+      "conditions": [
+        {
+          "index": 0,
+          "branch_id": 0,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            0,
+            1
+          ]
+        },
+        {
+          "index": 1,
+          "branch_id": 1,
+          "status": "proved",
+          "interpretation": "unique-cause",
+          "pair": [
+            0,
+            3
+          ]
+        }
+      ],
+      "truth_table": [
+        {
+          "row_id": 0,
+          "evaluated": {
+            "0": true,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 1,
+          "evaluated": {
+            "0": false
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 2,
+          "evaluated": {
+            "0": true,
+            "1": false
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 3,
+          "evaluated": {
+            "0": true,
+            "1": true
+          },
+          "outcome": true
+        }
+      ],
+      "status": "partial",
+      "status_reason": "unobserved_tail_conditions",
+      "unobserved_tail_conditions": 1,
+      "planted_undeclared_field": true
+    }
+  ],
+  "trace_health": {
+    "overflow": false,
+    "rows": 4,
+    "trace_parser_active": true,
+    "bytes_used": 44,
+    "pages_allocated": 16
+  },
+  "interpretation_polarity": "wasm-early-exit"
+}
