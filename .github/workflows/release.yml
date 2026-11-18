@@ -57,10 +57,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
             cross: true
           # #234 — musl beside gnu (option 1, decided 2026-09-24). The
@@ -71,11 +71,11 @@ jobs:
           # Asset naming stays witness-<tag>-<triple>.tar.gz — varve
           # derives names from the Rust triple.
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
             cross: true
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
             cross: true
           - target: x86_64-apple-darwin
@@ -207,7 +207,7 @@ jobs:
   compliance:
     name: Generate compliance evidence
     needs: [build-binaries]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # v0.15.1 — id-token: write needed for the keyless rekor
     # attest-blob step that runs after the compliance bundle is
     # built. Inherits from the workflow-level grant; declared here
@@ -301,7 +301,7 @@ jobs:
 
   wasm-component:
     name: Build witness-component (real Component Model wasm) — v0.7.0+
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -343,7 +343,7 @@ jobs:
   # failing run still leaves its evidence.
   verification-evidence:
     name: Verification evidence (JUnit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
       contents: read
@@ -403,7 +403,7 @@ jobs:
   create-github-release:
     name: Create GitHub Release
     needs: [build-binaries, compliance, wasm-component, verification-evidence]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Permissions — three of them, per the org-wide release-artifact
     # standardization brief:
     #   contents: write       — needed to create the GitHub Release
@@ -665,7 +665,7 @@ jobs:
   import-verification-results:
     name: Open rivet results import PR
     needs: [create-github-release]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -805,7 +805,7 @@ jobs:
   publish-pages:
     name: Publish MC/DC viz dashboard to GitHub Pages
     needs: [compliance]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -936,7 +936,7 @@ jobs:
     name: Publish to crates.io
     needs: [create-github-release]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read

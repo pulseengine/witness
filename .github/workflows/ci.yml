@@ -23,7 +23,7 @@ jobs:
     # Routes fork PRs to GitHub-hosted runners by default. This is NOT a security
     # boundary: a fork PR can edit this file. Isolation is enforced by the org's
     # smithy runner-group policy and fork-PR approval (pulseengine/warte#35).
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Pinned (not @stable) so a moving stable can't surface rustfmt
@@ -46,7 +46,7 @@ jobs:
     name: Rivet validate
     # Same fail-closed routing as Format: fork PRs go to GitHub-hosted runners
     # (plant executes the manifest's run commands).
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     timeout-minutes: 30
     env:
       RIVET_REV: a9ca696643dde6299fa54cd9fd430ab66ec6ed03 # rivet v0.38.0
@@ -54,18 +54,25 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Job-local install root, cached by rev: smithy runners share ~/.cargo
+      # across jobs and repos, so a rivet there can be any version.
+      - name: Cache rivet binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: rivet-a9ca6966
-      - name: Install rivet at the pinned rev
+          path: ${{ runner.temp }}/rivet-root
+          key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
+      - name: Install rivet at the pinned rev (job-local)
         run: |
-          if command -v rivet >/dev/null 2>&1 && rivet --version | grep -q "${RIVET_REV:0:8}"; then
-            echo "rivet already present: $(rivet --version)"
-          else
-            cargo install --locked --force --git https://github.com/pulseengine/rivet \
-              --rev "$RIVET_REV" --bin rivet rivet-cli
+          root="$RUNNER_TEMP/rivet-root"
+          if [ ! -x "$root/bin/rivet" ]; then
+            cargo install --locked --git https://github.com/pulseengine/rivet \
+              --rev "$RIVET_REV" --root "$root" --bin rivet rivet-cli
           fi
-          rivet --version | grep -q "${RIVET_REV:0:8}" || { echo "::error::rivet is not at $RIVET_REV"; exit 1; }
+          echo "$root/bin" >> "$GITHUB_PATH"
+          "$root/bin/rivet" --version | grep -q "${RIVET_REV:0:8}" || { echo "::error::rivet is not at $RIVET_REV"; exit 1; }
+      - name: Check rivet on PATH is the pinned one
+        run: |
+          [ "$(command -v rivet)" = "$RUNNER_TEMP/rivet-root/bin/rivet" ] || { echo "::error::rivet resolves to $(command -v rivet)"; exit 1; }
       - name: rivet validate
         run: rivet validate
       - name: Planted broken artifact must fail rivet validate
@@ -81,7 +88,7 @@ jobs:
   # Trade: GitHub-hosted minutes.
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Pinned (not @stable) so a moving stable can't surface NEW clippy
@@ -99,7 +106,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
           # Stays on ubuntu-latest equivalents: smithy is Linux x86_64 only.
           - os: macos-latest
           - os: windows-latest
@@ -112,7 +119,7 @@ jobs:
 
   msrv:
     name: MSRV
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@f08ac54821369508305fcb9e0121ec6e30ae9ada # 1.97.0
@@ -129,7 +136,7 @@ jobs:
     # pool. Miri here only interprets a handful of pure-Rust module tests
     # (report/decisions/predicate) — well within a hosted runner's 16 GB.
     # Trade: a few GitHub-hosted minutes per run.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -151,7 +158,7 @@ jobs:
 
   deny:
     name: Cargo Deny
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -161,8 +168,16 @@ jobs:
       # Skip `advisories` here — that check stays on the hosted `audit`
       # job until smithy ships cargo-audit 0.22.1+ (RUSTSEC-2026-0037
       # CVSS 4.0 parser issue).
-      - run: cargo install cargo-deny --locked --version 0.16.4 || true
-      - run: cargo deny check bans licenses sources
+      # Job-local install, called by path: smithy runners share ~/.cargo, and
+      # runner8 held a job-installed cargo-deny there (smithy, 2026-11-18).
+      # No `|| true`: a failed install fails the job instead of falling back
+      # to whatever cargo-deny the runner has.
+      - name: Install cargo-deny 0.16.4 (job-local)
+        run: cargo install cargo-deny --locked --version 0.16.4 --root "$RUNNER_TEMP/cargo-deny"
+      - run: |
+          deny="$RUNNER_TEMP/cargo-deny/bin/cargo-deny"
+          "$deny" --version | grep -qE '(^| )0\.16\.4$' || { echo "::error::cargo-deny is $("$deny" --version), want 0.16.4"; exit 1; }
+          "$deny" check bans licenses sources
 
   audit:
     name: Security Audit
@@ -171,19 +186,25 @@ jobs:
     # 2026-11-08 (smithy ansible/group_vars/all.yml, meld#571), which parses
     # CVSS 4.0 advisories; the version check below fails the job if an older
     # cargo-audit is ever the one `cargo audit` resolves to.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Pinned: an unpinned install floats the advisory parser and audit
       # semantics under us (same pin policy as release.yml).
-      - run: cargo install cargo-audit --locked --version 0.22.2
+      # Installed into a job-local root and called by path: smithy runners
+      # share ~/.cargo across jobs, and on runner8 (2026-11-18) its
+      # .crates.toml recorded 0.22.2 while ~/.cargo/bin/cargo-audit was
+      # 0.23.0, so `cargo install` skipped and `cargo audit` ran 0.23.0.
+      - name: Install cargo-audit 0.22.2 (job-local)
+        run: cargo install cargo-audit --locked --version 0.22.2 --root "$RUNNER_TEMP/cargo-audit"
       - name: Check cargo-audit version
         run: |
-          cargo audit --version
-          cargo audit --version | grep -qE '(^| )0\.22\.2$' \
-            || { echo "::error::cargo audit resolves to $(cargo audit --version), want 0.22.2"; exit 1; }
+          audit="$RUNNER_TEMP/cargo-audit/bin/cargo-audit"
+          "$audit" audit --version
+          "$audit" audit --version | grep -qE '(^| )0\.22\.2$' \
+            || { echo "::error::cargo-audit is $("$audit" audit --version), want 0.22.2"; exit 1; }
       # witness-viz and witness-component are standalone workspaces with
       # their own lockfiles that ship in releases; a bare `cargo audit`
       # only sees the root one. No ignore list exists (no audit.toml;
@@ -194,14 +215,14 @@ jobs:
           status=0
           for lock in Cargo.lock crates/witness-viz/Cargo.lock crates/witness-component/Cargo.lock; do
             echo "::group::cargo audit --file $lock"
-            cargo audit --file "$lock" || status=1
+            "$RUNNER_TEMP/cargo-audit/bin/cargo-audit" audit --file "$lock" || status=1
             echo "::endgroup::"
           done
           exit "$status"
 
   proptest-extended:
     name: Proptest (extended cases)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -213,7 +234,7 @@ jobs:
 
   mutants:
     name: Mutation testing (informational)
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","lean-mem"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","lean-mem"]') || 'ubuntu-24.04' }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     steps:
@@ -226,7 +247,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Runs on PRs too, not only push-to-main. A coverage job that only runs
     # after a merge is an alarm, not a gate — it tells you coverage fell once
     # the fall is already on main. FreeRTOS's coverage-cop, the clearest public
@@ -283,7 +304,7 @@ jobs:
 
   dogfood:
     name: Dogfood — witness measures the fixture
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -336,7 +357,7 @@ jobs:
 
   wasm-component:
     name: Build witness-component (Component Model wasm) — v0.7.0+
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -362,7 +383,7 @@ jobs:
 
   schemas:
     name: Schemas — validate fixtures against shipped JSON Schema docs (informational)
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     # v0.10.0 item 5 — published schemas live at docs/schemas/. CI proves
     # the shipped report.json / predicate.json fixtures match those
     # schemas. Informational while the schema work settles; will gate
@@ -419,7 +440,7 @@ jobs:
 
   verdict-suite:
     name: Verdict suite — end-to-end MC/DC on the canonical 7
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Runs on PRs too: as a main-only job it sat red on main for two weeks
     # (Oct 3–15 2026) with no PR ever showing it.
     steps:
