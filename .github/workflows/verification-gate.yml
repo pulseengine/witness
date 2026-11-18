@@ -37,14 +37,15 @@ jobs:
     name: Verification Gate (rivet-driven)
     runs-on: ubuntu-24.04
     # First runs need ~6min for the rivet source install + ~24min for
-    # the gated tests. Subsequent runs hit the Swatinem rust-cache and
-    # skip the rivet install (see the guard below), running in ~25min.
+    # the gated tests. Subsequent runs restore rivet from actions/cache
+    # (keyed by RIVET_REV) and skip the install, running in ~25min.
     # 45min headroom covers both cold and warm cases.
     timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -D warnings
       CARGO_INCREMENTAL: 0
+      RIVET_REV: a9ca696643dde6299fa54cd9fd430ab66ec6ed03 # rivet v0.38.0
       DEFAULT_FILTER: '(and (= type "test-case") (or (has-tag "unit-tests") (has-tag "static-analysis") (has-tag "security")))'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,19 +64,27 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Install rivet (skip if cached)
+      # rivet v0.38.0, the version Rivet validate (ci.yml) uses. Installed into
+      # a job-local root cached by rev, so a rivet the runner or the rust-cache
+      # restores into ~/.cargo/bin can never be the one the gate runs.
+      - name: Cache rivet binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/rivet-root
+          key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
+      - name: Install rivet at the pinned rev (job-local)
         run: |
-          # Swatinem's rust-cache restores ~/.cargo/bin/ between runs,
-          # so once rivet's installed it stays. Guard to skip the
-          # ~6min build on warm runs.
-          if command -v rivet >/dev/null 2>&1; then
-            echo "rivet already on PATH: $(rivet --version)"
-          else
-            cargo install --locked --git https://github.com/pulseengine/rivet \
-              --rev b7a17bef \
-              --bin rivet \
-              rivet-cli
+          root="$RUNNER_TEMP/rivet-root"
+          if [ ! -x "$root/bin/rivet" ]; then
+            RUSTFLAGS="" cargo install --locked --git https://github.com/pulseengine/rivet \
+              --rev "$RIVET_REV" --root "$root" --bin rivet rivet-cli
           fi
+          echo "$root/bin" >> "$GITHUB_PATH"
+          "$root/bin/rivet" --version | grep -q "${RIVET_REV:0:8}" || { echo "::error::rivet is not at $RIVET_REV"; exit 1; }
+      - name: Check rivet on PATH is the pinned one
+        run: |
+          [ "$(command -v rivet)" = "$RUNNER_TEMP/rivet-root/bin/rivet" ] || { echo "::error::rivet resolves to $(command -v rivet)"; exit 1; }
+          rivet --version
 
       - name: Pick verification filter (per-PR override via body)
         id: pick
