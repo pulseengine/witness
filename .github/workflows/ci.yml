@@ -409,13 +409,13 @@ jobs:
           if-no-files-found: warn
 
   schemas:
-    name: Schemas — validate fixtures against shipped JSON Schema docs (informational)
+    name: Schemas — validate verdict evidence against shipped JSON Schema docs
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     # v0.10.0 item 5 — published schemas live at docs/schemas/. CI proves
-    # the shipped report.json / predicate.json fixtures match those
-    # schemas. Informational while the schema work settles; will gate
-    # the release once we've absorbed any drift.
-    continue-on-error: true
+    # the verdict suite's report.json / predicate.json files match the
+    # schema each declares. Gating since 2026-11-18: it was
+    # continue-on-error, which hid a v3 schema drift on every main run
+    # (#384). A failure here turns main's CI run red.
     needs: verdict-suite
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
