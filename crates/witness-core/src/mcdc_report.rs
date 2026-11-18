@@ -362,6 +362,8 @@ impl McdcReport {
                 report.schema = MCDC_SCHEMA_URL.to_string();
                 for d in &mut report.decisions {
                     strip_v3_guard_fields(d);
+                    // #182 added a decision-level chain; v1/v2 never declared it.
+                    d.inline_chain = None;
                     d.per_context.clear();
                     for r in &mut d.truth_table {
                         r.inline_context = None;
@@ -374,6 +376,7 @@ impl McdcReport {
                 // v2 strips v3-only fields; keeps v2 fields intact.
                 for d in &mut report.decisions {
                     strip_v3_guard_fields(d);
+                    d.inline_chain = None;
                     for r in &mut d.truth_table {
                         r.inline_chain = None;
                     }
@@ -2072,9 +2075,34 @@ mod tests {
             assert_eq!(chain.first(), Some(&frame_outer));
         }
 
-        // v2: chain stripped from RowView + PerContextVerdict.
+        // The decision itself carries the chain in v3 (#182).
+        assert!(
+            dec.inline_chain.is_some(),
+            "v3 should keep DecisionVerdict.inline_chain"
+        );
+
+        // v1 and v2 never declared DecisionVerdict.inline_chain
+        // (additionalProperties: false), so both must strip it.
+        let report_v1 = McdcReport::from_record_with_schema(&record, McdcSchemaVersion::V1);
+        let dec = report_v1.decisions.first().expect("decision");
+        assert!(
+            dec.inline_chain.is_none(),
+            "v1 should strip DecisionVerdict.inline_chain"
+        );
+        let v1_json = serde_json::to_string(&report_v1).expect("serialize v1");
+        assert!(
+            !v1_json.contains("inline_chain"),
+            "no inline_chain anywhere in a v1 envelope"
+        );
+
+        // v2: chain stripped from RowView + PerContextVerdict + the decision.
         let report_v2 = McdcReport::from_record_with_schema(&record, McdcSchemaVersion::V2);
         assert_eq!(report_v2.schema, MCDC_SCHEMA_URL_V2);
+        let v2_json = serde_json::to_string(&report_v2).expect("serialize v2");
+        assert!(
+            !v2_json.contains("inline_chain"),
+            "no inline_chain anywhere in a v2 envelope"
+        );
         let dec = report_v2.decisions.first().expect("decision");
         assert!(
             dec.truth_table.iter().all(|r| r.inline_chain.is_none()),
