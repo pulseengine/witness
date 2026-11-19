@@ -1016,3 +1016,93 @@ artifacts:
         target: DEC-047
       - type: produced-by
         target: AS-001
+
+  - id: FEAT-045
+    type: feature
+    title: "v0.47 bet 1: witness recheck, internal consistency an assessor can re-run (serves O2)"
+    status: draft
+    release: v0.47.0
+    description: "Serves O2. witness recheck <evidence-dir> re-derives report.json from run.json plus manifest through the witness-mcdc-checker kernel, checks the hash chain and an inventory written before archiving, and states that it shows internal consistency only. Compliance action generates its README from the inventory (#360) and stops swallowing failures. Acceptance: required job recheck-controls with planted controls (deleted run.json, flipped module byte, gap edited to proved with hashes recomputed, inventory line for absent file, re-signed with a fresh key against the keyless cosign identity), one control per fail-open step, linux recheck of macOS evidence. Gated by spike S1 (no hidden input). Seams: wohl verify step, pulseengine.eu north-star-o2.py control. Plan: docs/proposals/v0.47.0.md."
+    tags: [v0.47, serves-O2, north-star, evidence-bundle, issue-360]
+    links:
+      - type: satisfies
+        target: REQ-021
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-19T22:11:51Z
+
+  - id: FEAT-046
+    type: feature
+    title: "v0.47 bet 2: schema gate as a signed WASI component under kiln (serves O5)"
+    status: draft
+    release: v0.47.0
+    description: "Serves O5. Port tools/check_report_schemas.py to a Rust wasm32-wasip2 component, sign it with sigil in CI, wsc-verify the signed bytes and run them under kiln and wasmtime; identical verdicts to the Python checker and to a frozen expected-output corpus kept after the Python is deleted; plant report-schema-extra-property red under both; gates.toml equals the required-check list. Runs only if spike S2 (kiln runs a wasip2 command component with preopens) passes; otherwise dropped. Plan: docs/proposals/v0.47.0.md."
+    tags: [v0.47, serves-O5, north-star, wasi-component, no-new-python]
+    links:
+      - type: satisfies
+        target: REQ-031
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-19T22:11:52Z
+
+  - id: FEAT-047
+    type: feature
+    title: "v0.47 bet 3a: observe the last operand of a short-circuit chain (#358) (serves O2)"
+    status: draft
+    release: v0.47.0
+    description: "Serves O2 (moves no indicator; keeps a bundle from passing on decisions witness cannot see). #358 steps 2-3: row outcomes from the return-value trace and a probe on the last operand's value. Acceptance: the 4 missing-last-operand ledger entries go stale and are removed; ledger <=13 entries on every PR, <=5 at the tag, no category changes; no_overclaim green; planted perturbed-probe control turns the truth-table check red. Kill: any non-ledgered proved-pair change or unfixable false-proved within two weeks. Plan: docs/proposals/v0.47.0.md."
+    tags: [v0.47, serves-O2, north-star, issue-358, mcdc]
+    links:
+      - type: satisfies
+        target: REQ-082
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-19T22:11:52Z
+
+  - id: FEAT-048
+    type: feature
+    title: "v0.47 bet 3b: decisions lowered to branch-free arithmetic (#268) (serves O2)"
+    status: draft
+    release: v0.47.0
+    description: "Serves O2. Probe the comparison results feeding i32.and/i32.or trees; otherwise a manifest warning instead of a clean 0/0. Acceptance: verdict suite required on rustc 1.98.1 and 1.99.x, floating stable as a canary; 4 condition-count ledger entries removed; range_overlap and mixed_or_and leave ZERO_DECISION or carry the warning, and recheck/verify never report a clean pass with the warning present. Mechanical kill: new decisions on httparse/json_lite whose DWARF source line has no &&, || or comparison token. Plan: docs/proposals/v0.47.0.md."
+    tags: [v0.47, serves-O2, north-star, issue-268, mcdc]
+    links:
+      - type: satisfies
+        target: REQ-079
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-19T22:11:52Z
+
+  - id: FEAT-049
+    type: feature
+    title: "v0.47 bet 4: decide and test the component path for MC/DC (serves O2)"
+    status: draft
+    release: v0.47.0
+    description: "Serves O2 (2027-Q1 relay stretch). Spike S3 runs meld fusion (REQ-054) on wohl's composed component and records the decision count; decide whether a fused-module report counts as the component's MC/DC part and how it is hash-bound to the shipped component; fixture test (wasip2 component, 3-condition decision, hand-derived table) for the working path; wohl job required once wohl confirms the floor (>0 decisions, no unwarned 0/0). Native per-row component path deferred to v0.48.0 only if fusion is insufficient. Plan: docs/proposals/v0.47.0.md."
+    tags: [v0.47, serves-O2, north-star, component-model, wohl-58]
+    links:
+      - type: satisfies
+        target: REQ-012
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-19T22:11:52Z
+
+  - id: FEAT-050
+    type: feature
+    title: "v0.47 bet 5: bounded proof harness for the checker kernel, audited ledger (serves O3)"
+    status: draft
+    release: v0.47.0
+    description: "Serves O3. Kani or Verus (spike S4) harness for find_independent_effect_pair: soundness, completeness, unique-cause preference against a standalone declarative spec signed off by a reviewer other than the author. Acceptance: required proof job states row and condition bounds; 4 planted mutants (incl. completeness) each fail the proof; CI axiom audit extracts every assume/unwind/stub/model and fails if it differs from the ledger, the ledger grows or a bound falls; claims.yaml binds the README kernel wording. Kill: condition bound <5, a model unlike the shipped code, or any mutant passing. Plan: docs/proposals/v0.47.0.md."
+    tags: [v0.47, serves-O3, north-star, proof, kernel]
+    links:
+      - type: satisfies
+        target: REQ-016
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-19T22:11:52Z
