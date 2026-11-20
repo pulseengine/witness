@@ -10,7 +10,7 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 ## [0.46.1] — 2026-11-20
 
 Security patch on the v0.46 line: v0.46.0 plus wasmtime 50.0.3, cut from
-`release/0.46` (v0.46.0 with #381 and #398 cherry-picked). No change to witness's Rust
+`release/0.46` (v0.46.0 with #370, #381 and #398 cherry-picked). No change to witness's Rust
 source. Features merged on main since v0.46.0 are not in it.
 
 ### Changed
@@ -25,6 +25,8 @@ source. Features merged on main since v0.46.0 are not in it.
 ### Security
 
 - `wasmtime` and `wasmtime-wasi` 49.0.5 -> 50.0.2 (#381), for GHSA-5m8g-xhq4-4h93.
+- `quinn-udp` 0.5.14 -> 0.5.16 in `crates/witness-viz/Cargo.lock` (#370), for
+  RUSTSEC-2026-0538.
 - `wasmtime` and `wasmtime-wasi` 50.0.2 -> 50.0.3 (Cargo.lock only), for
   RUSTSEC-2026-0587: a WASI filesystem sandbox escape on Windows through a
   drive-prefixed path component. witness's harness builds its WASI context with
