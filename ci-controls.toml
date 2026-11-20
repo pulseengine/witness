@@ -117,3 +117,47 @@ plant = "ci-controls/recheck-run-edited-report-rederived"
 expect = "fail"
 stderr_or_stdout_matches = '(?m)FAIL +state_machine/chain/run->predicate +\[chain-mismatch\] sha256\(run\.json\)[\s\S]*, 1 failed, \d+ not checked, \d+ not applicable; failure classes: chain-mismatch$'
 timeout = 120
+
+# v0.47.0 FEAT-050: each kernel mutant (a patch in the plant directory, applied
+# by `run` only when present) must make the Kani proof fail on the property
+# it breaks. Runs in the "Kernel proof (Kani)" job, which installs cargo-kani.
+
+# Mutant: the outcome-differs check removed.
+[[control]]
+id = "kani-mutant-outcome-check"
+check = "Kernel proof (Kani) — pair search, rows<=8, conditions<=6"
+run = 'if [ -f kernel-mutant.patch ]; then git apply kernel-mutant.patch; fi && cd crates/witness-mcdc-checker && cargo kani --harness pair_kernel_r4_c5'
+plant = "ci-controls/kani-mutant-outcome-check"
+expect = "fail"
+stderr_or_stdout_matches = 'returned rows are not a pair'
+timeout = 1200
+
+# Mutant: the non-target compatibility loop skipped.
+[[control]]
+id = "kani-mutant-compat-loop"
+check = "Kernel proof (Kani) — pair search, rows<=8, conditions<=6"
+run = 'if [ -f kernel-mutant.patch ]; then git apply kernel-mutant.patch; fi && cd crates/witness-mcdc-checker && cargo kani --harness pair_kernel_r4_c5'
+plant = "ci-controls/kani-mutant-compat-loop"
+expect = "fail"
+stderr_or_stdout_matches = 'returned rows are not a pair'
+timeout = 1200
+
+# Mutant: the unique-cause preference inverted.
+[[control]]
+id = "kani-mutant-preference"
+check = "Kernel proof (Kani) — pair search, rows<=8, conditions<=6"
+run = 'if [ -f kernel-mutant.patch ]; then git apply kernel-mutant.patch; fi && cd crates/witness-mcdc-checker && cargo kani --harness pair_kernel_r4_c5'
+plant = "ci-controls/kani-mutant-preference"
+expect = "fail"
+stderr_or_stdout_matches = 'unique-cause pair exists but masking returned'
+timeout = 1200
+
+# Mutant: completeness broken (None although a pair exists).
+[[control]]
+id = "kani-mutant-completeness"
+check = "Kernel proof (Kani) — pair search, rows<=8, conditions<=6"
+run = 'if [ -f kernel-mutant.patch ]; then git apply kernel-mutant.patch; fi && cd crates/witness-mcdc-checker && cargo kani --harness pair_kernel_r4_c5'
+plant = "ci-controls/kani-mutant-completeness"
+expect = "fail"
+stderr_or_stdout_matches = 'a pair exists but none was returned'
+timeout = 1200
