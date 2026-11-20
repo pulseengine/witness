@@ -104,7 +104,10 @@ runs:
         case "$OS-$ARCH" in
           Linux-x86_64)   TARGET=x86_64-unknown-linux-gnu ;;
           Linux-aarch64)  TARGET=aarch64-unknown-linux-gnu ;;
-          Darwin-x86_64)  TARGET=x86_64-apple-darwin ;;
+          Darwin-x86_64)
+            # No Intel macOS assets since v0.47.0 (fleet decision 2026-11-20).
+            echo "::error::witness publishes no x86_64-apple-darwin build since v0.47.0; use an Apple Silicon (arm64) or Linux runner" >&2
+            exit 1 ;;
           Darwin-arm64)   TARGET=aarch64-apple-darwin ;;
           *) echo "unsupported runner $OS-$ARCH" >&2; exit 1 ;;
         esac

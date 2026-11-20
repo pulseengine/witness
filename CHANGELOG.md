@@ -40,6 +40,7 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **No x86_64-apple-darwin (Intel macOS) release assets** from v0.47.0 on (fleet decision 2026-11-20). On an Intel Mac, build from source (`cargo install --locked --git https://github.com/pulseengine/witness --tag <tag> witness-mcdc`); the aarch64 build does not run there (Rosetta 2 translates x86_64 to Apple Silicon, not the reverse). The `witness` composite action now fails with an explicit error on an Intel macOS runner instead of downloading a missing asset.
 - **MSRV is now 1.97** (wasmtime 0.137 / cranelift floor): `rust-version`, clippy `msrv`, and the CI Clippy/MSRV/test toolchain pin.
 
 ## [0.46.0] — 2026-11-05
