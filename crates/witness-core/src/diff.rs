@@ -386,6 +386,8 @@ mod tests {
             decisions: vec![],
             trace_health: Default::default(),
             stubbed_imports: Vec::new(),
+            module_sha256: None,
+            manifest_sha256: None,
         };
         std::fs::write(path, serde_json::to_string(&r).unwrap()).unwrap();
     }

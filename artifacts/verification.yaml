@@ -1184,3 +1184,35 @@ artifacts:
         target: REQ-084
       - type: produced-by
         target: AS-001
+
+  - id: TEST-FEAT-045
+    type: test-case
+    title: witness recheck passes the committed bundle and fails each planted tampering with its own class
+    description: >
+      crates/witness/tests/recheck.rs rechecks the committed bundle
+      tests/fixtures/recheck/suite (two verdicts, signed with a key whose
+      public half sits outside the bundle) and requires every recorded hash
+      link, the inventory, the report re-derivation and the expected-key
+      signature to PASS, and the unrecorded report -> coverage-predicate link
+      to be NOT-CHECKED. On copies it plants a deleted run.json, a flipped
+      module byte, a gap edited to proved with the inventory re-computed
+      (only rederive-mismatch fails), an inventory line for an absent file,
+      and an envelope re-signed with a fresh key plus a matching in-bundle
+      key (only signer-mismatch fails); predicate.json edited after signing
+      (only envelope-payload-mismatch fails, links use the signed statement);
+      run.json edited with report.json re-derived (only the signed
+      run_sha256 link fails); a missing predicate or envelope with an
+      expected key; and two ambiguous layouts. Seven of these run as plant
+      controls in the Recheck controls CI job. Not covered: the
+      keyless cosign certificate identity check (not implemented).
+    tags: [verification, evidence-bundle, v0.47]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p witness-mcdc --test recheck
+        - run: cargo test -p witness-mcdc --lib recheck
+    links:
+      - type: verifies
+        target: REQ-021
+      - type: produced-by
+        target: AS-001

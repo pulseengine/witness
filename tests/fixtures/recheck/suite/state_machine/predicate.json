@@ -1,0 +1,168 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "instrumented.wasm",
+      "digest": {
+        "sha256": "2e9e2aec4360ddb5f2880ed6f592c0f1a36cf7cd930f9121275cfbcd2d185df4"
+      }
+    },
+    {
+      "name": "source.wasm",
+      "digest": {
+        "sha256": "6b95ae22371bf51e051ebbfa7bba55a8be4d28c71011ac86fa9cea877b71f0c6"
+      }
+    }
+  ],
+  "predicateType": "https://pulseengine.eu/witness-coverage/v1",
+  "predicate": {
+    "coverage": {
+      "covered_branches": 14,
+      "module": "state_machine/instrumented.wasm",
+      "per_function": [
+        {
+          "covered": 3,
+          "function_index": 0,
+          "function_name": "verdict_state_machine::valid_pair",
+          "total": 3
+        },
+        {
+          "covered": 11,
+          "function_index": 1,
+          "function_name": "verdict_state_machine::can_advance_to",
+          "total": 11
+        }
+      ],
+      "schema_version": "2",
+      "total_branches": 14,
+      "uncovered": [],
+      "witness_version": "0.46.0"
+    },
+    "measurement": {
+      "harness": null,
+      "measured_at": "2026-11-20T03:47:51Z",
+      "run_sha256": "cd3cda97d70d0be8dd303f5196d8cffd7980e30e34e9523df9110b88c16fb821",
+      "test_cases": [
+        {
+          "invocation": "run_row_0",
+          "row_id": 0
+        },
+        {
+          "invocation": "run_row_1",
+          "row_id": 1
+        },
+        {
+          "invocation": "run_row_2",
+          "row_id": 2
+        },
+        {
+          "invocation": "run_row_3",
+          "row_id": 3
+        },
+        {
+          "invocation": "run_row_4",
+          "row_id": 4
+        },
+        {
+          "invocation": "run_row_5",
+          "row_id": 5
+        },
+        {
+          "invocation": "run_row_6",
+          "row_id": 6
+        },
+        {
+          "invocation": "run_row_7",
+          "row_id": 7
+        },
+        {
+          "invocation": "run_row_8",
+          "row_id": 8
+        },
+        {
+          "invocation": "run_row_9",
+          "row_id": 9
+        },
+        {
+          "invocation": "run_row_10",
+          "row_id": 10
+        },
+        {
+          "invocation": "run_row_11",
+          "row_id": 11
+        },
+        {
+          "invocation": "run_row_12",
+          "row_id": 12
+        },
+        {
+          "invocation": "run_row_13",
+          "row_id": 13
+        },
+        {
+          "invocation": "run_row_14",
+          "row_id": 14
+        },
+        {
+          "invocation": "run_row_15",
+          "row_id": 15
+        },
+        {
+          "invocation": "run_row_16",
+          "row_id": 16
+        },
+        {
+          "invocation": "run_row_17",
+          "row_id": 17
+        },
+        {
+          "invocation": "run_row_18",
+          "row_id": 18
+        },
+        {
+          "invocation": "run_row_19",
+          "row_id": 19
+        },
+        {
+          "invocation": "run_row_20",
+          "row_id": 20
+        },
+        {
+          "invocation": "run_row_21",
+          "row_id": 21
+        },
+        {
+          "invocation": "run_row_22",
+          "row_id": 22
+        },
+        {
+          "invocation": "run_row_23",
+          "row_id": 23
+        },
+        {
+          "invocation": "run_row_24",
+          "row_id": 24
+        },
+        {
+          "invocation": "run_row_25",
+          "row_id": 25
+        },
+        {
+          "invocation": "run_row_26",
+          "row_id": 26
+        }
+      ],
+      "toolchain": {
+        "rust_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+        "wasmtime_version": "44"
+      },
+      "witness_version": "0.46.0"
+    },
+    "original_module": {
+      "digest": {
+        "sha256": "6b95ae22371bf51e051ebbfa7bba55a8be4d28c71011ac86fa9cea877b71f0c6"
+      },
+      "name": "source.wasm"
+    }
+  }
+}

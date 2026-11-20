@@ -45,6 +45,18 @@ pub struct RunRecord {
     /// face. Empty (skipped) when nothing was stubbed. Names are `instance#func`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stubbed_imports: Vec<String>,
+    /// v0.47 (FEAT-045) — lowercase-hex SHA-256 of the instrumented module
+    /// bytes this run executed, hashed by `witness run` before execution.
+    /// Lets `witness recheck` check the module → run-record link of the
+    /// evidence hash chain from bytes. Absent on pre-v0.47 records and on
+    /// merged records whose inputs disagree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_sha256: Option<String>,
+    /// v0.47 (FEAT-045) — lowercase-hex SHA-256 of the branch manifest bytes
+    /// this run read. The manifest → run-record link of the hash chain.
+    /// Absent on pre-v0.47 records and on merged records whose inputs disagree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_sha256: Option<String>,
 }
 
 /// One source-level decision's per-row truth table.
@@ -437,7 +449,23 @@ pub fn merge_records(records: &[RunRecord]) -> Result<RunRecord> {
         decisions: merged_decisions,
         trace_health: merged_health,
         stubbed_imports: Vec::new(),
+        module_sha256: agreed_digest(records, |r| r.module_sha256.as_deref()),
+        manifest_sha256: agreed_digest(records, |r| r.manifest_sha256.as_deref()),
     })
+}
+
+/// v0.47 — the input digest every merged record agrees on, or `None` when
+/// any input lacks it or two inputs differ (a merged record must not claim
+/// a digest one of its inputs did not record).
+fn agreed_digest(
+    records: &[RunRecord],
+    get: impl Fn(&RunRecord) -> Option<&str>,
+) -> Option<String> {
+    let first = get(records.first()?)?;
+    records
+        .iter()
+        .all(|r| get(r) == Some(first))
+        .then(|| first.to_string())
 }
 
 /// Read N run JSON files and write the merged result to `output`.
@@ -490,6 +518,8 @@ mod tests {
             decisions: vec![],
             trace_health: TraceHealth::default(),
             stubbed_imports: Vec::new(),
+            module_sha256: None,
+            manifest_sha256: None,
         }
     }
 
@@ -503,6 +533,23 @@ mod tests {
         assert_eq!(merged.branches[1].hits, 5);
         assert_eq!(merged.branches[2].hits, 5);
         assert_eq!(merged.invoked, vec!["fn1".to_string(), "fn1".to_string()]);
+    }
+
+    #[test]
+    fn merge_keeps_input_digests_only_when_all_agree() {
+        let with = |m: Option<&str>| {
+            let mut r = make_record("m.wasm", &[1]);
+            r.module_sha256 = m.map(str::to_string);
+            r.manifest_sha256 = Some("bb".to_string());
+            r
+        };
+        let same = merge_records(&[with(Some("aa")), with(Some("aa"))]).unwrap();
+        assert_eq!(same.module_sha256.as_deref(), Some("aa"));
+        assert_eq!(same.manifest_sha256.as_deref(), Some("bb"));
+        let differ = merge_records(&[with(Some("aa")), with(Some("cc"))]).unwrap();
+        assert_eq!(differ.module_sha256, None);
+        let missing = merge_records(&[with(Some("aa")), with(None)]).unwrap();
+        assert_eq!(missing.module_sha256, None);
     }
 
     #[test]

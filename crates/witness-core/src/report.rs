@@ -214,6 +214,8 @@ mod tests {
             decisions: vec![],
             trace_health: Default::default(),
             stubbed_imports: Vec::new(),
+            module_sha256: None,
+            manifest_sha256: None,
         }
     }
 
@@ -251,6 +253,8 @@ mod tests {
             decisions: vec![],
             trace_health: Default::default(),
             stubbed_imports: Vec::new(),
+            module_sha256: None,
+            manifest_sha256: None,
         };
         let report = Report::from_record(&empty);
         assert_eq!(report.total_branches, 0);

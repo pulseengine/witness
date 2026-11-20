@@ -1,0 +1,5 @@
+# Recheck evidence is compared byte for byte (INVENTORY.sha256, the hash
+# chain, re-derivation). Line-ending conversion on checkout (core.autocrlf on
+# Windows) would change those bytes, so git must never touch them.
+tests/fixtures/recheck/** -text
+ci-controls/recheck-*/** -text
