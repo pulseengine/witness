@@ -70,7 +70,7 @@ check = "Recheck controls"
 run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
 plant = "ci-controls/recheck-gap-edited-to-proved"
 expect = "fail"
-stderr_or_stdout_matches = '(?m)FAIL +state_machine/rederive-report +\[rederive-mismatch\][\s\S]*, 1 failed, \d+ not checked; failure classes: rederive-mismatch$'
+stderr_or_stdout_matches = '(?m)FAIL +state_machine/rederive-report +\[rederive-mismatch\][\s\S]*, 1 failed, \d+ not checked, \d+ not applicable; failure classes: rederive-mismatch$'
 timeout = 120
 
 [[control]]
@@ -91,7 +91,7 @@ check = "Recheck controls"
 run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
 plant = "ci-controls/recheck-resigned-fresh-key"
 expect = "fail"
-stderr_or_stdout_matches = '(?m)FAIL +state_machine/signature +\[signer-mismatch\][\s\S]*, 1 failed, \d+ not checked; failure classes: signer-mismatch$'
+stderr_or_stdout_matches = '(?m)FAIL +state_machine/signature +\[signer-mismatch\][\s\S]*, 1 failed, \d+ not checked, \d+ not applicable; failure classes: signer-mismatch$'
 timeout = 120
 
 # predicate.json edited after signing (the envelope still verifies, inventory
@@ -103,7 +103,7 @@ check = "Recheck controls"
 run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
 plant = "ci-controls/recheck-predicate-differs-from-signed"
 expect = "fail"
-stderr_or_stdout_matches = '(?m)FAIL +state_machine/chain/predicate->envelope +\[envelope-payload-mismatch\][\s\S]*, 1 failed, \d+ not checked; failure classes: envelope-payload-mismatch$'
+stderr_or_stdout_matches = '(?m)FAIL +state_machine/chain/predicate->envelope +\[envelope-payload-mismatch\][\s\S]*, 1 failed, \d+ not checked, \d+ not applicable; failure classes: envelope-payload-mismatch$'
 timeout = 120
 
 # One run.json row outcome flipped, report.json re-derived from the edited
@@ -115,5 +115,5 @@ check = "Recheck controls"
 run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
 plant = "ci-controls/recheck-run-edited-report-rederived"
 expect = "fail"
-stderr_or_stdout_matches = '(?m)FAIL +state_machine/chain/run->predicate +\[chain-mismatch\] sha256\(run\.json\)[\s\S]*, 1 failed, \d+ not checked; failure classes: chain-mismatch$'
+stderr_or_stdout_matches = '(?m)FAIL +state_machine/chain/run->predicate +\[chain-mismatch\] sha256\(run\.json\)[\s\S]*, 1 failed, \d+ not checked, \d+ not applicable; failure classes: chain-mismatch$'
 timeout = 120

@@ -574,8 +574,8 @@ jobs:
             and ([.checks[] | select(.id | endswith("/rederive-report"))] | length > 0)
             and all(.checks[] | select(.id | endswith("/rederive-report")); .status == "pass")' \
             "$RUNNER_TEMP/recheck.json"
-      - name: Recheck the committed fixture against the expected key (must pass)
-        run: '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+      - name: Recheck the committed fixture in O2 verify mode (--strict, expected key; must pass)
+        run: '"$WITNESS" recheck --strict tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
       - name: Planted tamperings must each fail recheck
         uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
         with:

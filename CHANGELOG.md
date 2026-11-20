@@ -23,6 +23,10 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   Not built yet: the check against the release's keyless cosign certificate identity.
   Exit 0 = no check failed, 1 = a check failed, 2 = could not run.
   `--format json` emits `https://pulseengine.eu/witness-recheck/v1`.
+  `--strict` also fails when any check is NOT-CHECKED (no inventory, no expected key, an
+  unrecorded hash link); this is the O2 verify mode (witness#395). A link the predicate
+  type does not carry (witness-coverage/v1 embeds no report; witness-mcdc carries no
+  branch summary) is reported as N/A and does not fail `--strict`.
 - `witness run` records `module_sha256` and `manifest_sha256` (additive, optional) in
   the run JSON, and `witness predicate` records `measurement.run_sha256` (additive,
   optional, added to the witness-coverage/v1 schema), so the module → run, manifest →

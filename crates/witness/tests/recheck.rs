@@ -82,10 +82,11 @@ fn committed_fixture_passes_every_recorded_link() {
                 o.to_text()
             );
         }
-        // witness-coverage/v1 does not bind report.json: said, not passed.
+        // witness-coverage/v1 does not embed report.json: said, not passed,
+        // and not a gap (it is bound through run->predicate + rederive-report).
         assert_eq!(
             status(&o, &format!("{v}/chain/report->predicate")),
-            Status::NotChecked
+            Status::NotApplicable
         );
     }
     assert!(
@@ -374,12 +375,14 @@ fn unexpected_top_level_file_fails_unless_inventoried() {
 #[test]
 fn strict_fails_when_anything_is_not_checked() {
     let (_tmp, suite) = copy_suite();
-    // With the expected key every recorded link is checked; the committed
-    // fixture may still leave links NOT-CHECKED (they are reported, see the
-    // first test), and strict_ok must reflect exactly that.
+    // The complete committed bundle with the expected key is what a verify
+    // command sees: --strict must PASS on it (links the predicate type does
+    // not carry are N/A, not gaps).
     let o = recheck(&suite, Some(&expected_key())).unwrap();
-    assert!(o.ok);
-    assert_eq!(o.strict_ok(), o.summary.not_checked == 0);
+    assert!(o.ok, "{}", o.to_text());
+    assert_eq!(o.summary.not_checked, 0, "{}", o.to_text());
+    assert!(o.summary.not_applicable > 0);
+    assert!(o.strict_ok(), "{}", o.to_text());
     // Without the key the signature is NOT-CHECKED, so strict must fail.
     let o = recheck(&suite, None).unwrap();
     assert!(o.ok);

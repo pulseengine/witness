@@ -81,6 +81,9 @@ pub enum Status {
     Pass,
     Fail,
     NotChecked,
+    /// The link does not exist for this predicate type (e.g. witness-coverage/v1
+    /// embeds no report). Reported with its reason; never fails `--strict`.
+    NotApplicable,
 }
 
 impl Status {
@@ -89,6 +92,7 @@ impl Status {
             Status::Pass => "PASS",
             Status::Fail => "FAIL",
             Status::NotChecked => "NOT-CHECKED",
+            Status::NotApplicable => "N/A",
         }
     }
 }
@@ -110,6 +114,8 @@ pub struct Summary {
     pub pass: usize,
     pub fail: usize,
     pub not_checked: usize,
+    /// Links this predicate type does not carry. Not a gap: `--strict` ignores them.
+    pub not_applicable: usize,
 }
 
 /// The whole recheck result (`--format json` serialises this).
@@ -156,11 +162,12 @@ impl Outcome {
         }
         let classes: Vec<&str> = self.failure_classes().into_iter().collect();
         out.push_str(&format!(
-            "recheck: {}: {} passed, {} failed, {} not checked{}\n",
+            "recheck: {}: {} passed, {} failed, {} not checked, {} not applicable{}\n",
             if self.ok { "OK" } else { "FAILED" },
             self.summary.pass,
             self.summary.fail,
             self.summary.not_checked,
+            self.summary.not_applicable,
             if classes.is_empty() {
                 String::new()
             } else {
@@ -218,6 +225,9 @@ impl Checks {
     fn skip(&mut self, id: String, reason: impl Into<String>) {
         self.push(id, Status::NotChecked, None, reason.into());
     }
+    fn not_applicable(&mut self, id: String, reason: impl Into<String>) {
+        self.push(id, Status::NotApplicable, None, reason.into());
+    }
 }
 
 /// Run every check on `dir`. `Err` only when recheck cannot run at all.
@@ -248,6 +258,7 @@ pub fn recheck(dir: &Path, expected_key: Option<&ExpectedKey>) -> anyhow::Result
             Status::Pass => &mut summary.pass,
             Status::Fail => &mut summary.fail,
             Status::NotChecked => &mut summary.not_checked,
+            Status::NotApplicable => &mut summary.not_applicable,
         };
         *slot = slot.saturating_add(1);
     }
@@ -1006,7 +1017,7 @@ fn check_predicate(
                 }
             }
         }
-        checks.skip(
+        checks.not_applicable(
             id("chain/report->predicate"),
             "witness-coverage/v1 predicates do not embed report.json; it is bound through \
              run->predicate plus rederive-report",
@@ -1018,7 +1029,7 @@ fn check_predicate(
     ]
     .contains(&ptype)
     {
-        checks.skip(
+        checks.not_applicable(
             id("chain/run->predicate-coverage"),
             "witness-mcdc predicates carry no branch summary",
         );
