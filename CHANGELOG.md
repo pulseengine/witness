@@ -7,6 +7,15 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- `wasmtime` and `wasmtime-wasi` 50.0.2 -> 50.0.3 (Cargo.lock only), for
+  RUSTSEC-2026-0587: a WASI filesystem sandbox escape on Windows through a
+  drive-prefixed path component. witness's harness builds its WASI context with
+  `inherit_stdio()` only and preopens no directory (`crates/witness/src/run.rs`),
+  so we found no path to the escape from witness itself; the bump clears the
+  advisory for the dependency.
+
 ## [0.46.0] — 2026-11-05
 
 Headline: **witness now checks its own MC/DC against an independent reference, and stops
