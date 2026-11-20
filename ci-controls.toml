@@ -20,3 +20,18 @@ plant = "ci-controls/report-schema-extra-property"
 expect = "fail"
 stderr_or_stdout_matches = "'planted_undeclared_field' was unexpected"
 timeout = 120
+
+# #358 (v0.47.0 Bet 3a): the value-tail probe's condition index perturbed by
+# one. The planted triangle report.json is what witness produced when
+# `apply_unobserved_tails` inserted the probe one index early (as c2 instead
+# of c3); the truth-table check must reject it. Runs in the "Verdict suite"
+# job against that job's evidence (VERDICT_EVIDENCE); the planted copy
+# replaces only triangle's report. Fails closed when the evidence is missing.
+[[control]]
+id = "truth-table-tail-index-shift"
+check = "Verdict suite — end-to-end MC/DC on the canonical 7"
+run = 'ev="${VERDICT_EVIDENCE:?set VERDICT_EVIDENCE to the verdict-suite output dir}" && test -f "$ev/triangle/report.json" && mkdir -p build && cp -R "$ev" build/ev && if [ -d planted-evidence ]; then cp -R planted-evidence/. build/ev/; fi && python3 tools/check_truth_tables.py --evidence build/ev'
+plant = "ci-controls/truth-table-tail-index-shift"
+expect = "fail"
+stderr_or_stdout_matches = 'NEW DIVERGENCE \(not in ledger\): triangle: '
+timeout = 120

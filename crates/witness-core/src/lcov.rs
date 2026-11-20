@@ -233,6 +233,7 @@ mod tests {
                 chain_kind: crate::instrument::ChainKind::default(),
                 unobserved_tail_conditions: 0,
                 unobserved_tail_indirect: false,
+                tail_probe: crate::instrument::TailProbe::None,
                 inline_context: None,
             }],
             branch_inline_contexts: std::collections::BTreeMap::new(),

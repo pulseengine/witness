@@ -524,7 +524,9 @@ fn group_into_decisions(
                 brtable_resolved.push((entry.function_index, loc.file.clone(), loc.line, entry));
             }
             // IfElse stays out of the cluster pass; see IfThen note above.
-            BranchKind::IfElse => {}
+            // #358: a ValueTail probe joins its decision in
+            // `apply_unobserved_tails`, never by line clustering.
+            BranchKind::IfElse | BranchKind::ValueTail => {}
         }
     }
 
@@ -591,6 +593,7 @@ fn group_into_decisions(
                     chain_kind: crate::instrument::ChainKind::default(),
                     unobserved_tail_conditions: 0,
                     unobserved_tail_indirect: false,
+                    tail_probe: crate::instrument::TailProbe::None,
                     inline_context,
                 });
                 *next_decision_id = next_decision_id.saturating_add(1);
@@ -666,6 +669,7 @@ fn group_into_decisions(
             chain_kind: crate::instrument::ChainKind::default(),
             unobserved_tail_conditions: 0,
             unobserved_tail_indirect: false,
+            tail_probe: crate::instrument::TailProbe::None,
             inline_context,
         });
         next_decision_id = next_decision_id.saturating_add(1);

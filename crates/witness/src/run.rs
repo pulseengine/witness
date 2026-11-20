@@ -26,7 +26,7 @@ use witness_core::error::Error;
 use witness_core::instrument::{
     BRCNT_EXPORT_PREFIX, BRVAL_EXPORT_PREFIX, COUNTER_EXPORT_PREFIX, ChainKind, Decision,
     InlineContext, Manifest, ROW_RESET_EXPORT, TRACE_HEADER_BYTES, TRACE_MEMORY_EXPORT,
-    TRACE_RESET_EXPORT,
+    TRACE_RESET_EXPORT, TailProbe,
 };
 use witness_core::run_record::{
     BranchHit, DecisionRecord, DecisionRow, HarnessSnapshot, RunRecord, TraceHealth,
@@ -511,16 +511,15 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
     // #352: decisions whose last operand is an unobserved value tail. For
     // these, condition values cannot determine the outcome, so the
     // chain-derived outcome is never used (see `parse_trace_records`).
-    let indirect_decisions: std::collections::HashSet<u32> = manifest
-        .decisions
-        .iter()
-        .filter(|d| d.unobserved_tail_indirect)
-        .map(|d| d.id)
-        .collect();
+    // #358: a probed tail (`tail_probe`) is in `tail_decisions` too: the
+    // chain-derived outcome assumes every `br_if` branches in its chain's
+    // direction, which the lowering of a value tail does not guarantee
+    // (rustc's triangle exits its first `br_if` on FALSE), so the real
+    // return value or the probed tail value is used instead.
     let tail_decisions: std::collections::HashSet<u32> = manifest
         .decisions
         .iter()
-        .filter(|d| d.unobserved_tail_conditions > 0)
+        .filter(|d| d.unobserved_tail_conditions > 0 || !d.tail_probe.is_none())
         .map(|d| d.id)
         .collect();
     // v0.13.0 — per-decision lookup from condition_index → branch_id
@@ -697,13 +696,9 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                 let dec_lookup: Option<&Decision> =
                     manifest.decisions.iter().find(|d| d.id == dec_id);
                 for (evaluated, iter_outcome) in iters {
-                    // #352: an indirect value tail means the function result is NOT
-                    // the decision's value; record no outcome at all.
-                    let row_outcome = if indirect_decisions.contains(&dec_id) {
-                        None
-                    } else {
-                        iter_outcome.or(outcome)
-                    };
+                    let row_outcome = dec_lookup.map_or(iter_outcome.or(outcome), |d| {
+                        tail_row_outcome(d, &evaluated, iter_outcome.or(outcome))
+                    });
                     // v0.13.0 — tag each row with its modal inline
                     // context. Falls out to None for pre-v0.13
                     // manifests (empty branch_inline_contexts) or
@@ -755,6 +750,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                         raw_brvals.insert(cond_idx_u32, val);
                     }
                 }
+                let row_outcome = tail_row_outcome(d, &evaluated, outcome);
                 let row_ctx = row_modal_context(&evaluated, d, branch_inline_contexts);
                 let row_chain = row_modal_chain(&evaluated, d, branch_inline_chains);
                 rows_per_decision
@@ -763,11 +759,7 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
                     .push(DecisionRow {
                         row_id,
                         evaluated,
-                        outcome: if d.unobserved_tail_indirect {
-                            None
-                        } else {
-                            outcome
-                        },
+                        outcome: row_outcome,
                         raw_brvals,
                         inline_context: row_ctx,
                         inline_chain: row_chain,
@@ -844,6 +836,30 @@ fn run_via_embedded(options: &RunOptions<'_>) -> Result<()> {
 ///   value.
 type IterationEntry = (BTreeMap<u32, bool>, Option<bool>);
 type IterationsByDecision = BTreeMap<u32, Vec<IterationEntry>>;
+
+/// #352 / #358 — the outcome a row of decision `d` records, given the
+/// outcome the row would otherwise carry (`outcome`: the per-call or
+/// per-row function return value, or a chain-derived value).
+/// - unobserved indirect tail: the function result is NOT the decision's
+///   value, so no outcome at all;
+/// - probed indirect tail: the decision's value is the probed tail value
+///   when the tail was evaluated (it is the last condition); when the
+///   chain stopped earlier the value is not observed, so no outcome;
+/// - otherwise (no tail, unobserved or probed direct tail): `outcome`.
+fn tail_row_outcome(
+    d: &Decision,
+    evaluated: &BTreeMap<u32, bool>,
+    outcome: Option<bool>,
+) -> Option<bool> {
+    if d.unobserved_tail_indirect {
+        return None;
+    }
+    if d.tail_probe == TailProbe::Indirect {
+        let tail_idx = u32::try_from(d.conditions.len().saturating_sub(1)).ok()?;
+        return evaluated.get(&tail_idx).copied();
+    }
+    outcome
+}
 
 /// v0.8 — derive a decision's outcome from its iteration's condition
 /// values, using the wasm-classified chain direction.
@@ -1239,16 +1255,15 @@ fn harness_v2_to_run_record(
     // #352: decisions whose last operand is an unobserved value tail. For
     // these, condition values cannot determine the outcome, so the
     // chain-derived outcome is never used (see `parse_trace_records`).
-    let indirect_decisions: std::collections::HashSet<u32> = manifest
-        .decisions
-        .iter()
-        .filter(|d| d.unobserved_tail_indirect)
-        .map(|d| d.id)
-        .collect();
+    // #358: a probed tail (`tail_probe`) is in `tail_decisions` too: the
+    // chain-derived outcome assumes every `br_if` branches in its chain's
+    // direction, which the lowering of a value tail does not guarantee
+    // (rustc's triangle exits its first `br_if` on FALSE), so the real
+    // return value or the probed tail value is used instead.
     let tail_decisions: std::collections::HashSet<u32> = manifest
         .decisions
         .iter()
-        .filter(|d| d.unobserved_tail_conditions > 0)
+        .filter(|d| d.unobserved_tail_conditions > 0 || !d.tail_probe.is_none())
         .map(|d| d.id)
         .collect();
     // v0.13.0 — same per-row tagging substrate as run_via_embedded.
@@ -1322,13 +1337,9 @@ fn harness_v2_to_run_record(
                 let dec_lookup: Option<&Decision> =
                     manifest.decisions.iter().find(|d| d.id == dec_id);
                 for (evaluated, iter_outcome) in iters {
-                    // #352: an indirect value tail means the function result is NOT
-                    // the decision's value; record no outcome at all.
-                    let row_outcome = if indirect_decisions.contains(&dec_id) {
-                        None
-                    } else {
-                        iter_outcome.or(outcome)
-                    };
+                    let row_outcome = dec_lookup.map_or(iter_outcome.or(outcome), |d| {
+                        tail_row_outcome(d, &evaluated, iter_outcome.or(outcome))
+                    });
                     let row_ctx = dec_lookup
                         .map(|d| row_modal_context(&evaluated, d, branch_inline_contexts))
                         .unwrap_or(None);
@@ -1377,6 +1388,7 @@ fn harness_v2_to_run_record(
                         raw_brvals.insert(cond_idx_u32, val_i32);
                     }
                 }
+                let row_outcome = tail_row_outcome(d, &evaluated, outcome);
                 let row_ctx = row_modal_context(&evaluated, d, branch_inline_contexts);
                 let row_chain = row_modal_chain(&evaluated, d, branch_inline_chains);
                 rows_per_decision
@@ -1385,11 +1397,7 @@ fn harness_v2_to_run_record(
                     .push(DecisionRow {
                         row_id,
                         evaluated,
-                        outcome: if d.unobserved_tail_indirect {
-                            None
-                        } else {
-                            outcome
-                        },
+                        outcome: row_outcome,
                         raw_brvals,
                         inline_context: row_ctx,
                         inline_chain: row_chain,
