@@ -91,6 +91,11 @@
           "description": "v0.11.0 — positional row→invocation map. Lets reviewers trace a truth-table row back to the named export the runner exercised. Empty on harness-mode runs that don't ship per-row data; absent on v0.10.x envelopes.",
           "type": "array",
           "items": { "$ref": "#/$defs/TestCase" }
+        },
+        "run_sha256": {
+          "description": "v0.47 (FEAT-045) — lowercase-hex SHA-256 of the run JSON the predicate was built from. Binds the whole run record (MC/DC rows included) into the signed statement; `witness recheck` checks it and re-derives report.json from that run record. Absent on pre-v0.47 envelopes.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       }
     },

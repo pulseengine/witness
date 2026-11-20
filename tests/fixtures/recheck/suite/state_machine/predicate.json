@@ -40,7 +40,8 @@
     },
     "measurement": {
       "harness": null,
-      "measured_at": "2026-11-20T01:13:46Z",
+      "measured_at": "2026-11-20T03:47:51Z",
+      "run_sha256": "cd3cda97d70d0be8dd303f5196d8cffd7980e30e34e9523df9110b88c16fb821",
       "test_cases": [
         {
           "invocation": "run_row_0",

@@ -151,6 +151,7 @@ mod tests {
                 witness_version: "0.5.0".to_string(),
                 toolchain: None,
                 test_cases: vec![],
+                run_sha256: None,
             },
             original_module: None,
         };

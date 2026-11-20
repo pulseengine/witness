@@ -13,20 +13,26 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   evidence bundle without the build: (a) every file against `INVENTORY.sha256`
   (`sha256sum` format, written by `witness recheck --write-inventory`), re-hashed from
   bytes; (b) every recorded hash link, from source module to manifest, run record,
-  predicate subjects, predicate coverage section and DSSE payload; (c) `report.json`
-  re-derived from `run.json` through the reporter, byte-equal. A link no producer
-  records is printed NOT-CHECKED, never PASS. `--expect-key` checks the DSSE signature
-  against a key from outside the bundle; the in-bundle `verifying-key.pub` is never
-  trusted. Not built yet: the check against the release's keyless cosign certificate
-  identity. Exit 0 = no check failed, 1 = a check failed, 2 = could not run.
+  predicate (subjects, `measurement.run_sha256`, coverage summary) and DSSE payload;
+  (c) `report.json` re-derived from `run.json` through the reporter, byte-equal. A link
+  no producer records is printed NOT-CHECKED, never PASS. `--expect-key` checks the DSSE
+  signature against a key from outside the bundle (the in-bundle `verifying-key.pub` is
+  never trusted); the predicate links are then checked against the signed statement, and
+  a missing envelope or predicate fails. Root verdict files beside verdict
+  subdirectories, and unknown uninventoried top-level files in a suite, fail.
+  Not built yet: the check against the release's keyless cosign certificate identity.
+  Exit 0 = no check failed, 1 = a check failed, 2 = could not run.
   `--format json` emits `https://pulseengine.eu/witness-recheck/v1`.
 - `witness run` records `module_sha256` and `manifest_sha256` (additive, optional) in
-  the run JSON, so recheck can check the module → run and manifest → run links.
+  the run JSON, and `witness predicate` records `measurement.run_sha256` (additive,
+  optional, added to the witness-coverage/v1 schema), so the module → run, manifest →
+  run and run → signed predicate links can be checked.
 - CI: the Verdict suite job writes `INVENTORY.sha256` before upload, and a new
-  **Recheck controls** job (not required) rechecks that evidence and runs five plant
+  **Recheck controls** job (not required) rechecks that evidence and runs seven plant
   controls (deleted `run.json`, flipped module byte, `gap` edited to `proved` with
   hashes re-computed, inventory line for an absent file, envelope re-signed with a
-  fresh key) against the committed fixture `tests/fixtures/recheck/suite`.
+  fresh key, predicate.json edited after signing, run.json edited with report.json
+  re-derived) against the committed fixture `tests/fixtures/recheck/suite`.
 
 ### Changed
 

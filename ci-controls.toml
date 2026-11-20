@@ -93,3 +93,27 @@ plant = "ci-controls/recheck-resigned-fresh-key"
 expect = "fail"
 stderr_or_stdout_matches = '(?m)FAIL +state_machine/signature +\[signer-mismatch\][\s\S]*, 1 failed, \d+ not checked; failure classes: signer-mismatch$'
 timeout = 120
+
+# predicate.json edited after signing (the envelope still verifies, inventory
+# re-computed): with an expected key, the predicate links use the signed
+# statement, so the only failure is predicate.json vs the signed payload.
+[[control]]
+id = "recheck-predicate-differs-from-signed"
+check = "Recheck controls"
+run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+plant = "ci-controls/recheck-predicate-differs-from-signed"
+expect = "fail"
+stderr_or_stdout_matches = '(?m)FAIL +state_machine/chain/predicate->envelope +\[envelope-payload-mismatch\][\s\S]*, 1 failed, \d+ not checked; failure classes: envelope-payload-mismatch$'
+timeout = 120
+
+# One run.json row outcome flipped, report.json re-derived from the edited
+# run record, inventory re-computed: only the signed measurement.run_sha256
+# binds the run record, so that link is the single failure.
+[[control]]
+id = "recheck-run-edited-report-rederived"
+check = "Recheck controls"
+run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+plant = "ci-controls/recheck-run-edited-report-rederived"
+expect = "fail"
+stderr_or_stdout_matches = '(?m)FAIL +state_machine/chain/run->predicate +\[chain-mismatch\] sha256\(run\.json\)[\s\S]*, 1 failed, \d+ not checked; failure classes: chain-mismatch$'
+timeout = 120

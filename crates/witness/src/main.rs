@@ -990,6 +990,14 @@ fn main() -> Result<()> {
                     "test_cases".to_string(),
                     serde_json::Value::Array(test_cases),
                 );
+                // v0.47 (FEAT-045) — bind the whole run record into the
+                // statement, so a signature over it covers the MC/DC rows
+                // `witness recheck` re-derives report.json from.
+                let run_bytes = std::fs::read(&run)?;
+                measurement.insert(
+                    "run_sha256".to_string(),
+                    serde_json::Value::String(witness_core::predicate::sha256_hex_pub(&run_bytes)),
+                );
             }
             witness_core::predicate::save_statement(&stmt, &output)?;
             // v0.9.11 — chatty success.

@@ -10,18 +10,25 @@
 //!   exclusion). Symlinks and other non-regular entries fail.
 //! - **(b) hash chain.** Each hash link the producers record is re-checked
 //!   from bytes: source module → manifest, instrumented module → run record,
-//!   manifest → run record, run record → predicate coverage section,
-//!   instrumented / source module → predicate subjects, predicate → DSSE
-//!   payload, and the DSSE signature against a key given on the command line.
-//!   A link no producer records is reported NOT-CHECKED, never PASS.
+//!   manifest → run record, run record → predicate (`measurement.run_sha256`,
+//!   plus the branch-summary coverage section), instrumented / source module
+//!   → predicate subjects, predicate → DSSE payload, and the DSSE signature
+//!   against a key given on the command line. With `--expect-key`, the
+//!   predicate links are checked against the statement that verifies, and a
+//!   missing envelope or predicate fails. A link no producer records is
+//!   reported NOT-CHECKED, never PASS.
 //! - **(c) re-derivation.** `report.json` is re-derived from `run.json`
 //!   through the reporter `witness report --format mcdc-json` uses
 //!   ([`McdcReport::to_json_document`]) and must be byte-equal.
 //!
 //! Directory rule: if `<dir>` itself holds any verdict file (`run.json`,
 //! `report.json`, `manifest.json`, `instrumented.wasm`, `predicate.json`,
-//! `signed.dsse.json`) it is one verdict; otherwise every immediate
-//! subdirectory is a verdict, and a directory with none fails.
+//! `signed.dsse.json`) it is one verdict, and a subdirectory that also holds
+//! verdict files fails (`ambiguous-layout`). Otherwise every immediate
+//! subdirectory is a verdict, a directory with none fails, and a top-level
+//! file must be one run-suite.sh writes (`INVENTORY.sha256`,
+//! `verifying-key.pub`, `VERIFY.md`, `SUMMARY.txt`) or be listed in the
+//! inventory (`unexpected-top-level-file`).
 //!
 //! No network, no build access, deterministic output. Exit codes (set by the
 //! CLI): 0 when no check failed, 1 when any check failed, 2 when recheck could
@@ -212,8 +219,8 @@ pub fn recheck(dir: &Path, expected_key: Option<&ExpectedKey>) -> anyhow::Result
         bail!("{} is not a directory", dir.display());
     }
     let mut checks = Checks::default();
-    check_inventory(dir, &mut checks)?;
-    let verdicts = verdict_dirs(dir)?;
+    let listed = check_inventory(dir, &mut checks)?;
+    let verdicts = verdict_dirs(dir, listed.as_ref(), &mut checks)?;
     if verdicts.is_empty() {
         checks.fail(
             "verdicts".to_string(),
@@ -358,7 +365,8 @@ fn parse_inventory(text: &str) -> Result<BTreeMap<String, String>, String> {
     Ok(out)
 }
 
-fn check_inventory(root: &Path, checks: &mut Checks) -> anyhow::Result<()> {
+/// Returns the listed paths when an inventory was present and parsed.
+fn check_inventory(root: &Path, checks: &mut Checks) -> anyhow::Result<Option<BTreeSet<String>>> {
     let id = || "inventory".to_string();
     let inv = root.join(INVENTORY_FILE);
     match std::fs::symlink_metadata(&inv) {
@@ -371,7 +379,7 @@ fn check_inventory(root: &Path, checks: &mut Checks) -> anyhow::Result<()> {
                     root.display()
                 ),
             );
-            return Ok(());
+            return Ok(None);
         }
         Err(e) => return Err(e).with_context(|| format!("cannot stat {}", inv.display())),
         Ok(m) if !m.is_file() => {
@@ -380,7 +388,7 @@ fn check_inventory(root: &Path, checks: &mut Checks) -> anyhow::Result<()> {
                 "inventory-malformed",
                 format!("{INVENTORY_FILE} is not a regular file"),
             );
-            return Ok(());
+            return Ok(None);
         }
         Ok(_) => {}
     }
@@ -396,7 +404,7 @@ fn check_inventory(root: &Path, checks: &mut Checks) -> anyhow::Result<()> {
                 "inventory-malformed",
                 format!("{INVENTORY_FILE}: {e}"),
             );
-            return Ok(());
+            return Ok(None);
         }
     };
     let (files, odd) = list_files(root)?;
@@ -448,30 +456,83 @@ fn check_inventory(root: &Path, checks: &mut Checks) -> anyhow::Result<()> {
             ),
         );
     }
-    Ok(())
+    Ok(Some(listed.into_keys().collect()))
 }
 
 // ---------------------------------------------------------------------------
 // verdicts: (b) hash chain and (c) re-derivation
 // ---------------------------------------------------------------------------
 
-fn verdict_dirs(root: &Path) -> anyhow::Result<Vec<(String, PathBuf)>> {
-    if VERDICT_MARKERS.iter().any(|m| root.join(m).exists()) {
+/// Top-level files a suite directory may hold without being inventoried
+/// (what verdicts/run-suite.sh writes next to the verdict directories).
+const SUITE_TOP_LEVEL_FILES: &[&str] = &[INVENTORY_FILE, IN_BUNDLE_KEY, "VERIFY.md", "SUMMARY.txt"];
+
+fn has_markers(dir: &Path) -> bool {
+    VERDICT_MARKERS.iter().any(|m| dir.join(m).exists())
+}
+
+/// Decide which directories are verdicts. A root that holds verdict files is
+/// one verdict; if any subdirectory also holds verdict files the layout is
+/// ambiguous and fails (root files must not hide subdirectory verdicts).
+/// Otherwise every subdirectory is a verdict, and each top-level file must be
+/// one run-suite.sh writes or be listed in the inventory.
+fn verdict_dirs(
+    root: &Path,
+    listed: Option<&BTreeSet<String>>,
+    checks: &mut Checks,
+) -> anyhow::Result<Vec<(String, PathBuf)>> {
+    let mut subdirs = Vec::new();
+    let mut top_files = Vec::new();
+    for e in std::fs::read_dir(root).with_context(|| format!("cannot list {}", root.display()))? {
+        let e = e.with_context(|| format!("cannot list {}", root.display()))?;
+        let name = e.file_name().to_string_lossy().into_owned();
+        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            subdirs.push((name, e.path()));
+        } else {
+            top_files.push(name);
+        }
+    }
+    subdirs.sort();
+    top_files.sort();
+    if has_markers(root) {
+        let nested: Vec<&str> = subdirs
+            .iter()
+            .filter(|(_, p)| has_markers(p))
+            .map(|(n, _)| n.as_str())
+            .collect();
+        if !nested.is_empty() {
+            checks.fail(
+                "layout".to_string(),
+                "ambiguous-layout",
+                format!(
+                    "{} holds verdict files and so do its subdirectories {}; recheck one \
+                     verdict or one suite, not both",
+                    root.display(),
+                    nested.join(", ")
+                ),
+            );
+        }
         let label = root
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| ".".to_string());
         return Ok(vec![(label, root.to_path_buf())]);
     }
-    let mut out = Vec::new();
-    for e in std::fs::read_dir(root).with_context(|| format!("cannot list {}", root.display()))? {
-        let e = e.with_context(|| format!("cannot list {}", root.display()))?;
-        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            out.push((e.file_name().to_string_lossy().into_owned(), e.path()));
+    for f in &top_files {
+        let known = SUITE_TOP_LEVEL_FILES.contains(&f.as_str());
+        let inventoried = listed.is_some_and(|l| l.contains(f));
+        if !known && !inventoried {
+            checks.fail(
+                "layout".to_string(),
+                "unexpected-top-level-file",
+                format!(
+                    "{f} sits at the top of a suite directory, is not a file run-suite.sh \
+                     writes there, and is not listed in {INVENTORY_FILE}"
+                ),
+            );
         }
     }
-    out.sort();
-    Ok(out)
+    Ok(subdirs)
 }
 
 /// Read `dir/name` if it exists. A read error other than not-found is
@@ -700,53 +761,11 @@ fn check_verdict(
             );
         }
     }
-
-    // predicate.json: subjects, and its binding to run.json / report.json.
-    match &predicate {
-        None => {
-            for l in [
-                "chain/module->predicate",
-                "chain/source->predicate",
-                "chain/run->predicate",
-                "chain/report->predicate",
-            ] {
-                checks.skip(id(l), "no readable predicate.json");
-            }
-        }
-        Some(p) => check_predicate(
-            p,
-            &id,
-            record.as_ref(),
-            report_bytes.as_deref(),
-            module.as_deref(),
-            source.as_deref(),
-            checks,
-        ),
-    }
-
-    // predicate.json -> signed.dsse.json payload.
-    match (&predicate, &envelope_bytes) {
-        (_, None) => checks.skip(id("chain/predicate->envelope"), "no signed.dsse.json"),
-        (None, Some(_)) => checks.skip(
-            id("chain/predicate->envelope"),
-            "no readable predicate.json to compare the payload with",
-        ),
-        (Some(p), Some(env)) => match envelope_payload(env) {
-            Ok(payload) if &payload == p => checks.pass(
-                id("chain/predicate->envelope"),
-                "the DSSE payload is the same statement as predicate.json",
-            ),
-            Ok(_) => checks.fail(
-                id("chain/predicate->envelope"),
-                "envelope-payload-mismatch",
-                "the DSSE payload in signed.dsse.json is not the statement in predicate.json",
-            ),
-            Err(e) => checks.fail(id("chain/predicate->envelope"), "envelope-malformed", e),
-        },
-    }
-
-    // Signature, against a key from outside the bundle only.
+    // Signature first, against a key from outside the bundle only: with an
+    // expected signer, the statement that verifies is the one every predicate
+    // link is checked against, never the unsigned predicate.json.
     let sig_id = id("signature");
+    let mut signed: Option<Value> = None;
     match (expected_key, &envelope_bytes) {
         (None, _) => checks.skip(
             sig_id,
@@ -762,13 +781,23 @@ fn check_verdict(
             ),
         ),
         (Some(k), Some(env)) => match witness_core::attest::verify_envelope(env, &k.bytes) {
-            Ok(_) => checks.pass(
-                sig_id,
-                format!(
-                    "signed.dsse.json verifies against the expected key {}",
-                    k.path
+            Ok(stmt) => match serde_json::to_value(&stmt) {
+                Ok(v) => {
+                    checks.pass(
+                        sig_id,
+                        format!(
+                            "signed.dsse.json verifies against the expected key {}",
+                            k.path
+                        ),
+                    );
+                    signed = Some(v);
+                }
+                Err(e) => checks.fail(
+                    sig_id,
+                    "envelope-malformed",
+                    format!("the signed statement cannot be re-read: {e}"),
                 ),
-            ),
+            },
             Err(e) => {
                 let hint = if in_bundle_keys(vdir, root)
                     .iter()
@@ -790,15 +819,101 @@ fn check_verdict(
             }
         },
     }
+
+    // predicate.json against the DSSE payload (compared as JSON values).
+    let pe_id = id("chain/predicate->envelope");
+    match (&signed, &predicate, &envelope_bytes) {
+        (Some(s), Some(p), _) if s == p => checks.pass(
+            pe_id,
+            "predicate.json is the signed statement (compared as JSON values)",
+        ),
+        (Some(_), Some(_), _) => checks.fail(
+            pe_id,
+            "envelope-payload-mismatch",
+            "predicate.json is not the statement signed in signed.dsse.json (compared as JSON \
+             values); the predicate links below are checked against the signed statement",
+        ),
+        (Some(_), None, _) => checks.fail(
+            pe_id,
+            "predicate-missing",
+            "--expect-key given, but predicate.json is missing or unreadable",
+        ),
+        (None, _, None) => checks.skip(pe_id, "no signed.dsse.json"),
+        (None, None, Some(_)) => checks.skip(
+            pe_id,
+            "no readable predicate.json to compare the payload with",
+        ),
+        (None, Some(p), Some(env)) => match envelope_payload(env) {
+            Ok(payload) if &payload == p => checks.pass(
+                pe_id,
+                "the DSSE payload is the same statement as predicate.json (compared as JSON \
+                 values; signature not checked)",
+            ),
+            Ok(_) => checks.fail(
+                pe_id,
+                "envelope-payload-mismatch",
+                "the DSSE payload in signed.dsse.json is not the statement in predicate.json",
+            ),
+            Err(e) => checks.fail(pe_id, "envelope-malformed", e),
+        },
+    }
+
+    // Predicate links: subjects, and the binding to run.json / report.json.
+    let statement = match (&signed, expected_key) {
+        (Some(s), _) => Some((s, "signed statement")),
+        (None, Some(_)) => None,
+        (None, None) => predicate.as_ref().map(|p| (p, "predicate.json (unsigned)")),
+    };
+    match statement {
+        None => {
+            let why = if expected_key.is_some() {
+                "no statement verifies against the expected key"
+            } else {
+                "no readable predicate.json"
+            };
+            for l in [
+                "chain/module->predicate",
+                "chain/source->predicate",
+                "chain/run->predicate",
+                "chain/run->predicate-coverage",
+                "chain/report->predicate",
+            ] {
+                checks.skip(id(l), why);
+            }
+        }
+        Some((p, src)) => check_predicate(
+            p,
+            src,
+            &id,
+            &PredicateInputs {
+                record: record.as_ref(),
+                run_sha: run_bytes.as_deref().map(sha256_hex_pub),
+                report_bytes: report_bytes.as_deref(),
+                module: module.as_deref(),
+                source: source.as_deref(),
+            },
+            checks,
+        ),
+    }
 }
 
+/// Recheck's own hashes and parses of the files a predicate may bind.
+struct PredicateInputs<'a> {
+    record: Option<&'a RunRecord>,
+    run_sha: Option<String>,
+    report_bytes: Option<&'a [u8]>,
+    module: Option<&'a str>,
+    source: Option<&'a str>,
+}
+
+/// Check one statement (the signed one when an expected key verified it,
+/// else the unsigned predicate.json; `src` names which) against recheck's
+/// own hashes of the bundle files.
 fn check_predicate(
     p: &Value,
+    src: &str,
     id: &dyn Fn(&str) -> String,
-    record: Option<&RunRecord>,
-    report_bytes: Option<&[u8]>,
-    module: Option<&str>,
-    source: Option<&str>,
+    inputs: &PredicateInputs<'_>,
     checks: &mut Checks,
 ) {
     fn subject_digest(p: &Value, i: usize) -> Option<&str> {
@@ -815,53 +930,78 @@ fn check_predicate(
         checks,
         id("chain/module->predicate"),
         subject_digest(p, 0),
-        "predicate.json subject[0]",
+        &format!("{src} subject[0]"),
         "instrumented.wasm",
-        module,
-        "predicate.json has no subject",
+        inputs.module,
+        &format!("{src} has no subject"),
     );
     link(
         checks,
         id("chain/source->predicate"),
         subject_digest(p, 1),
-        "predicate.json subject[1]",
+        &format!("{src} subject[1]"),
         "source.wasm",
-        source,
-        "predicate.json names no original-module subject",
+        inputs.source,
+        &format!("{src} names no original-module subject"),
+    );
+
+    // The whole run record, bound by digest (witness >= 0.47).
+    let body = p.get("predicate");
+    let recorded_run = body
+        .and_then(|b| b.get("measurement"))
+        .and_then(|m| m.get("run_sha256"))
+        .and_then(Value::as_str);
+    link(
+        checks,
+        id("chain/run->predicate"),
+        recorded_run,
+        &format!("{src} measurement.run_sha256"),
+        "run.json",
+        inputs.run_sha.as_deref(),
+        &format!(
+            "{src} records no measurement.run_sha256 (written by witness >= 0.47 only): the \
+             MC/DC decisions in run.json, and so report.json, are not covered by any signature"
+        ),
     );
 
     let ptype = p.get("predicateType").and_then(Value::as_str).unwrap_or("");
-    let body = p.get("predicate");
     if ptype == PREDICATE_TYPE {
-        match (record, body.and_then(|b| b.get("coverage"))) {
-            (None, _) => checks.skip(id("chain/run->predicate"), "no readable run.json"),
+        // A branch-count summary only: it never binds the MC/DC rows.
+        let cov_id = id("chain/run->predicate-coverage");
+        match (inputs.record, body.and_then(|b| b.get("coverage"))) {
+            (None, _) => checks.skip(cov_id, "no readable run.json"),
             (Some(_), None) => checks.fail(
-                id("chain/run->predicate"),
+                cov_id,
                 "predicate-coverage-mismatch",
-                "witness-coverage/v1 predicate has no coverage section",
+                format!("{src} (witness-coverage/v1) has no coverage section"),
             ),
             (Some(r), Some(cov)) => {
                 let derived = serde_json::to_value(witness_core::report::Report::from_record(r))
                     .unwrap_or(Value::Null);
                 if without_module(&derived) == without_module(cov) {
                     checks.pass(
-                        id("chain/run->predicate"),
-                        "predicate coverage section equals the branch report re-derived from \
-                         run.json (module path not compared)",
+                        cov_id,
+                        format!(
+                            "{src} coverage section equals the branch summary re-derived from \
+                             run.json (module path not compared; a summary, not the MC/DC rows)"
+                        ),
                     );
                 } else {
                     checks.fail(
-                        id("chain/run->predicate"),
+                        cov_id,
                         "predicate-coverage-mismatch",
-                        "predicate coverage section differs from the branch report re-derived from run.json",
+                        format!(
+                            "{src} coverage section differs from the branch summary re-derived \
+                             from run.json"
+                        ),
                     );
                 }
             }
         }
         checks.skip(
             id("chain/report->predicate"),
-            "witness-coverage/v1 predicates do not bind report.json; report.json is tied to \
-             run.json by rederive-report only",
+            "witness-coverage/v1 predicates do not embed report.json; it is bound through \
+             run->predicate plus rederive-report",
         );
     } else if [
         MCDC_PREDICATE_TYPE,
@@ -871,9 +1011,10 @@ fn check_predicate(
     .contains(&ptype)
     {
         checks.skip(
-            id("chain/run->predicate"),
-            "witness-mcdc predicates bind run.json through the embedded report (report->predicate)",
+            id("chain/run->predicate-coverage"),
+            "witness-mcdc predicates carry no branch summary",
         );
+        let rid = id("chain/report->predicate");
         let report = body.and_then(|b| b.get("report"));
         let stored = body
             .and_then(|b| b.get("report_sha256"))
@@ -882,38 +1023,46 @@ fn check_predicate(
             (Some(rep), Some(stored)) => {
                 let canonical = serde_json::to_vec(rep).unwrap_or_default();
                 let derived = sha256_hex_pub(&canonical);
-                let shipped: Option<Value> =
-                    report_bytes.and_then(|b| serde_json::from_slice(b).ok());
+                let shipped: Option<Value> = inputs
+                    .report_bytes
+                    .and_then(|b| serde_json::from_slice(b).ok());
                 if !derived.eq_ignore_ascii_case(stored) {
                     checks.fail(
-                        id("chain/report->predicate"),
+                        rid,
                         "chain-mismatch",
-                        format!("sha256 of the embedded report is {derived}, predicate report_sha256 records {stored}"),
+                        format!(
+                            "sha256 of the report embedded in {src} is {derived}, its \
+                             report_sha256 records {stored}"
+                        ),
                     );
                 } else if shipped.as_ref().map(without_module) != Some(without_module(rep)) {
                     checks.fail(
-                        id("chain/report->predicate"),
+                        rid,
                         "predicate-report-mismatch",
-                        "the report embedded in predicate.json is not report.json (module path not compared)",
+                        format!(
+                            "the report embedded in {src} is not report.json (module path not \
+                             compared)"
+                        ),
                     );
                 } else {
                     checks.pass(
-                        id("chain/report->predicate"),
+                        rid,
                         format!(
-                            "embedded report hashes to report_sha256 {}... and equals report.json",
+                            "the report embedded in {src} hashes to its report_sha256 {}... and \
+                             equals report.json",
                             short(&derived)
                         ),
                     );
                 }
             }
             _ => checks.fail(
-                id("chain/report->predicate"),
+                rid,
                 "chain-mismatch",
-                "witness-mcdc predicate lacks report or report_sha256",
+                format!("{src} (witness-mcdc) lacks report or report_sha256"),
             ),
         }
     } else {
-        for l in ["chain/run->predicate", "chain/report->predicate"] {
+        for l in ["chain/run->predicate-coverage", "chain/report->predicate"] {
             checks.skip(id(l), format!("unknown predicateType `{ptype}`"));
         }
     }

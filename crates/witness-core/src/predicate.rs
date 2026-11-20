@@ -130,6 +130,13 @@ pub struct Measurement {
     /// Empty on harness-mode runs that don't ship per-row data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub test_cases: Vec<TestCase>,
+    /// v0.47 (FEAT-045) — lowercase-hex SHA-256 of the run JSON file the
+    /// predicate was built from. Binds the whole run record (MC/DC rows
+    /// included) into the signed statement, so `witness recheck` can check
+    /// run.json against the signature and re-derive report.json from it.
+    /// Set by the `witness predicate` CLI; absent on pre-v0.47 envelopes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_sha256: Option<String>,
 }
 
 /// v0.11.0 — toolchain provenance recorded in the predicate body so
@@ -174,6 +181,7 @@ impl Measurement {
             witness_version: env!("CARGO_PKG_VERSION").to_string(),
             toolchain: Some(Toolchain::current()),
             test_cases: build_test_cases(invoked),
+            run_sha256: None,
         }
     }
 }

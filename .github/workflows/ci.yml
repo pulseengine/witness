@@ -537,7 +537,7 @@ jobs:
 
   # FEAT-045 (v0.47 bet 1): `witness recheck` on the verdict-suite evidence
   # (inventory written by the Verdict suite job before upload, re-hashed here
-  # after download; every report.json re-derived from its run.json), then five
+  # after download; every report.json re-derived from its run.json), then seven
   # planted tamperings of the committed bundle tests/fixtures/recheck/suite,
   # each of which must fail recheck with its own failure class (ci-controls.toml,
   # recheck-*). Not a required check; making it one is the owner's decision.
@@ -580,4 +580,4 @@ jobs:
         uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
         with:
           manifest: ci-controls.toml
-          only: recheck-deleted-run-json recheck-flipped-module-byte recheck-gap-edited-to-proved recheck-inventory-absent-file recheck-resigned-fresh-key
+          only: recheck-deleted-run-json recheck-flipped-module-byte recheck-gap-edited-to-proved recheck-inventory-absent-file recheck-resigned-fresh-key recheck-predicate-differs-from-signed recheck-run-edited-report-rederived

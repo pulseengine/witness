@@ -9,7 +9,7 @@
 # Everything else under suite/ is rebuilt the way verdicts/run-suite.sh builds
 # a verdict, signed with a fresh Ed25519 key whose public half is written to
 # expected-signer.pub (outside the bundle: the trust anchor) and whose secret
-# half is deleted on exit. Then INVENTORY.sha256 is written, and the five
+# half is deleted on exit. Then INVENTORY.sha256 is written, and the seven
 # ci-controls/recheck-* plants are rebuilt from the new fixture.
 set -euo pipefail
 
@@ -105,5 +105,29 @@ mkdir -p "$P/state_machine"
 cp "$TMP/resign/state_machine/signed.dsse.json" "$P/state_machine/signed.dsse.json"
 cp "$TMP/resign/verifying-key.pub" "$P/verifying-key.pub"
 cp "$(inventory_of "$TMP/resign")" "$P/INVENTORY.sha256"
+
+# 6. predicate.json edited after signing (the envelope still verifies):
+#    the predicate links are checked against the signed statement, so only
+#    the predicate.json vs signed-payload comparison fails.
+cp -R "$SUITE" "$TMP/pred"
+awk '!d && /"covered_branches": / { n = $2 + 0; sub(/[0-9]+/, n + 1); d = 1 } { print }
+     END { if (!d) exit 1 }' state_machine/predicate.json > "$TMP/pred/state_machine/predicate.json"
+P="$CTL/recheck-predicate-differs-from-signed/$REL"
+mkdir -p "$P/state_machine"
+cp "$TMP/pred/state_machine/predicate.json" "$P/state_machine/predicate.json"
+cp "$(inventory_of "$TMP/pred")" "$P/INVENTORY.sha256"
+
+# 7. one row outcome in run.json flipped, report.json re-derived from the
+#    edited run record and the inventory re-computed: only the signed
+#    measurement.run_sha256 can catch it.
+cp -R "$SUITE" "$TMP/run"
+awk '!d && /"outcome": true/ { sub(/true/, "false"); d = 1 } { print } END { if (!d) exit 1 }' \
+    state_machine/run.json > "$TMP/run/state_machine/run.json"
+"$WITNESS" report --input "$TMP/run/state_machine/run.json" --format mcdc-json \
+    > "$TMP/run/state_machine/report.json"
+P="$CTL/recheck-run-edited-report-rederived/$REL"
+mkdir -p "$P/state_machine"
+cp "$TMP/run/state_machine/run.json" "$TMP/run/state_machine/report.json" "$P/state_machine/"
+cp "$(inventory_of "$TMP/run")" "$P/INVENTORY.sha256"
 
 echo "regenerated $REL and ci-controls/recheck-*"

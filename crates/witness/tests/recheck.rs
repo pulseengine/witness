@@ -71,6 +71,7 @@ fn committed_fixture_passes_every_recorded_link() {
             "chain/module->predicate",
             "chain/source->predicate",
             "chain/run->predicate",
+            "chain/run->predicate-coverage",
             "chain/predicate->envelope",
             "signature",
         ] {
@@ -215,4 +216,157 @@ fn single_verdict_directory_is_rechecked_on_its_own() {
     assert_eq!(status(&o, "leap_year/rederive-report"), Status::Pass);
     // The inventory sits at the suite root, so a lone verdict has none.
     assert_eq!(status(&o, "inventory"), Status::NotChecked);
+}
+
+// --- signature binding (with an expected signer, the signed statement rules)
+
+#[test]
+fn predicate_edited_after_signing_fails_only_the_payload_comparison() {
+    let (_t, suite) = copy_suite();
+    let p = suite.join("state_machine/predicate.json");
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    // Point the unsigned predicate at a different module digest.
+    v["subject"][0]["digest"]["sha256"] = serde_json::Value::String("0".repeat(64));
+    std::fs::write(&p, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
+    write_inventory(&suite).unwrap();
+    let o = recheck(&suite, Some(&expected_key())).unwrap();
+    assert_eq!(
+        classes(&o),
+        BTreeSet::from(["envelope-payload-mismatch"]),
+        "{}",
+        o.to_text()
+    );
+    // The module link is checked against the signed statement, which still matches.
+    assert_eq!(
+        status(&o, "state_machine/chain/module->predicate"),
+        Status::Pass
+    );
+    // Without a trust anchor the unsigned predicate.json is what gets checked.
+    let unsigned = recheck(&suite, None).unwrap();
+    assert_eq!(
+        status(&unsigned, "state_machine/chain/module->predicate"),
+        Status::Fail
+    );
+}
+
+#[test]
+fn with_expected_key_a_missing_predicate_or_envelope_fails() {
+    let (_t, suite) = copy_suite();
+    std::fs::remove_file(suite.join("state_machine/predicate.json")).unwrap();
+    std::fs::remove_file(suite.join("leap_year/signed.dsse.json")).unwrap();
+    write_inventory(&suite).unwrap();
+    let o = recheck(&suite, Some(&expected_key())).unwrap();
+    assert_eq!(
+        classes(&o),
+        BTreeSet::from(["predicate-missing", "signature-missing"]),
+        "{}",
+        o.to_text()
+    );
+    // Without an expected key the same gaps are NOT-CHECKED, not PASS.
+    let no_key = recheck(&suite, None).unwrap();
+    assert!(no_key.ok, "{}", no_key.to_text());
+    assert_eq!(
+        status(&no_key, "state_machine/chain/module->predicate"),
+        Status::NotChecked
+    );
+}
+
+// --- run -> predicate binds the whole run record
+
+#[test]
+fn run_record_edited_with_report_rederived_fails_the_signed_run_digest() {
+    let (_t, suite) = copy_suite();
+    let run = suite.join("state_machine/run.json");
+    let text = std::fs::read_to_string(&run).unwrap();
+    std::fs::write(
+        &run,
+        text.replacen("\"outcome\": true", "\"outcome\": false", 1),
+    )
+    .unwrap();
+    let record = witness_core::run_record::RunRecord::load(&run).unwrap();
+    let report = witness_core::mcdc_report::McdcReport::from_record(&record);
+    std::fs::write(
+        suite.join("state_machine/report.json"),
+        report.to_json_document().unwrap(),
+    )
+    .unwrap();
+    write_inventory(&suite).unwrap();
+    let o = recheck(&suite, Some(&expected_key())).unwrap();
+    assert_eq!(
+        classes(&o),
+        BTreeSet::from(["chain-mismatch"]),
+        "{}",
+        o.to_text()
+    );
+    assert_eq!(
+        status(&o, "state_machine/chain/run->predicate"),
+        Status::Fail
+    );
+    assert_eq!(status(&o, "state_machine/rederive-report"), Status::Pass);
+}
+
+#[test]
+fn predicate_without_run_digest_says_the_decisions_are_unsigned() {
+    let (t, suite) = copy_suite();
+    // A pre-v0.47 statement: no measurement.run_sha256; re-sign it.
+    let p = suite.join("state_machine/predicate.json");
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    v["predicate"]["measurement"]
+        .as_object_mut()
+        .unwrap()
+        .remove("run_sha256");
+    std::fs::write(&p, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
+    let sk = t.path().join("k.sk");
+    let pk = t.path().join("k.pub");
+    witness_core::attest::generate_keypair_files(&sk, &pk).unwrap();
+    witness_core::attest::sign_predicate_file(
+        &p,
+        &sk,
+        &suite.join("state_machine/signed.dsse.json"),
+        None,
+    )
+    .unwrap();
+    std::fs::remove_dir_all(suite.join("leap_year")).unwrap();
+    write_inventory(&suite).unwrap();
+    let key = ExpectedKey::load(&pk).unwrap();
+    let o = recheck(&suite, Some(&key)).unwrap();
+    assert!(o.ok, "{}", o.to_text());
+    let c = o
+        .checks
+        .iter()
+        .find(|c| c.id == "state_machine/chain/run->predicate")
+        .unwrap();
+    assert_eq!(c.status, Status::NotChecked);
+    assert!(
+        c.reason.contains("not covered by any signature"),
+        "{}",
+        c.reason
+    );
+}
+
+// --- layout
+
+#[test]
+fn root_verdict_files_beside_verdict_subdirectories_are_ambiguous() {
+    let (_t, suite) = copy_suite();
+    std::fs::copy(suite.join("leap_year/run.json"), suite.join("run.json")).unwrap();
+    let o = recheck(&suite, None).unwrap();
+    assert!(classes(&o).contains("ambiguous-layout"), "{}", o.to_text());
+}
+
+#[test]
+fn unexpected_top_level_file_fails_unless_inventoried() {
+    let (_t, suite) = copy_suite();
+    std::fs::write(suite.join("notes.txt"), "x").unwrap();
+    // Not inventoried (the existing inventory predates it).
+    let o = recheck(&suite, None).unwrap();
+    assert!(
+        classes(&o).contains("unexpected-top-level-file"),
+        "{}",
+        o.to_text()
+    );
+    // Inventoried: allowed.
+    write_inventory(&suite).unwrap();
+    let ok = recheck(&suite, None).unwrap();
+    assert!(ok.ok, "{}", ok.to_text());
 }
