@@ -10,8 +10,17 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 ## [0.46.1] — 2026-11-20
 
 Security patch on the v0.46 line: v0.46.0 plus wasmtime 50.0.3, cut from
-`release/0.46` (v0.46.0 with #381 and #398 cherry-picked). No witness source change; only
-manifests and lockfiles. Features merged on main since v0.46.0 are not in it.
+`release/0.46` (v0.46.0 with #381 and #398 cherry-picked). No change to witness's Rust
+source. Features merged on main since v0.46.0 are not in it.
+
+### Changed
+
+- **No x86_64-apple-darwin (Intel macOS) release asset** from v0.46.1 on (fleet
+  decision 2026-11-20). On an Intel Mac, build from source (`cargo install --locked
+  --git https://github.com/pulseengine/witness --tag <tag> witness-mcdc`); the
+  aarch64 build does not run there (Rosetta 2 translates x86_64 to Apple Silicon,
+  not the reverse). The `witness` composite action fails with an explicit error on
+  an Intel macOS runner instead of downloading a missing asset.
 
 ### Security
 
