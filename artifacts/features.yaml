@@ -1052,7 +1052,7 @@ artifacts:
     title: "v0.47 bet 3a: observe the last operand of a short-circuit chain (#358) (serves O2)"
     status: draft
     release: v0.47.0
-    description: "Serves O2 (moves no indicator; keeps a bundle from passing on decisions witness cannot see). #358 steps 2-3: row outcomes from the return-value trace and a probe on the last operand's value. Acceptance: the 4 missing-last-operand ledger entries go stale and are removed; ledger <=13 entries on every PR, <=5 at the tag, no category changes; no_overclaim green; planted perturbed-probe control turns the truth-table check red. Kill: any non-ledgered proved-pair change or unfixable false-proved within two weeks. Plan: docs/proposals/v0.47.0.md."
+    description: "Serves O2 (moves no indicator; keeps a bundle from passing on decisions witness cannot see). #358 steps 2-3: row outcomes from the return-value trace and a probe on the last operand's value. Acceptance: the 12 last-operand ledger entries (missing-last-operand, condition-count and interpretation-differs for triangle, leap_year, state_guard, safety_envelope) go stale and are removed; ledger <=13 entries on every PR, <=5 at the tag, no category changes; no_overclaim green; planted perturbed-probe control turns the truth-table check red. Kill: any non-ledgered proved-pair change or unfixable false-proved within two weeks. Plan: docs/proposals/v0.47.0.md."
     tags: [v0.47, serves-O2, north-star, issue-358, mcdc]
     links:
       - type: satisfies
@@ -1067,7 +1067,7 @@ artifacts:
     title: "v0.47 bet 3b: decisions lowered to branch-free arithmetic (#268) (serves O2)"
     status: draft
     release: v0.47.0
-    description: "Serves O2. Probe the comparison results feeding i32.and/i32.or trees; otherwise a manifest warning instead of a clean 0/0. Acceptance: verdict suite required on rustc 1.98.1 and 1.99.x, floating stable as a canary; 4 condition-count ledger entries removed; range_overlap and mixed_or_and leave ZERO_DECISION or carry the warning, and recheck/verify never report a clean pass with the warning present. Mechanical kill: new decisions on httparse/json_lite whose DWARF source line has no &&, || or comparison token. Plan: docs/proposals/v0.47.0.md."
+    description: "Serves O2. Probe the comparison results feeding i32.and/i32.or trees; otherwise a manifest warning instead of a clean 0/0. Acceptance: verdict suite required on rustc 1.98.1 and 1.99.x, floating stable as a canary; no ledger entry attributed (the 4 condition-count entries were last-operand entries, retired by bet 3a); range_overlap and mixed_or_and leave ZERO_DECISION or carry the warning, and recheck/verify never report a clean pass with the warning present. Mechanical kill: new decisions on httparse/json_lite whose DWARF source line has no &&, || or comparison token. Plan: docs/proposals/v0.47.0.md."
     tags: [v0.47, serves-O2, north-star, issue-268, mcdc]
     links:
       - type: satisfies

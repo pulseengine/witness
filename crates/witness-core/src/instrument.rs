@@ -48,7 +48,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use walrus::ir::{
     BinaryOp, Binop, BrIf, Const, GlobalGet, GlobalSet, IfElse, Instr, InstrSeqId, InstrSeqType,
-    LoadKind, LocalGet, LocalTee, MemArg, Store, StoreKind, Unreachable, Value,
+    LoadKind, LocalGet, LocalSet, LocalTee, MemArg, Store, StoreKind, Unreachable, Value,
 };
 use walrus::{
     ConstExpr, ExportItem, FunctionBuilder, FunctionId, GlobalId, LocalId, MemoryId, Module,
@@ -198,6 +198,13 @@ pub enum BranchKind {
     /// The default arm of a `br_table` (selector >= number of explicit
     /// targets). Counter fires when the default branch is taken.
     BrTableDefault,
+    /// #358 — a probe on the VALUE produced by the last operand of a
+    /// short-circuit chain (`a || b || c`: `c`), which has no `br_if` of
+    /// its own. Placed on the fall-through path of the preceding `br_if`,
+    /// so it fires only when that operand is evaluated; records
+    /// `value != 0` (source polarity). Counter fires when the value is
+    /// true. Joins the preceding `br_if`'s decision as its last condition.
+    ValueTail,
 }
 
 /// One branch point in the original module. `instr_index` is the position
@@ -308,6 +315,37 @@ pub struct Decision {
     /// (false) for direct tails and on pre-v0.46 manifests.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unobserved_tail_indirect: bool,
+    /// #358 — the decision's last operand is a value tail that witness
+    /// DOES observe, through a `ValueTail` probe whose branch id is the
+    /// last entry of `conditions`. `direct`: the tail's value is the
+    /// function result, so row outcomes come from the real return value.
+    /// `indirect`: it escapes some other way, so a row's outcome is the
+    /// probed tail value when the tail was evaluated and unknown
+    /// otherwise. Absent (`none`) when there is no probed tail; a tail
+    /// witness cannot probe keeps `unobserved_tail_conditions = 1`.
+    #[serde(default, skip_serializing_if = "TailProbe::is_none")]
+    pub tail_probe: TailProbe,
+}
+
+/// #358 — how a decision's probed value tail reaches the function result.
+/// See `Decision::tail_probe`.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TailProbe {
+    /// No probed tail.
+    #[default]
+    None,
+    /// The probed tail's value is the function result.
+    Direct,
+    /// The probed tail's value escapes through `br` / `call` / `drop` or a
+    /// shape not provably the result.
+    Indirect,
+}
+
+impl TailProbe {
+    pub fn is_none(&self) -> bool {
+        matches!(self, TailProbe::None)
+    }
 }
 
 /// v0.12.0 — call-site context for an inlined source decision. The
@@ -995,8 +1033,10 @@ pub fn instrument_module(module: &mut Module, module_source: &str) -> Result<Vec
     // function returns.
     let mut chain_hints: HashMap<u32, BranchHint> = HashMap::new();
     // #352: absolute branch ids whose fall-through is a value tail.
-    let mut value_tails: HashMap<u32, bool> = HashMap::new();
+    // #358: plus the absolute id of the tail's `ValueTail` probe, if any.
+    let mut value_tails: HashMap<u32, AbsTail> = HashMap::new();
     for scan in &scans {
+        let scan_base = entries.len();
         for (idx_in_scan, branch) in scan.branches.iter().enumerate() {
             let id = u32::try_from(entries.len())
                 .map_err(|_| Error::Instrument("branch count exceeds u32::MAX".to_string()))?;
@@ -1004,8 +1044,19 @@ pub fn instrument_module(module: &mut Module, module_source: &str) -> Result<Vec
             if let Some(&hint) = scan.hints.get(&idx_in_scan) {
                 chain_hints.insert(id, hint);
             }
-            if let Some(&indirect) = scan.value_tail.get(&idx_in_scan) {
-                value_tails.insert(id, indirect);
+            if let Some(tail) = scan.value_tail.get(&idx_in_scan) {
+                let probe = tail
+                    .probe
+                    .map(|p| u32::try_from(scan_base.saturating_add(p)))
+                    .transpose()
+                    .map_err(|_| Error::Instrument("branch count exceeds u32::MAX".to_string()))?;
+                value_tails.insert(
+                    id,
+                    AbsTail {
+                        indirect: tail.indirect,
+                        probe,
+                    },
+                );
             }
             // v0.32 (DEC-039) — i64 so a hot branch's hit count cannot
             // wrap/sign-flip past i32::MAX at real-application scale.
@@ -1172,24 +1223,71 @@ thread_local! {
     /// #352 value-tail stash. Set by `instrument_module`; read by
     /// `apply_unobserved_tails`. Same single-threaded contract as
     /// `LAST_CHAIN_HINTS`.
-    static LAST_VALUE_TAILS: std::cell::RefCell<HashMap<u32, bool>> =
+    static LAST_VALUE_TAILS: std::cell::RefCell<HashMap<u32, AbsTail>> =
         std::cell::RefCell::new(HashMap::new());
+}
+
+/// #352 / #358 — a value tail keyed by the absolute id of the `br_if` it
+/// follows: whether its value escapes indirectly, and the absolute id of
+/// its `ValueTail` probe when witness could place one.
+#[derive(Debug, Clone, Copy)]
+struct AbsTail {
+    indirect: bool,
+    probe: Option<u32>,
 }
 
 /// #352 — flag each decision whose LAST `br_if` falls through into a value
 /// tail (see `value_tail_sites`) with `unobserved_tail_conditions = 1`.
 /// Only the last condition is examined: an interior `br_if` falling into
 /// another `br_if` is an ordinary chain.
+///
+/// #358 — when the tail carries a `ValueTail` probe, the probe's branch id
+/// is appended as the decision's last condition instead, the decision has
+/// no unobserved operand, and `tail_probe` records how the value leaves.
 pub fn apply_unobserved_tails(decisions: &mut [Decision]) {
     let tails = LAST_VALUE_TAILS.with(|cell| cell.borrow().clone());
+    let probes: std::collections::HashSet<u32> = tails.values().filter_map(|t| t.probe).collect();
     for d in decisions {
+        // Already applied (the last condition is a probe): idempotent.
+        if d.conditions
+            .last()
+            .is_some_and(|last| probes.contains(last))
+        {
+            continue;
+        }
         let tail = d
             .conditions
             .last()
             .and_then(|last| tails.get(last))
             .copied();
-        d.unobserved_tail_conditions = u32::from(tail.is_some());
-        d.unobserved_tail_indirect = tail == Some(true);
+        match tail {
+            Some(AbsTail {
+                indirect,
+                probe: Some(probe),
+            }) => {
+                d.conditions.push(probe);
+                d.unobserved_tail_conditions = 0;
+                d.unobserved_tail_indirect = false;
+                d.tail_probe = if indirect {
+                    TailProbe::Indirect
+                } else {
+                    TailProbe::Direct
+                };
+            }
+            Some(AbsTail {
+                indirect,
+                probe: None,
+            }) => {
+                d.unobserved_tail_conditions = 1;
+                d.unobserved_tail_indirect = indirect;
+                d.tail_probe = TailProbe::None;
+            }
+            None => {
+                d.unobserved_tail_conditions = 0;
+                d.unobserved_tail_indirect = false;
+                d.tail_probe = TailProbe::None;
+            }
+        }
     }
 }
 
@@ -2033,7 +2131,17 @@ struct FunctionScan {
     /// continuation computes the function's returned VALUE, i.e. the
     /// operand after this `br_if` has no `br_if` of its own. Only ever
     /// populated for functions with a single `i32` result.
-    value_tail: HashMap<usize, bool>,
+    value_tail: HashMap<usize, TailSite>,
+}
+
+/// #352 / #358 — one value tail within a scan.
+#[derive(Debug, Clone, Copy)]
+struct TailSite {
+    /// The value escapes indirectly (see `value_tail_sites`).
+    indirect: bool,
+    /// Index (into `branches`) of the tail's `ValueTail` probe site, or
+    /// `None` when no probe point was recognised.
+    probe: Option<usize>,
 }
 
 fn collect_scans(module: &Module) -> Vec<FunctionScan> {
@@ -2041,17 +2149,48 @@ fn collect_scans(module: &Module) -> Vec<FunctionScan> {
     for (index, (fid, lf)) in module.funcs.iter_local().enumerate() {
         let mut sites = Vec::new();
         let mut hints = HashMap::new();
-        let mut lin: Vec<Lin> = Vec::new();
-        walk_collect(lf, lf.entry_block(), &mut sites, &mut hints, &mut lin);
+        let mut lin: Vec<LinItem> = Vec::new();
+        let mut ctx = WalkCtx {
+            locals: &module.locals,
+            parents: HashMap::new(),
+            loops: std::collections::HashSet::new(),
+        };
+        walk_collect(
+            lf,
+            &mut ctx,
+            lf.entry_block(),
+            &mut sites,
+            &mut hints,
+            &mut lin,
+        );
         if sites.is_empty() {
             continue;
         }
         let returns_i32 = module.types.get(lf.ty()).results() == [ValType::I32];
-        let value_tail = if returns_i32 {
-            value_tail_sites(&lin)
-        } else {
-            HashMap::new()
-        };
+        let mut value_tail = HashMap::new();
+        if returns_i32 {
+            // #358: each tail with a recognised probe point gets a
+            // `ValueTail` site, appended after the walked sites so the
+            // walked sites keep their indices (hints are keyed by them).
+            let mut tails: Vec<(usize, TailPoint)> =
+                value_tail_sites(&lin, &ctx.parents, &ctx.loops)
+                    .into_iter()
+                    .collect();
+            tails.sort_by_key(|(site, _)| *site);
+            for (site, (indirect, point)) in tails {
+                let probe = point.map(|(seq_id, instr_index)| {
+                    sites.push(BranchSite {
+                        seq_id,
+                        instr_index,
+                        kind: BranchKind::ValueTail,
+                        target_index: None,
+                        byte_offset: None,
+                    });
+                    sites.len().saturating_sub(1)
+                });
+                value_tail.insert(site, TailSite { indirect, probe });
+            }
+        }
         let function_index = u32::try_from(index).unwrap_or(u32::MAX);
         let function_name = module.funcs.get(fid).name.clone();
         out.push(FunctionScan {
@@ -2066,12 +2205,21 @@ fn collect_scans(module: &Module) -> Vec<FunctionScan> {
     out
 }
 
+/// #358 — per-function walk state: local types (for `pushes_bool_i32`),
+/// each nested sequence's parent, and which sequences are loop bodies.
+struct WalkCtx<'a> {
+    locals: &'a walrus::ModuleLocals,
+    parents: HashMap<InstrSeqId, InstrSeqId>,
+    loops: std::collections::HashSet<InstrSeqId>,
+}
+
 fn walk_collect(
     func: &walrus::LocalFunction,
+    ctx: &mut WalkCtx<'_>,
     seq_id: InstrSeqId,
     out: &mut Vec<BranchSite>,
     hints: &mut HashMap<usize, BranchHint>,
-    lin: &mut Vec<Lin>,
+    lin: &mut Vec<LinItem>,
 ) {
     let seq = func.block(seq_id);
     for (index, (instr, loc)) in seq.instrs.iter().enumerate() {
@@ -2080,6 +2228,23 @@ fn walk_collect(
             None
         } else {
             Some(loc.data())
+        };
+        // #358: every linearised item records where it sits, and whether
+        // it leaves a boolean i32 that is consumed right away (a probe
+        // point candidate for a value tail).
+        let next = seq.instrs.get(index.saturating_add(1)).map(|(n, _)| n);
+        let final_bool = pushes_bool_i32(instr, ctx.locals) && consumes_final_value(next);
+        let br_target = if let Instr::BrIf(BrIf { block }) = instr {
+            Some(*block)
+        } else {
+            None
+        };
+        let at = |l: Lin| LinItem {
+            lin: l,
+            seq: seq_id,
+            index: i,
+            final_bool,
+            br_target,
         };
         // SAFETY-REVIEW: walrus has 50+ Instr variants; only those
         // containing nested InstrSeqIds need handling (Block, Loop,
@@ -2113,7 +2278,7 @@ fn walk_collect(
                     BranchHint::BranchesOnTrue
                 };
                 hints.insert(out.len(), hint);
-                lin.push(Lin::Site(out.len()));
+                lin.push(at(Lin::Site(out.len())));
                 out.push(BranchSite {
                     seq_id,
                     instr_index: i,
@@ -2126,7 +2291,7 @@ fn walk_collect(
                 consequent,
                 alternative,
             }) => {
-                lin.push(Lin::Branch);
+                lin.push(at(Lin::Branch));
                 out.push(BranchSite {
                     seq_id,
                     instr_index: i,
@@ -2141,11 +2306,13 @@ fn walk_collect(
                     target_index: None,
                     byte_offset,
                 });
-                walk_collect(func, *consequent, out, hints, lin);
-                walk_collect(func, *alternative, out, hints, lin);
+                ctx.parents.insert(*consequent, seq_id);
+                ctx.parents.insert(*alternative, seq_id);
+                walk_collect(func, ctx, *consequent, out, hints, lin);
+                walk_collect(func, ctx, *alternative, out, hints, lin);
             }
             Instr::BrTable(bt) => {
-                lin.push(Lin::Branch);
+                lin.push(at(Lin::Branch));
                 let n = u32::try_from(bt.blocks.len()).unwrap_or(u32::MAX);
                 for t in 0..n {
                     out.push(BranchSite {
@@ -2164,12 +2331,17 @@ fn walk_collect(
                     byte_offset,
                 });
             }
-            Instr::Block(b) => walk_collect(func, b.seq, out, hints, lin),
-            Instr::Loop(l) => {
-                lin.push(Lin::Branch);
-                walk_collect(func, l.seq, out, hints, lin);
+            Instr::Block(b) => {
+                ctx.parents.insert(b.seq, seq_id);
+                walk_collect(func, ctx, b.seq, out, hints, lin);
             }
-            other => lin.push(classify_instr(other)),
+            Instr::Loop(l) => {
+                lin.push(at(Lin::Branch));
+                ctx.parents.insert(l.seq, seq_id);
+                ctx.loops.insert(l.seq);
+                walk_collect(func, ctx, l.seq, out, hints, lin);
+            }
+            other => lin.push(at(classify_instr(other))),
         }
     }
 }
@@ -2212,6 +2384,115 @@ fn classify_instr(instr: &Instr) -> Lin {
     }
 }
 
+/// #358 — a `Lin` with its position in the function body.
+#[derive(Debug, Clone, Copy)]
+struct LinItem {
+    lin: Lin,
+    seq: InstrSeqId,
+    index: u32,
+    /// The instruction pushes a boolean-valued `i32` (a comparison, an
+    /// `eqz`, an `i32` bitwise and/or/xor, an `i32` load or a read of an
+    /// `i32` local) and the next instruction in the same sequence consumes
+    /// it as a final value: `local.set`, `return`, `br`, `call`, `drop`,
+    /// or the end of the sequence.
+    final_bool: bool,
+    /// For a `br_if`: the block its taken edge targets.
+    br_target: Option<InstrSeqId>,
+}
+
+/// #358 — is sequence `x` nested within (or equal to) sequence `outer`?
+fn seq_within(
+    mut x: InstrSeqId,
+    outer: InstrSeqId,
+    parents: &HashMap<InstrSeqId, InstrSeqId>,
+) -> bool {
+    loop {
+        if x == outer {
+            return true;
+        }
+        match parents.get(&x) {
+            Some(&p) => x = p,
+            None => return false,
+        }
+    }
+}
+
+/// #358 — does `instr` push a boolean-valued `i32`? Conservative: only
+/// shapes whose result type is certainly `i32`, so a probe's `local.tee`
+/// of an `i32` local always validates.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn pushes_bool_i32(instr: &Instr, locals: &walrus::ModuleLocals) -> bool {
+    use walrus::ir::UnaryOp;
+    match instr {
+        Instr::Binop(Binop { op }) => matches!(
+            op,
+            BinaryOp::I32Eq
+                | BinaryOp::I32Ne
+                | BinaryOp::I32LtS
+                | BinaryOp::I32LtU
+                | BinaryOp::I32GtS
+                | BinaryOp::I32GtU
+                | BinaryOp::I32LeS
+                | BinaryOp::I32LeU
+                | BinaryOp::I32GeS
+                | BinaryOp::I32GeU
+                | BinaryOp::I64Eq
+                | BinaryOp::I64Ne
+                | BinaryOp::I64LtS
+                | BinaryOp::I64LtU
+                | BinaryOp::I64GtS
+                | BinaryOp::I64GtU
+                | BinaryOp::I64LeS
+                | BinaryOp::I64LeU
+                | BinaryOp::I64GeS
+                | BinaryOp::I64GeU
+                | BinaryOp::F32Eq
+                | BinaryOp::F32Ne
+                | BinaryOp::F32Lt
+                | BinaryOp::F32Gt
+                | BinaryOp::F32Le
+                | BinaryOp::F32Ge
+                | BinaryOp::F64Eq
+                | BinaryOp::F64Ne
+                | BinaryOp::F64Lt
+                | BinaryOp::F64Gt
+                | BinaryOp::F64Le
+                | BinaryOp::F64Ge
+                | BinaryOp::I32And
+                | BinaryOp::I32Or
+                | BinaryOp::I32Xor
+        ),
+        Instr::Unop(walrus::ir::Unop { op }) => {
+            matches!(op, UnaryOp::I32Eqz | UnaryOp::I64Eqz)
+        }
+        Instr::Load(walrus::ir::Load { kind, .. }) => matches!(
+            kind,
+            LoadKind::I32 { .. } | LoadKind::I32_8 { .. } | LoadKind::I32_16 { .. }
+        ),
+        Instr::LocalGet(LocalGet { local }) => locals.get(*local).ty() == ValType::I32,
+        _ => false,
+    }
+}
+
+/// #358 — is `next` (the instruction after a value, `None` at the end of
+/// the sequence) a consumer that takes the value as a final result rather
+/// than as an operand of further computation?
+#[allow(clippy::wildcard_enum_match_arm)]
+fn consumes_final_value(next: Option<&Instr>) -> bool {
+    match next {
+        None => true,
+        Some(i) => matches!(
+            i,
+            Instr::LocalSet(_)
+                | Instr::Return(_)
+                | Instr::Br(_)
+                | Instr::Call(_)
+                | Instr::CallIndirect(_)
+                | Instr::Drop(_)
+        ),
+    }
+}
+
 fn local_key(id: LocalId) -> u32 {
     // walrus ids are opaque; the index of the arena slot is stable per module.
     u32::try_from(id.index()).unwrap_or(u32::MAX)
@@ -2232,10 +2513,38 @@ fn local_key(id: LocalId) -> u32 {
 ///
 /// Anything not provably direct is indirect. A site whose window ends at
 /// another `br_if` / `if` / `br_table` / loop is not a tail.
-fn value_tail_sites(lin: &[Lin]) -> HashMap<usize, bool> {
+///
+/// #358 — each tail also carries its probe point, `(seq, index)`: the
+/// probe is inserted at that index, i.e. right after the instruction that
+/// leaves the tail's value, before it is consumed. Candidates are the
+/// window's instructions that leave a boolean `i32` consumed as a final
+/// value (`LinItem::final_bool`) and that the `br_if`'s TAKEN edge skips,
+/// so the probe never fires on that short-circuit exit: those in the
+/// `br_if`'s own sequence, or, when it targets a block (not a loop),
+/// anywhere nested within that target block. (`(a && b) || c`: `c` sits
+/// after the inner block, reached by `a`'s exit and `b`'s fall-through,
+/// both of which evaluate `c`, and skipped by `b`'s exit.) A probe point is
+/// given only when there is exactly one candidate; otherwise `None`, and
+/// the tail stays unobserved.
+/// #358 — a value tail: `(indirect, probe point)`.
+type TailPoint = (bool, Option<(InstrSeqId, u32)>);
+
+fn value_tail_sites(
+    lin: &[LinItem],
+    parents: &HashMap<InstrSeqId, InstrSeqId>,
+    loops: &std::collections::HashSet<InstrSeqId>,
+) -> HashMap<usize, TailPoint> {
     let mut out = HashMap::new();
-    for (pos, item) in lin.iter().enumerate() {
-        let Lin::Site(site) = item else { continue };
+    for (pos, entry) in lin.iter().enumerate() {
+        let Lin::Site(site) = entry.lin else { continue };
+        let site_seq = entry.seq;
+        let skipped_by_taken_edge = |x: InstrSeqId| {
+            x == site_seq
+                || entry
+                    .br_target
+                    .is_some_and(|t| !loops.contains(&t) && seq_within(x, t, parents))
+        };
+        let mut probe_candidates: Vec<(InstrSeqId, u32)> = Vec::new();
         let mut has_compute = false;
         let mut has_set = false;
         let mut set_in_window: Vec<u32> = Vec::new();
@@ -2243,7 +2552,8 @@ fn value_tail_sites(lin: &[Lin]) -> HashMap<usize, bool> {
         let mut ended_by_branch = false;
         let mut ended_by_escape = false;
         let mut last: Option<Lin> = None;
-        for next in lin.iter().skip(pos.saturating_add(1)) {
+        for next_item in lin.iter().skip(pos.saturating_add(1)) {
+            let next = &next_item.lin;
             match next {
                 Lin::Site(_) | Lin::Branch => {
                     ended_by_branch = true;
@@ -2266,6 +2576,9 @@ fn value_tail_sites(lin: &[Lin]) -> HashMap<usize, bool> {
                 }
                 Lin::Other => {}
             }
+            if next_item.final_bool && skipped_by_taken_edge(next_item.seq) {
+                probe_candidates.push((next_item.seq, next_item.index.saturating_add(1)));
+            }
             if !matches!(next, Lin::Other) {
                 last = Some(*next);
             }
@@ -2285,7 +2598,11 @@ fn value_tail_sites(lin: &[Lin]) -> HashMap<usize, bool> {
             Some(Lin::LocalGet(l)) => set_in_window.contains(&l) || (!has_set && !has_compute),
             _ => false,
         };
-        out.insert(*site, ended_by_escape || !last_is_value);
+        let probe = match probe_candidates.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        };
+        out.insert(site, (ended_by_escape || !last_is_value, probe));
     }
     out
 }
@@ -2340,6 +2657,30 @@ fn rewrite_function(
 
     for ((seq_id, instr_index), group) in rewrite_ops {
         let at = usize::try_from(instr_index).unwrap_or(usize::MAX);
+        // #358: a `ValueTail` probe is an insertion point, not a branch
+        // instruction; it is alone at its position (the instruction there
+        // is the value's consumer, never a branch).
+        if let Some(&(idx_in_sites, BranchKind::ValueTail)) = group.first() {
+            let tmp = brif_tmp.ok_or_else(|| {
+                Error::Instrument("value-tail probe without brif_tmp local".to_string())
+            })?;
+            let counter = counters.get(idx_in_sites).copied().ok_or_else(|| {
+                Error::Instrument(format!("counter index {idx_in_sites} out of range"))
+            })?;
+            let absolute_branch_id =
+                u32::try_from(counter_offset.saturating_add(idx_in_sites)).unwrap_or(u32::MAX);
+            rewrite_value_tail(
+                func,
+                seq_id,
+                at,
+                counter,
+                brvals.get(idx_in_sites).copied().flatten(),
+                brcnts.get(idx_in_sites).copied().flatten(),
+                tmp,
+                (trace_record_helper, absolute_branch_id),
+            );
+            continue;
+        }
         // SAFETY-REVIEW: BrIf/IfElse/BrTable are the branch kinds produced
         // by `walk_collect`; any other variant here is a logic bug.
         #[allow(clippy::wildcard_enum_match_arm)]
@@ -2537,6 +2878,72 @@ fn rewrite_brif(
     }
 }
 
+/// #358 — insert a `ValueTail` probe at `(seq_id, index)`, where the stack
+/// top is the tail operand's `i32` value `v`:
+///
+/// `local.tee tmp; local.get tmp; i32.const 0; i32.ne; local.set tmp;
+/// brval = tmp; brcnt += 1; trace_record(branch_id, tmp);
+/// local.get tmp; if (inc counter) end`
+///
+/// Every step after the `tee` is stack-neutral, so `v` stays on the stack
+/// unchanged for its consumer: the function computes exactly what it did.
+#[allow(clippy::too_many_arguments)]
+fn rewrite_value_tail(
+    func: &mut walrus::LocalFunction,
+    seq_id: InstrSeqId,
+    index: usize,
+    counter: GlobalId,
+    brval: Option<GlobalId>,
+    brcnt: Option<GlobalId>,
+    tmp: LocalId,
+    trace: (FunctionId, u32),
+) {
+    let inc_seq = counter_inc_seq(func, counter);
+    let empty_seq = func
+        .builder_mut()
+        .dangling_instr_seq(InstrSeqType::Simple(None))
+        .id();
+    let mut probe: Vec<Instr> = Vec::with_capacity(20);
+    probe.push(Instr::LocalTee(LocalTee { local: tmp }));
+    probe.push(Instr::LocalGet(LocalGet { local: tmp }));
+    probe.push(Instr::Const(Const {
+        value: Value::I32(0),
+    }));
+    probe.push(Instr::Binop(Binop {
+        op: BinaryOp::I32Ne,
+    }));
+    probe.push(Instr::LocalSet(LocalSet { local: tmp }));
+    if let Some(bv) = brval {
+        probe.push(Instr::LocalGet(LocalGet { local: tmp }));
+        probe.push(Instr::GlobalSet(GlobalSet { global: bv }));
+    }
+    if let Some(bc) = brcnt {
+        probe.push(Instr::GlobalGet(GlobalGet { global: bc }));
+        probe.push(Instr::Const(Const {
+            value: Value::I32(1),
+        }));
+        probe.push(Instr::Binop(Binop {
+            op: BinaryOp::I32Add,
+        }));
+        probe.push(Instr::GlobalSet(GlobalSet { global: bc }));
+    }
+    let (helper, branch_id) = trace;
+    probe.push(Instr::Const(Const {
+        value: Value::I32(i32::try_from(branch_id).unwrap_or(i32::MAX)),
+    }));
+    probe.push(Instr::LocalGet(LocalGet { local: tmp }));
+    probe.push(Instr::Call(walrus::ir::Call { func: helper }));
+    probe.push(Instr::LocalGet(LocalGet { local: tmp }));
+    probe.push(Instr::IfElse(IfElse {
+        consequent: inc_seq,
+        alternative: empty_seq,
+    }));
+    let instrs = &mut func.block_mut(seq_id).instrs;
+    for (offset, instr) in probe.into_iter().enumerate() {
+        instrs.insert(index.saturating_add(offset), (instr, Default::default()));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn rewrite_ifelse(
     func: &mut walrus::LocalFunction,
@@ -2726,6 +3133,7 @@ mod tests {
             chain_kind: ChainKind::default(),
             unobserved_tail_conditions: 0,
             unobserved_tail_indirect: false,
+            tail_probe: crate::instrument::TailProbe::None,
             inline_context: None,
         }
     }

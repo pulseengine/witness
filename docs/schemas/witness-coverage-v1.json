@@ -185,9 +185,9 @@
       }
     },
     "BranchKind": {
-      "description": "Kind of branch a counter is counting.\n- `br_if` — counter fires when the br_if branch is taken.\n- `if_then` — counter fires when the consequent of an if/else runs.\n- `if_else` — counter fires when the alternative of an if/else runs.\n- `br_table_target` — counter fires when br_table dispatches to a specific target arm.\n- `br_table_default` — counter fires when br_table takes its default arm.",
+      "description": "Kind of branch a counter is counting.\n- `br_if` — counter fires when the br_if branch is taken.\n- `if_then` — counter fires when the consequent of an if/else runs.\n- `if_else` — counter fires when the alternative of an if/else runs.\n- `br_table_target` — counter fires when br_table dispatches to a specific target arm.\n- `br_table_default` — counter fires when br_table takes its default arm.\n- `value_tail` — (#358) probe on the value produced by the last operand of a short-circuit chain, which has no br_if; counter fires when that value is true.",
       "type": "string",
-      "enum": ["br_if", "if_then", "if_else", "br_table_target", "br_table_default"]
+      "enum": ["br_if", "if_then", "if_else", "br_table_target", "br_table_default", "value_tail"]
     }
   }
 }

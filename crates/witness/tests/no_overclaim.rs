@@ -27,8 +27,8 @@ use std::path::PathBuf;
 
 use witness::{RunOptions, run_module};
 use witness_core::instrument::{
-    BranchKind, ChainKind, Decision, Manifest, apply_chain_kinds, apply_unobserved_tails,
-    instrument_file,
+    BranchKind, ChainKind, Decision, Manifest, TailProbe, apply_chain_kinds,
+    apply_unobserved_tails, instrument_file,
 };
 use witness_core::mcdc_report::{ConditionStatus, DecisionStatus, McdcReport};
 use witness_core::run_record::RunRecord;
@@ -119,6 +119,98 @@ const CALLED_TAIL_WAT: &str = r#"
 )
 "#;
 
+/// #358 — `TRIANGLE_WAT` with the third operand's comparison routed through
+/// `select` (`c3 ? 1 : 0`). Same values, but no instruction leaves the tail
+/// value as a recognised boolean, so witness places no probe and the v0.46
+/// guard (`unobserved_tail_conditions = 1`) must still apply.
+const TRIANGLE_UNPROBED_WAT: &str = r#"
+(module
+  (func $f (param i32 i32 i32) (result i32)
+    (local i32)
+    block
+      local.get 1
+      local.get 0
+      i32.add
+      local.get 2
+      i32.gt_u
+      br_if 0
+      i32.const 1
+      return
+    end
+    i32.const 1
+    local.set 3
+    block
+      local.get 2
+      local.get 0
+      i32.add
+      local.get 1
+      i32.le_u
+      br_if 0
+      i32.const 1
+      i32.const 0
+      local.get 2
+      local.get 1
+      i32.add
+      local.get 0
+      i32.le_u
+      select
+      local.set 3
+    end
+    local.get 3)
+  (func (export "run_row_0") (result i32) i32.const 3 i32.const 4 i32.const 5 call $f)
+  (func (export "run_row_1") (result i32) i32.const 1 i32.const 2 i32.const 5 call $f)
+  (func (export "run_row_2") (result i32) i32.const 5 i32.const 1 i32.const 2 call $f)
+  (func (export "run_row_3") (result i32) i32.const 1 i32.const 5 i32.const 2 call $f)
+)
+"#;
+
+/// #358 — `CALLED_TAIL_WAT` with the same unprobeable `select` tail.
+const CALLED_TAIL_UNPROBED_WAT: &str = r#"
+(module
+  (func $log (param i32))
+  (func $f (param i32 i32 i32) (result i32)
+    (local i32)
+    block
+      local.get 1
+      local.get 0
+      i32.add
+      local.get 2
+      i32.gt_u
+      br_if 0
+      i32.const 1
+      call $log
+      i32.const 0
+      return
+    end
+    i32.const 1
+    local.set 3
+    block
+      local.get 2
+      local.get 0
+      i32.add
+      local.get 1
+      i32.le_u
+      br_if 0
+      i32.const 1
+      i32.const 0
+      local.get 2
+      local.get 1
+      i32.add
+      local.get 0
+      i32.le_u
+      select
+      local.set 3
+    end
+    local.get 3
+    call $log
+    i32.const 0)
+  (func (export "run_row_0") (result i32) i32.const 3 i32.const 4 i32.const 5 call $f)
+  (func (export "run_row_1") (result i32) i32.const 1 i32.const 2 i32.const 5 call $f)
+  (func (export "run_row_2") (result i32) i32.const 5 i32.const 1 i32.const 2 call $f)
+  (func (export "run_row_3") (result i32) i32.const 1 i32.const 5 i32.const 2 call $f)
+)
+"#;
+
 /// `a && b` as a COMPLETE chain: both operands have a `br_if`, the
 /// fall-through is a constant. Nothing is unobserved, so the derived
 /// (short-circuit) outcome is sound and FullMcdc must stay reachable.
@@ -169,6 +261,7 @@ fn run(wat: &str, rows: usize) -> (McdcReport, Decision) {
         inline_context: None,
         unobserved_tail_conditions: 0,
         unobserved_tail_indirect: false,
+        tail_probe: witness_core::instrument::TailProbe::None,
     }];
     // Same two passes `instrument_file` runs on DWARF-reconstructed decisions.
     // The instrument-time stashes they read are still set on this thread.
@@ -204,7 +297,7 @@ fn run(wat: &str, rows: usize) -> (McdcReport, Decision) {
 
 #[test]
 fn value_tail_chain_never_proves_with_unchanged_outcome_and_is_never_full() {
-    let (report, decision) = run(TRIANGLE_WAT, 4);
+    let (report, decision) = run(TRIANGLE_UNPROBED_WAT, 4);
     let real_outcomes = [false, true, true, true];
 
     // G2 detection: the last br_if falls into the value tail.
@@ -267,7 +360,7 @@ fn complete_chain_keeps_full_mcdc() {
 
 #[test]
 fn tail_passed_to_a_call_never_uses_the_return_value() {
-    let (report, decision) = run(CALLED_TAIL_WAT, 4);
+    let (report, decision) = run(CALLED_TAIL_UNPROBED_WAT, 4);
     assert_eq!(decision.unobserved_tail_conditions, 1);
     assert!(
         decision.unobserved_tail_indirect,
@@ -304,4 +397,109 @@ fn tail_passed_to_a_call_never_uses_the_return_value() {
             .any(|c| c.reason.as_deref() == Some("outcome_unverified")),
         "expected outcome_unverified gaps"
     );
+}
+
+// ---- #358: the last operand is OBSERVED through a value-tail probe ----
+
+/// Branch id of the decision's last condition must be a `ValueTail` site.
+fn assert_tail_is_probe(wat: &str, decision: &Decision) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let source = dir.path().join("source.wasm");
+    std::fs::write(&source, wat::parse_str(wat).expect("wat")).expect("write wasm");
+    let instrumented = dir.path().join("instrumented.wasm");
+    instrument_file(&source, &instrumented).expect("instrument");
+    let manifest = Manifest::load(&Manifest::path_for(&instrumented)).expect("manifest");
+    let last = *decision.conditions.last().expect("conditions");
+    let kind = manifest
+        .branches
+        .iter()
+        .find(|b| b.id == last)
+        .map(|b| b.kind);
+    assert_eq!(kind, Some(BranchKind::ValueTail));
+}
+
+#[test]
+fn probed_direct_tail_is_a_real_condition() {
+    let (report, decision) = run(TRIANGLE_WAT, 4);
+    let real_outcomes = [false, true, true, true];
+    assert_eq!(
+        decision.conditions.len(),
+        3,
+        "the third operand is a condition"
+    );
+    assert_eq!(decision.unobserved_tail_conditions, 0);
+    assert!(!decision.unobserved_tail_indirect);
+    assert_eq!(decision.tail_probe, TailProbe::Direct);
+    assert_tail_is_probe(TRIANGLE_WAT, &decision);
+
+    let d = &report.decisions[0];
+    assert_eq!(d.conditions.len(), 3);
+    assert_eq!(d.unobserved_tail_conditions, 0);
+    assert_ne!(
+        d.status_reason.as_deref(),
+        Some("unobserved_tail_conditions")
+    );
+    // Outcomes are still the REAL return values: the probe does not change
+    // what the function computes, and the direct tail's outcome source is
+    // unchanged.
+    for r in &d.truth_table {
+        assert_eq!(r.outcome, Some(real_outcomes[r.row_id as usize]));
+    }
+    // The tail is recorded (source polarity) exactly on the rows that
+    // evaluate it: row 0 (3,4,5): 9 <= 3 false; row 2 (5,1,2): 3 <= 5 true.
+    for r in &d.truth_table {
+        let want = match r.row_id {
+            0 => Some(false),
+            2 => Some(true),
+            _ => None,
+        };
+        assert_eq!(r.evaluated.get(&2).copied(), want, "row {}", r.row_id);
+    }
+    let c3 = &d.conditions[2];
+    assert!(matches!(c3.status, ConditionStatus::Proved), "{c3:?}");
+    let mut pair = c3.pair.expect("pair");
+    pair.sort_unstable();
+    assert_eq!(pair, [0, 2], "the truth table's c3 pair");
+    for c in &d.conditions {
+        if matches!(c.status, ConditionStatus::Proved) {
+            let [a, b] = c.pair.expect("proved condition carries its pair");
+            assert_ne!(
+                real_outcomes[a as usize], real_outcomes[b as usize],
+                "c{} proved by rows {a}+{b}, whose real outcomes are equal",
+                c.index
+            );
+        }
+    }
+}
+
+#[test]
+fn probed_indirect_tail_outcome_is_the_tail_value_or_nothing() {
+    let (report, decision) = run(CALLED_TAIL_WAT, 4);
+    assert_eq!(decision.conditions.len(), 3);
+    assert_eq!(decision.unobserved_tail_conditions, 0);
+    assert_eq!(decision.tail_probe, TailProbe::Indirect);
+    assert_tail_is_probe(CALLED_TAIL_WAT, &decision);
+
+    let d = &report.decisions[0];
+    // The function returns the constant 0 on every row; that is never an
+    // outcome. Rows that evaluate the tail carry its value (the decision's
+    // value); rows that stopped earlier carry none.
+    for r in &d.truth_table {
+        let want = match r.row_id {
+            0 => Some(false),
+            2 => Some(true),
+            _ => None,
+        };
+        assert_eq!(r.outcome, want, "row {}", r.row_id);
+    }
+    let c3 = &d.conditions[2];
+    assert!(matches!(c3.status, ConditionStatus::Proved), "{c3:?}");
+    for c in &d.conditions[..2] {
+        assert!(
+            !matches!(c.status, ConditionStatus::Proved),
+            "c{} proved without an observed outcome on its short-circuit row",
+            c.index
+        );
+    }
+    assert!(!matches!(d.status, DecisionStatus::FullMcdc));
 }
