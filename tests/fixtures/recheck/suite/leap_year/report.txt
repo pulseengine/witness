@@ -1,0 +1,14 @@
+module: leap_year/instrumented.wasm
+decisions: 0/1 full MC/DC; conditions: 2 proved, 0 gap, 0 dead
+
+decision #0 src/lib.rs:21: Partial
+  NOTE: 1 trailing operand(s) of this decision produce its value and have no branch, so witness never observes them; status is capped at Partial (reason: unobserved_tail_conditions). Row outcomes come from the real return value, never inferred from conditions.
+  truth table:
+    row 0: {c0=T} -> F
+    row 1: {c0=F, c1=T} -> T
+    row 2: {c0=F, c1=F} -> F
+    row 3: {c0=F, c1=F} -> T
+  conditions:
+    c0 (branch 0): proved via rows 0+1 (masking)
+    c1 (branch 1): proved via rows 1+2 (unique-cause)
+

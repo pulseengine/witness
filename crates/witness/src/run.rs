@@ -87,13 +87,27 @@ pub enum StubImports {
 
 /// Run the instrumented `module`, writing a `RunRecord` to `options.output`.
 pub fn run_module(options: &RunOptions<'_>) -> Result<()> {
+    // v0.47 (FEAT-045) — hash the module and manifest bytes before running,
+    // so the run record names the exact inputs it was produced from (the
+    // module → run and manifest → run links `witness recheck` checks).
+    let module_sha256 = sha256_of_file(options.module)?;
+    let manifest_sha256 = sha256_of_file(&options.manifest)?;
     if let Some(cmd) = options.harness.as_deref() {
-        return run_via_harness(options, cmd);
+        run_via_harness(options, cmd)?;
+    } else if options.component_backend {
+        run_via_wasmtime_component(options)?;
+    } else {
+        run_via_embedded(options)?;
     }
-    if options.component_backend {
-        return run_via_wasmtime_component(options);
-    }
-    run_via_embedded(options)
+    let mut record = RunRecord::load(options.output)?;
+    record.module_sha256 = Some(module_sha256);
+    record.manifest_sha256 = Some(manifest_sha256);
+    record.save(options.output)
+}
+
+fn sha256_of_file(path: &Path) -> Result<String> {
+    let bytes = std::fs::read(path).map_err(Error::Io)?;
+    Ok(witness_core::predicate::sha256_hex_pub(&bytes))
 }
 
 /// v0.38 (#110, DEC-044) — run an instrumented **component** through
@@ -1586,6 +1600,8 @@ fn build_run_record(
         decisions: vec![],
         trace_health: TraceHealth::default(),
         stubbed_imports,
+        module_sha256: None,
+        manifest_sha256: None,
     }
 }
 

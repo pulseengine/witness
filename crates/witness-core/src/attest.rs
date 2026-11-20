@@ -237,6 +237,8 @@ mod tests {
             }],
             trace_health: TraceHealth::default(),
             stubbed_imports: Vec::new(),
+            module_sha256: None,
+            manifest_sha256: None,
         };
         let mcdc = McdcReport::from_record(&record);
 

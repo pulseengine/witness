@@ -526,7 +526,58 @@ jobs:
             exit 1
           fi
           echo "ok: httparse has $p proved condition(s)"
+      # FEAT-045: the inventory is written before the evidence is archived;
+      # the Recheck controls job re-hashes every file against it after download.
+      - name: Write the evidence inventory (INVENTORY.sha256)
+        run: target/release/witness recheck --write-inventory build/verdict-evidence
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verdict-evidence
           path: build/verdict-evidence/
+
+  # FEAT-045 (v0.47 bet 1): `witness recheck` on the verdict-suite evidence
+  # (inventory written by the Verdict suite job before upload, re-hashed here
+  # after download; every report.json re-derived from its run.json), then five
+  # planted tamperings of the committed bundle tests/fixtures/recheck/suite,
+  # each of which must fail recheck with its own failure class (ci-controls.toml,
+  # recheck-*). Not a required check; making it one is the owner's decision.
+  recheck-controls:
+    name: Recheck controls
+    runs-on: ubuntu-24.04
+    needs: verdict-suite
+    timeout-minutes: 30
+    env:
+      # plant is built with `cargo install`; the workflow's -D warnings is for
+      # witness's own code, not for the pinned plant source.
+      RUSTFLAGS: ""
+      WITNESS: ${{ github.workspace }}/target/release/witness
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build witness binary
+        run: cargo build --release --locked -p witness-mcdc
+      - name: Download verdict evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verdict-evidence
+          path: build/verdict-evidence
+      - name: Recheck the verdict-suite evidence (must pass)
+        run: |
+          set -euo pipefail
+          "$WITNESS" recheck build/verdict-evidence
+          "$WITNESS" recheck build/verdict-evidence --format json > "$RUNNER_TEMP/recheck.json"
+          # A missing inventory or a skipped re-derivation is NOT-CHECKED, which
+          # does not fail recheck; this job requires both to have run.
+          jq -e '.ok
+            and any(.checks[]; .id == "inventory" and .status == "pass")
+            and ([.checks[] | select(.id | endswith("/rederive-report"))] | length > 0)
+            and all(.checks[] | select(.id | endswith("/rederive-report")); .status == "pass")' \
+            "$RUNNER_TEMP/recheck.json"
+      - name: Recheck the committed fixture against the expected key (must pass)
+        run: '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+      - name: Planted tamperings must each fail recheck
+        uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
+        with:
+          manifest: ci-controls.toml
+          only: recheck-deleted-run-json recheck-flipped-module-byte recheck-gap-edited-to-proved recheck-inventory-absent-file recheck-resigned-fresh-key

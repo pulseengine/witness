@@ -399,6 +399,16 @@ impl McdcReport {
         Self::from_record_with_schema(record, McdcSchemaVersion::default())
     }
 
+    /// v0.47 (FEAT-045) — the exact bytes `witness report --format mcdc-json`
+    /// writes: pretty-printed JSON plus one trailing newline. `witness
+    /// recheck` re-derives `report.json` through this same function and
+    /// requires byte equality, so the reporter and the recheck cannot drift.
+    pub fn to_json_document(&self) -> serde_json::Result<String> {
+        let mut doc = serde_json::to_string_pretty(self)?;
+        doc.push('\n');
+        Ok(doc)
+    }
+
     fn from_record_inner(record: &RunRecord) -> Self {
         let mut overall = McdcOverall::default();
         let mut decisions: Vec<DecisionVerdict> = Vec::with_capacity(record.decisions.len());
@@ -1486,6 +1496,8 @@ mod tests {
             decisions: vec![d],
             trace_health: TraceHealth::default(),
             stubbed_imports: Vec::new(),
+            module_sha256: None,
+            manifest_sha256: None,
         }
     }
 

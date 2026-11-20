@@ -1,0 +1,69 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "instrumented.wasm",
+      "digest": {
+        "sha256": "d79b2e6ccdc7f8c654108cc957fc494c484629409d39b2c54fcb8b0499b45185"
+      }
+    },
+    {
+      "name": "source.wasm",
+      "digest": {
+        "sha256": "8bfdcdb41623b3599ebd8c8d5b3fe18ea720b31a5f1e52dedcad1eb79afd07ea"
+      }
+    }
+  ],
+  "predicateType": "https://pulseengine.eu/witness-coverage/v1",
+  "predicate": {
+    "coverage": {
+      "covered_branches": 2,
+      "module": "leap_year/instrumented.wasm",
+      "per_function": [
+        {
+          "covered": 2,
+          "function_index": 0,
+          "function_name": "verdict_leap_year::is_leap_year",
+          "total": 2
+        }
+      ],
+      "schema_version": "2",
+      "total_branches": 2,
+      "uncovered": [],
+      "witness_version": "0.46.0"
+    },
+    "measurement": {
+      "harness": null,
+      "measured_at": "2026-11-20T01:13:46Z",
+      "test_cases": [
+        {
+          "invocation": "run_row_0",
+          "row_id": 0
+        },
+        {
+          "invocation": "run_row_1",
+          "row_id": 1
+        },
+        {
+          "invocation": "run_row_2",
+          "row_id": 2
+        },
+        {
+          "invocation": "run_row_3",
+          "row_id": 3
+        }
+      ],
+      "toolchain": {
+        "rust_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+        "wasmtime_version": "44"
+      },
+      "witness_version": "0.46.0"
+    },
+    "original_module": {
+      "digest": {
+        "sha256": "8bfdcdb41623b3599ebd8c8d5b3fe18ea720b31a5f1e52dedcad1eb79afd07ea"
+      },
+      "name": "source.wasm"
+    }
+  }
+}

@@ -309,6 +309,37 @@ enum Command {
         check_content: bool,
     },
 
+    /// v0.47 (FEAT-045) — re-check an evidence bundle without the build.
+    ///
+    /// Checks (a) the inventory `<dir>/INVENTORY.sha256` (every file
+    /// re-hashed, none missing, none unlisted), (b) every hash link the
+    /// producers record (module -> manifest -> run record -> predicate ->
+    /// DSSE payload), and (c) that each `report.json` is byte-equal to the
+    /// report re-derived from its `run.json`. Prints one PASS / FAIL /
+    /// NOT-CHECKED line per check; a link nothing records is NOT-CHECKED.
+    /// `<dir>` is one verdict if it holds verdict files, else every
+    /// subdirectory is a verdict. Exit 0: nothing failed; 1: a check failed;
+    /// 2: recheck could not run. Shows internal consistency only, not that
+    /// the run record came from a real execution.
+    Recheck {
+        /// Evidence directory: one verdict, or a suite of verdict subdirectories.
+        dir: PathBuf,
+        /// Raw 32-byte Ed25519 public key the DSSE envelopes must verify
+        /// against. The trust anchor must come from outside the bundle; the
+        /// in-bundle `verifying-key.pub` is never trusted. Without it the
+        /// signature check is NOT-CHECKED. (The keyless cosign certificate
+        /// identity check is not implemented.)
+        #[arg(long = "expect-key")]
+        expect_key: Option<PathBuf>,
+        /// Write `<dir>/INVENTORY.sha256` (every regular file, sorted,
+        /// `sha256sum` format) instead of checking. Run before archiving.
+        #[arg(long = "write-inventory")]
+        write_inventory: bool,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = RecheckFormat::Text)]
+        format: RecheckFormat,
+    },
+
     /// Emit LCOV from a run JSON for codecov ingestion.
     /// DWARF-correlated decisions emit BRDA records; uncorrelated
     /// branches go in a sibling overview text file (per
@@ -563,6 +594,14 @@ impl From<StubImportsArg> for run::StubImports {
             StubImportsArg::Trap => run::StubImports::Trap,
         }
     }
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum RecheckFormat {
+    /// One line per check, then a verdict line.
+    Text,
+    /// Machine-readable JSON (`https://pulseengine.eu/witness-recheck/v1`).
+    Json,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -821,8 +860,9 @@ fn main() -> Result<()> {
                     println!("{}", report.to_text());
                 }
                 ReportFormat::McdcJson => {
+                    // Same bytes `witness recheck` re-derives (FEAT-045).
                     let report = witness_core::mcdc_report::from_run_file(&input)?;
-                    println!("{}", serde_json::to_string_pretty(&report)?);
+                    print!("{}", report.to_json_document()?);
                 }
                 ReportFormat::McdcRollup => {
                     let rollup = witness_core::mcdc_report::rollup_from_run_file(
@@ -1079,6 +1119,12 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Command::Recheck {
+            dir,
+            expect_key,
+            write_inventory,
+            format,
+        } => run_recheck(&dir, expect_key.as_deref(), write_inventory, format)?,
         Command::Lcov {
             run,
             manifest,
@@ -1622,6 +1668,44 @@ fn run_viz(reports_dir: &std::path::Path, port: u16, bind: &str) -> Result<()> {
         })?;
     if !status.success() {
         anyhow::bail!("witness-viz exited with {status}");
+    }
+    Ok(())
+}
+
+/// `witness recheck` (FEAT-045). Exit 0: no check failed; 1: a check failed;
+/// 2: recheck could not run (bad directory, malformed `--expect-key`).
+// SAFETY-REVIEW: CLI output channel; `exit` sets the documented exit codes.
+#[allow(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
+fn run_recheck(
+    dir: &std::path::Path,
+    expect_key: Option<&std::path::Path>,
+    write_inventory: bool,
+    format: RecheckFormat,
+) -> Result<()> {
+    use witness::recheck;
+    fn cannot_run(e: anyhow::Error) -> ! {
+        eprintln!("error: witness recheck could not run: {e:#}");
+        std::process::exit(2)
+    }
+    if write_inventory {
+        let n = recheck::write_inventory(dir).unwrap_or_else(|e| cannot_run(e));
+        println!(
+            "wrote {} ({n} files)",
+            dir.join(recheck::INVENTORY_FILE).display()
+        );
+        return Ok(());
+    }
+    let key = expect_key
+        .map(recheck::ExpectedKey::load)
+        .transpose()
+        .unwrap_or_else(|e| cannot_run(e));
+    let outcome = recheck::recheck(dir, key.as_ref()).unwrap_or_else(|e| cannot_run(e));
+    match format {
+        RecheckFormat::Text => print!("{}", outcome.to_text()),
+        RecheckFormat::Json => println!("{}", serde_json::to_string_pretty(&outcome)?),
+    }
+    if !outcome.ok {
+        std::process::exit(1);
     }
     Ok(())
 }

@@ -1,0 +1,80 @@
+module: state_machine/instrumented.wasm
+decisions: 1/2 full MC/DC; conditions: 12 proved, 2 gap, 0 dead
+
+decision #0 src/lib.rs:73: FullMcdc
+  truth table:
+    row 0: {c0=F, c1=T, c2=T} -> T
+    row 2: {c0=F, c1=T, c2=T} -> T
+    row 4: {c0=F, c1=T, c2=T} -> T
+    row 6: {c0=F, c1=T, c2=T} -> T
+    row 8: {c0=F, c1=T, c2=T} -> T
+    row 10: {c0=F, c1=T, c2=T} -> T
+    row 12: {c0=F, c1=T, c2=T} -> T
+    row 14: {c0=F, c1=T, c2=T} -> T
+    row 16: {c0=F, c1=T, c2=T} -> T
+    row 18: {c0=F, c1=T, c2=T} -> T
+    row 20: {c0=F, c1=T, c2=T} -> T
+    row 22: {c0=F, c1=T, c2=T} -> T
+    row 24: {c0=F, c1=T, c2=T} -> T
+    row 26: {c0=F, c1=T, c2=T} -> T
+    row 28: {c0=F, c1=T, c2=T} -> T
+    row 30: {c0=F, c1=T, c2=T} -> T
+    row 32: {c0=F, c1=T, c2=T} -> T
+    row 34: {c0=F, c1=T, c2=T} -> T
+    row 36: {c0=T, c2=T} -> T
+    row 38: {c0=F, c1=T, c2=F} -> F
+    row 40: {c0=F, c1=F} -> F
+    row 42: {c0=F, c1=F} -> F
+    row 44: {c0=F, c1=F} -> F
+    row 46: {c0=F, c1=F} -> F
+    row 48: {c0=T, c2=T} -> T
+    row 50: {c0=F, c1=T, c2=T} -> T
+    row 52: {c0=F, c1=T, c2=T} -> T
+  conditions:
+    c0 (branch 0): proved via rows 36+40 (masking)
+    c1 (branch 1): proved via rows 0+40 (masking)
+    c2 (branch 2): proved via rows 0+38 (unique-cause)
+
+decision #1 src/lib.rs:92: Partial
+  NOTE: 1 trailing operand(s) of this decision produce its value and have no branch, so witness never observes them; status is capped at Partial (reason: unobserved_tail_conditions). Row outcomes come from the real return value, never inferred from conditions.
+  truth table:
+    row 1: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=T} -> T
+    row 3: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=T} -> T
+    row 5: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=T} -> T
+    row 7: {c0=T, c1=T, c2=T, c3=T, c4=F, c6=T, c8=T, c10=T} -> T
+    row 9: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=F, c7=T, c8=T, c10=T} -> T
+    row 11: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=F, c9=F, c10=T} -> T
+    row 13: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=F} -> T
+    row 15: {c0=T, c1=T, c2=T, c3=F} -> F
+    row 17: {c0=T, c1=T, c2=T, c3=T, c4=F, c5=F} -> F
+    row 19: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=F, c7=F} -> F
+    row 21: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=F, c7=F} -> F
+    row 23: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=F, c9=T} -> F
+    row 25: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=F} -> F
+    row 27: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=F} -> F
+    row 29: {c0=T, c1=F} -> F
+    row 31: {c0=T, c1=F} -> F
+    row 33: {c0=T, c1=F} -> F
+    row 35: {c0=T, c1=F} -> F
+    row 37: {c0=F} -> F
+    row 39: {c0=T, c1=F} -> F
+    row 41: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=T} -> T
+    row 43: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=T} -> T
+    row 45: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=T} -> T
+    row 47: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=T} -> T
+    row 49: {c0=F} -> F
+    row 51: {c0=T, c1=T, c2=T, c3=T, c4=T, c6=T, c8=T, c10=F} -> F
+    row 53: {c0=T, c1=T, c2=T, c3=F} -> F
+  conditions:
+    c0 (branch 3): proved via rows 1+37 (masking)
+    c1 (branch 4): proved via rows 1+29 (masking)
+    c2 (branch 5): GAP — try a row {c0=T, c1=T, c2=F, c3=T, c4=T, c6=T, c8=F, c9=F, c10=T} (outcome must differ from row 11)
+    c3 (branch 6): proved via rows 1+15 (masking)
+    c4 (branch 7): proved via rows 1+17 (masking)
+    c5 (branch 8): GAP — try a row {c0=T, c1=T, c2=T, c3=T, c4=F, c5=T} (outcome must differ from row 17)
+    c6 (branch 9): proved via rows 1+19 (masking)
+    c7 (branch 10): proved via rows 9+19 (masking)
+    c8 (branch 11): proved via rows 1+23 (masking)
+    c9 (branch 12): proved via rows 11+23 (masking)
+    c10 (branch 13): proved via rows 1+25 (masking)
+

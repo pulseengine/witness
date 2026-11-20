@@ -1,7 +1,8 @@
-# Planted controls for witness CI checks, run by pulseengine/plant in the
-# "Rivet validate" job (.github/workflows/ci.yml). Each control runs its check
-# on a copy of HEAD (must pass) and on a copy with the plant overlaid (must
-# fail). Locally: `plant` from the repository root, with rivet on PATH.
+# Planted controls for witness CI checks, run by pulseengine/plant in the CI
+# job each control names in `check` (.github/workflows/ci.yml). Each control
+# runs its check on a copy of HEAD (must pass) and on a copy with the plant
+# overlaid (must fail). Locally: `plant` from the repository root, with rivet
+# on PATH and WITNESS set to an absolute witness binary path.
 
 [[control]]
 id = "rivet-broken-link"
@@ -34,4 +35,61 @@ run = 'ev="${VERDICT_EVIDENCE:?set VERDICT_EVIDENCE to the verdict-suite output 
 plant = "ci-controls/truth-table-tail-index-shift"
 expect = "fail"
 stderr_or_stdout_matches = 'NEW DIVERGENCE \(not in ledger\): triangle: '
+
+# witness recheck (FEAT-045), run in the "Recheck controls" job. Each control
+# plants one tampering into the committed bundle tests/fixtures/recheck/suite
+# and requires `witness recheck` to fail with that tampering's own failure
+# class. WITNESS must name a built witness binary (absolute path). The
+# expected signer key lives outside the bundle. Rebuild fixture and plants
+# with tests/fixtures/recheck/regen.sh.
+
+[[control]]
+id = "recheck-deleted-run-json"
+check = "Recheck controls"
+run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+plant = "ci-controls/recheck-deleted-run-json"
+expect = "fail"
+stderr_or_stdout_matches = 'FAIL +state_machine/run\.json +\[required-file-missing\]'
+timeout = 120
+
+[[control]]
+id = "recheck-flipped-module-byte"
+check = "Recheck controls"
+run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+plant = "ci-controls/recheck-flipped-module-byte"
+expect = "fail"
+stderr_or_stdout_matches = '\[inventory-digest-mismatch\] state_machine/instrumented\.wasm: content hashes to'
+timeout = 120
+
+# Hashes and inventory re-computed after the edit: the only check left to
+# catch it is re-derivation of report.json from run.json, so the control
+# requires that to be the single failure.
+[[control]]
+id = "recheck-gap-edited-to-proved"
+check = "Recheck controls"
+run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+plant = "ci-controls/recheck-gap-edited-to-proved"
+expect = "fail"
+stderr_or_stdout_matches = '(?m)FAIL +state_machine/rederive-report +\[rederive-mismatch\][\s\S]*, 1 failed, \d+ not checked; failure classes: rederive-mismatch$'
+timeout = 120
+
+[[control]]
+id = "recheck-inventory-absent-file"
+check = "Recheck controls"
+run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+plant = "ci-controls/recheck-inventory-absent-file"
+expect = "fail"
+stderr_or_stdout_matches = '\[inventory-missing-file\] INVENTORY\.sha256 lists state_machine/coverage-addendum\.json, which is not in the bundle'
+timeout = 120
+
+# Re-signed with a fresh key, the in-bundle verifying-key.pub and inventory
+# updated to match: only the check against the expected key (from outside
+# the bundle) can catch it.
+[[control]]
+id = "recheck-resigned-fresh-key"
+check = "Recheck controls"
+run = '"$WITNESS" recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub'
+plant = "ci-controls/recheck-resigned-fresh-key"
+expect = "fail"
+stderr_or_stdout_matches = '(?m)FAIL +state_machine/signature +\[signer-mismatch\][\s\S]*, 1 failed, \d+ not checked; failure classes: signer-mismatch$'
 timeout = 120

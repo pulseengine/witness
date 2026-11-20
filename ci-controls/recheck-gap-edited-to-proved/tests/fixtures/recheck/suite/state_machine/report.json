@@ -1,0 +1,762 @@
+{
+  "schema": "https://pulseengine.eu/witness-mcdc/v3",
+  "witness_version": "0.46.0",
+  "module": "state_machine/instrumented.wasm",
+  "overall": {
+    "decisions_total": 2,
+    "decisions_full_mcdc": 1,
+    "conditions_total": 14,
+    "conditions_proved": 13,
+    "conditions_gap": 1,
+    "conditions_dead": 0
+  },
+  "decisions": [
+    {
+      "id": 0,
+      "source_file": "src/lib.rs",
+      "source_line": 73,
+      "conditions": [
+        {
+          "index": 0,
+          "branch_id": 0,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            36,
+            40
+          ]
+        },
+        {
+          "index": 1,
+          "branch_id": 1,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            0,
+            40
+          ]
+        },
+        {
+          "index": 2,
+          "branch_id": 2,
+          "status": "proved",
+          "interpretation": "unique-cause",
+          "pair": [
+            0,
+            38
+          ]
+        }
+      ],
+      "truth_table": [
+        {
+          "row_id": 0,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 2,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 4,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 6,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 8,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 10,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 12,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 14,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 16,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 18,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 20,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 22,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 24,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 26,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 28,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 30,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 32,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 34,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 36,
+          "evaluated": {
+            "0": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 38,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 40,
+          "evaluated": {
+            "0": false,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 42,
+          "evaluated": {
+            "0": false,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 44,
+          "evaluated": {
+            "0": false,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 46,
+          "evaluated": {
+            "0": false,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 48,
+          "evaluated": {
+            "0": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 50,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 52,
+          "evaluated": {
+            "0": false,
+            "1": true,
+            "2": true
+          },
+          "outcome": true
+        }
+      ],
+      "status": "full_mcdc"
+    },
+    {
+      "id": 1,
+      "source_file": "src/lib.rs",
+      "source_line": 92,
+      "conditions": [
+        {
+          "index": 0,
+          "branch_id": 3,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            1,
+            37
+          ]
+        },
+        {
+          "index": 1,
+          "branch_id": 4,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            1,
+            29
+          ]
+        },
+        {
+          "index": 2,
+          "branch_id": 5,
+          "status": "proved",
+          "gap_closure": {
+            "paired_with_row": 11,
+            "evaluated": {
+              "0": true,
+              "1": true,
+              "2": false,
+              "3": true,
+              "4": true,
+              "6": true,
+              "8": false,
+              "9": false,
+              "10": true
+            },
+            "outcome_must_differ_from": true
+          }
+        },
+        {
+          "index": 3,
+          "branch_id": 6,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            1,
+            15
+          ]
+        },
+        {
+          "index": 4,
+          "branch_id": 7,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            1,
+            17
+          ]
+        },
+        {
+          "index": 5,
+          "branch_id": 8,
+          "status": "gap",
+          "gap_closure": {
+            "paired_with_row": 17,
+            "evaluated": {
+              "0": true,
+              "1": true,
+              "2": true,
+              "3": true,
+              "4": false,
+              "5": true
+            },
+            "outcome_must_differ_from": false
+          }
+        },
+        {
+          "index": 6,
+          "branch_id": 9,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            1,
+            19
+          ]
+        },
+        {
+          "index": 7,
+          "branch_id": 10,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            9,
+            19
+          ]
+        },
+        {
+          "index": 8,
+          "branch_id": 11,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            1,
+            23
+          ]
+        },
+        {
+          "index": 9,
+          "branch_id": 12,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            11,
+            23
+          ]
+        },
+        {
+          "index": 10,
+          "branch_id": 13,
+          "status": "proved",
+          "interpretation": "masking",
+          "pair": [
+            1,
+            25
+          ]
+        }
+      ],
+      "truth_table": [
+        {
+          "row_id": 1,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 3,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 5,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 7,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": false,
+            "6": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 9,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": false,
+            "7": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 11,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": false,
+            "9": false,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 13,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": false
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 15,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 17,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": false,
+            "5": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 19,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": false,
+            "7": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 21,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": false,
+            "7": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 23,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": false,
+            "9": true
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 25,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 27,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 29,
+          "evaluated": {
+            "0": true,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 31,
+          "evaluated": {
+            "0": true,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 33,
+          "evaluated": {
+            "0": true,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 35,
+          "evaluated": {
+            "0": true,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 37,
+          "evaluated": {
+            "0": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 39,
+          "evaluated": {
+            "0": true,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 41,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 43,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 45,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 47,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 49,
+          "evaluated": {
+            "0": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 51,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": true,
+            "4": true,
+            "6": true,
+            "8": true,
+            "10": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 53,
+          "evaluated": {
+            "0": true,
+            "1": true,
+            "2": true,
+            "3": false
+          },
+          "outcome": false
+        }
+      ],
+      "status": "partial",
+      "unobserved_tail_conditions": 1
+    }
+  ],
+  "trace_health": {
+    "overflow": false,
+    "rows": 27,
+    "trace_parser_active": true,
+    "bytes_used": 1168,
+    "pages_allocated": 16
+  },
+  "interpretation_polarity": "wasm-early-exit"
+}

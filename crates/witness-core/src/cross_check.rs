@@ -153,6 +153,8 @@ mod tests {
             decisions: vec![],
             trace_health: TraceHealth::default(),
             stubbed_imports: Vec::new(),
+            module_sha256: None,
+            manifest_sha256: None,
         }
     }
 

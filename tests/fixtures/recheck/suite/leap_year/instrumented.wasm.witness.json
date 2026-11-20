@@ -1,0 +1,42 @@
+{
+  "schema_version": "2",
+  "witness_version": "0.46.0",
+  "module_source": "leap_year/source.wasm",
+  "original_module_sha256": "8bfdcdb41623b3599ebd8c8d5b3fe18ea720b31a5f1e52dedcad1eb79afd07ea",
+  "branches": [
+    {
+      "id": 0,
+      "function_index": 0,
+      "function_name": "_RNvCsin4DhBhRT3d_17verdict_leap_year12is_leap_year",
+      "function_display": "verdict_leap_year::is_leap_year",
+      "kind": "br_if",
+      "instr_index": 3,
+      "byte_offset": 128,
+      "seq_debug": "2"
+    },
+    {
+      "id": 1,
+      "function_index": 0,
+      "function_name": "_RNvCsin4DhBhRT3d_17verdict_leap_year12is_leap_year",
+      "function_display": "verdict_leap_year::is_leap_year",
+      "kind": "br_if",
+      "instr_index": 7,
+      "byte_offset": 136,
+      "seq_debug": "2"
+    }
+  ],
+  "decisions": [
+    {
+      "id": 0,
+      "conditions": [
+        0,
+        1
+      ],
+      "source_file": "src/lib.rs",
+      "source_line": 21,
+      "chain_kind": "or",
+      "unobserved_tail_conditions": 1
+    }
+  ],
+  "attribution_source": "dwarf"
+}

@@ -1,0 +1,86 @@
+{
+  "schema_version": "2",
+  "witness_version": "0.46.0",
+  "module_path": "leap_year/instrumented.wasm",
+  "invoked": [
+    "run_row_0",
+    "run_row_1",
+    "run_row_2",
+    "run_row_3",
+    "__witness_trace_bytes=44"
+  ],
+  "branches": [
+    {
+      "id": 0,
+      "function_index": 0,
+      "function_name": "_RNvCsin4DhBhRT3d_17verdict_leap_year12is_leap_year",
+      "function_display": "verdict_leap_year::is_leap_year",
+      "kind": "br_if",
+      "instr_index": 3,
+      "hits": 1
+    },
+    {
+      "id": 1,
+      "function_index": 0,
+      "function_name": "_RNvCsin4DhBhRT3d_17verdict_leap_year12is_leap_year",
+      "function_display": "verdict_leap_year::is_leap_year",
+      "kind": "br_if",
+      "instr_index": 7,
+      "hits": 1
+    }
+  ],
+  "decisions": [
+    {
+      "id": 0,
+      "source_file": "src/lib.rs",
+      "source_line": 21,
+      "condition_branch_ids": [
+        0,
+        1
+      ],
+      "rows": [
+        {
+          "row_id": 0,
+          "evaluated": {
+            "0": true
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 1,
+          "evaluated": {
+            "0": false,
+            "1": true
+          },
+          "outcome": true
+        },
+        {
+          "row_id": 2,
+          "evaluated": {
+            "0": false,
+            "1": false
+          },
+          "outcome": false
+        },
+        {
+          "row_id": 3,
+          "evaluated": {
+            "0": false,
+            "1": false
+          },
+          "outcome": true
+        }
+      ],
+      "unobserved_tail_conditions": 1
+    }
+  ],
+  "trace_health": {
+    "overflow": false,
+    "rows": 4,
+    "trace_parser_active": true,
+    "bytes_used": 44,
+    "pages_allocated": 16
+  },
+  "module_sha256": "d79b2e6ccdc7f8c654108cc957fc494c484629409d39b2c54fcb8b0499b45185",
+  "manifest_sha256": "003a2d6ff6acbe5db589e96a22e67d2b1a41d2f945f54b3562a076f054481c2b"
+}
