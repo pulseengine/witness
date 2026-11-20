@@ -331,6 +331,11 @@ enum Command {
         /// identity check is not implemented.)
         #[arg(long = "expect-key")]
         expect_key: Option<PathBuf>,
+        /// Also fail (exit 1) when any check is NOT-CHECKED: no inventory,
+        /// no `--expect-key`, or a hash link the evidence does not record.
+        /// Use this when recheck is the verify command for a bundle.
+        #[arg(long)]
+        strict: bool,
         /// Write `<dir>/INVENTORY.sha256` (every regular file, sorted,
         /// `sha256sum` format) instead of checking. Run before archiving.
         #[arg(long = "write-inventory")]
@@ -1130,9 +1135,10 @@ fn main() -> Result<()> {
         Command::Recheck {
             dir,
             expect_key,
+            strict,
             write_inventory,
             format,
-        } => run_recheck(&dir, expect_key.as_deref(), write_inventory, format)?,
+        } => run_recheck(&dir, expect_key.as_deref(), strict, write_inventory, format)?,
         Command::Lcov {
             run,
             manifest,
@@ -1687,6 +1693,7 @@ fn run_viz(reports_dir: &std::path::Path, port: u16, bind: &str) -> Result<()> {
 fn run_recheck(
     dir: &std::path::Path,
     expect_key: Option<&std::path::Path>,
+    strict: bool,
     write_inventory: bool,
     format: RecheckFormat,
 ) -> Result<()> {
@@ -1713,6 +1720,13 @@ fn run_recheck(
         RecheckFormat::Json => println!("{}", serde_json::to_string_pretty(&outcome)?),
     }
     if !outcome.ok {
+        std::process::exit(1);
+    }
+    if strict && !outcome.strict_ok() {
+        eprintln!(
+            "error: --strict: {} check(s) NOT-CHECKED; a verify command must check every link",
+            outcome.summary.not_checked
+        );
         std::process::exit(1);
     }
     Ok(())

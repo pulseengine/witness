@@ -370,3 +370,19 @@ fn unexpected_top_level_file_fails_unless_inventoried() {
     let ok = recheck(&suite, None).unwrap();
     assert!(ok.ok, "{}", ok.to_text());
 }
+
+#[test]
+fn strict_fails_when_anything_is_not_checked() {
+    let (_tmp, suite) = copy_suite();
+    // With the expected key every recorded link is checked; the committed
+    // fixture may still leave links NOT-CHECKED (they are reported, see the
+    // first test), and strict_ok must reflect exactly that.
+    let o = recheck(&suite, Some(&expected_key())).unwrap();
+    assert!(o.ok);
+    assert_eq!(o.strict_ok(), o.summary.not_checked == 0);
+    // Without the key the signature is NOT-CHECKED, so strict must fail.
+    let o = recheck(&suite, None).unwrap();
+    assert!(o.ok);
+    assert!(o.summary.not_checked > 0);
+    assert!(!o.strict_ok());
+}

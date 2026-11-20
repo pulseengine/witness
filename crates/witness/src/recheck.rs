@@ -125,6 +125,14 @@ pub struct Outcome {
 }
 
 impl Outcome {
+    /// True when no check failed AND nothing was left unchecked. This is the
+    /// bar for using recheck as an evidence-bundle verify command
+    /// (`witness recheck --strict`): a bundle without an inventory, a
+    /// signature or a recorded hash link does not pass.
+    pub fn strict_ok(&self) -> bool {
+        self.ok && self.summary.not_checked == 0
+    }
+
     /// The distinct failure classes, sorted.
     pub fn failure_classes(&self) -> BTreeSet<&'static str> {
         self.checks.iter().filter_map(|c| c.failure_class).collect()
