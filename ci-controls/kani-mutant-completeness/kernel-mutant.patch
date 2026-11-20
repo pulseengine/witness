@@ -1,0 +1,11 @@
+--- a/crates/witness-mcdc-checker/src/lib.rs
++++ b/crates/witness-mcdc-checker/src/lib.rs
+@@ -220,7 +220,7 @@ pub fn find_independent_effect_pair_in<R: RowView>(
+             }
+         }
+     }
+-    best
++    None
+ }
+ 
+ /// Helper: build a [`Row`] from a slice of `(index, value)` pairs and

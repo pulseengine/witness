@@ -107,6 +107,28 @@ jobs:
           manifest: ci-controls.toml
           only: report-schema-extra-property
 
+  # v0.47.0 FEAT-050 (REQ-016): bounded Kani proof of the MC/DC pair-search
+  # kernel against a declarative spec (crates/witness-mcdc-checker/src/proofs.rs;
+  # bounds and trusted assumptions in crates/witness-mcdc-checker/PROOF-LEDGER.md).
+  # Four planted kernel mutants must each make the proof fail.
+  kernel-proof:
+    name: Kernel proof (Kani) — pair search, rows<=8, conditions<=6
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Kani proof of the pair-search kernel
+        uses: model-checking/kani-github-action@f838096619a707b0f6b2118cf435eaccfa33e51f # v1.1
+        with:
+          kani-version: '0.67.0'
+          working-directory: crates/witness-mcdc-checker
+          args: '--harness pair_kernel_r4_c5 --harness pair_kernel_r8_c6'
+      - name: Planted kernel mutants must each fail the proof
+        uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
+        with:
+          manifest: ci-controls.toml
+          only: kani-mutant-outcome-check kani-mutant-compat-loop kani-mutant-preference kani-mutant-completeness
+
   # v0.45 — every job that ran on the self-hosted `rust-cpu` pool now runs
   # on GitHub-hosted ubuntu-latest, for the reason Miri moved in v0.29: the
   # pool is shared org-wide and was saturated for days (required checks sat
