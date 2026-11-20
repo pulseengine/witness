@@ -50,6 +50,9 @@
 
 extern crate alloc;
 
+#[cfg(kani)]
+mod proofs;
+
 use alloc::collections::BTreeMap;
 
 /// One decision row: sparse condition vector + optional outcome.
@@ -88,6 +91,39 @@ impl Interpretation {
     pub const MASKING: &'static str = "masking";
 }
 
+/// Read-only view of one row of a decision's truth table.
+///
+/// The kernel reads rows only through this trait so that the Kani proof
+/// (`src/proofs.rs`, v0.47.0 FEAT-050) can check it over array-backed rows;
+/// symbolic `BTreeMap`s are out of reach for bounded model checking. [`Row`]
+/// is the production implementation; its three accessors are the trusted
+/// adapter listed in `PROOF-LEDGER.md`.
+pub trait RowView {
+    /// The row's id, returned in the pair.
+    fn row_id(&self) -> u32;
+    /// The value of condition `idx`, or `None` when it was not evaluated.
+    fn get(&self, idx: u32) -> Option<bool>;
+    /// How many conditions were evaluated in this row.
+    fn evaluated_count(&self) -> usize;
+    /// The decision outcome, or `None` when it was not observed.
+    fn outcome(&self) -> Option<bool>;
+}
+
+impl RowView for Row {
+    fn row_id(&self) -> u32 {
+        self.row_id
+    }
+    fn get(&self, idx: u32) -> Option<bool> {
+        self.evaluated.get(&idx).copied()
+    }
+    fn evaluated_count(&self) -> usize {
+        self.evaluated.len()
+    }
+    fn outcome(&self) -> Option<bool> {
+        self.outcome
+    }
+}
+
 /// Find a pair of rows that prove condition `target_idx` independently
 /// affects the decision outcome under masking MC/DC.
 ///
@@ -103,13 +139,22 @@ impl Interpretation {
 /// unique-cause pair. Row order does not affect correctness — the
 /// returned pair is the lowest-index pair under input ordering.
 ///
+pub fn find_independent_effect_pair(
+    rows: &[Row],
+    target_idx: u32,
+    total_conditions: usize,
+) -> Option<(u32, u32, &'static str)> {
+    find_independent_effect_pair_in(rows, target_idx, total_conditions)
+}
+
+/// [`find_independent_effect_pair`] over any [`RowView`]. Same contract.
 // SAFETY-REVIEW: arithmetic on `i + 1` index bumps is bounded by
 // `rows.len()` (Vec length, fits in usize) and `total_conditions`
 // (manifest entry count, fits in u32 by construction).
 // Wraparound is impossible for any non-degenerate input.
 #[allow(clippy::arithmetic_side_effects)]
-pub fn find_independent_effect_pair(
-    rows: &[Row],
+pub fn find_independent_effect_pair_in<R: RowView>(
+    rows: &[R],
     target_idx: u32,
     total_conditions: usize,
 ) -> Option<(u32, u32, &'static str)> {
@@ -119,18 +164,18 @@ pub fn find_independent_effect_pair(
             // SAFETY-REVIEW: `i` and `j` are bounded by `rows.len()`.
             #[allow(clippy::indexing_slicing)]
             let (r1, r2) = (&rows[i], &rows[j]);
-            let v1 = match r1.evaluated.get(&target_idx) {
-                Some(v) => *v,
+            let v1 = match r1.get(target_idx) {
+                Some(v) => v,
                 None => continue,
             };
-            let v2 = match r2.evaluated.get(&target_idx) {
-                Some(v) => *v,
+            let v2 = match r2.get(target_idx) {
+                Some(v) => v,
                 None => continue,
             };
             if v1 == v2 {
                 continue;
             }
-            let (o1, o2) = match (r1.outcome, r2.outcome) {
+            let (o1, o2) = match (r1.outcome(), r2.outcome()) {
                 (Some(a), Some(b)) => (a, b),
                 _ => continue,
             };
@@ -143,7 +188,7 @@ pub fn find_independent_effect_pair(
                 if idx == target_idx {
                     continue;
                 }
-                match (r1.evaluated.get(&idx), r2.evaluated.get(&idx)) {
+                match (r1.get(idx), r2.get(idx)) {
                     (Some(a), Some(b)) if a != b => {
                         compatible = false;
                         break;
@@ -155,8 +200,8 @@ pub fn find_independent_effect_pair(
                 continue;
             }
             // Determine interpretation.
-            let r1_full = r1.evaluated.len() == total_conditions;
-            let r2_full = r2.evaluated.len() == total_conditions;
+            let r1_full = r1.evaluated_count() == total_conditions;
+            let r2_full = r2.evaluated_count() == total_conditions;
             let interp = if r1_full && r2_full {
                 Interpretation::UNIQUE_CAUSE
             } else {
@@ -166,13 +211,13 @@ pub fn find_independent_effect_pair(
             // searching only if the current best is masking.
             match (&best, interp) {
                 (None, _) => {
-                    best = Some((r1.row_id, r2.row_id, interp));
+                    best = Some((r1.row_id(), r2.row_id(), interp));
                 }
                 (Some((_, _, current)), s)
                     if s == Interpretation::UNIQUE_CAUSE
                         && *current != Interpretation::UNIQUE_CAUSE =>
                 {
-                    best = Some((r1.row_id, r2.row_id, interp));
+                    best = Some((r1.row_id(), r2.row_id(), interp));
                 }
                 _ => {}
             }
