@@ -89,8 +89,9 @@ jobs:
             archive: zip
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
+          toolchain: 1.98.1
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -231,7 +232,9 @@ jobs:
           EPOCH=$(git log -1 --pretty=%ct "${GITHUB_SHA}")
           echo "SOURCE_DATE_EPOCH=${EPOCH}" >> "$GITHUB_ENV"
           echo "::notice::Reproducible-build clock SOURCE_DATE_EPOCH=${EPOCH} (tag commit)"
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.98.1
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - uses: ./.github/actions/compliance
         id: evidence
@@ -304,8 +307,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
+          toolchain: 1.98.1
           targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -363,8 +367,9 @@ jobs:
       # The verdict suite (TEST-VERDICT-SUITE) builds its fixtures for both
       # wasm targets; the PR gate never runs it, so its prerequisites
       # live only here.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
+          toolchain: 1.98.1
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown, wasm32-wasip2
       - name: Install rivet (skip if cached)
@@ -432,7 +437,9 @@ jobs:
       # the SBOM's own digest enters the sums. CycloneDX 1.5 JSON is
       # the format the org-wide release-artifact standardization
       # brief settles on.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.98.1
       - name: Install cargo-cyclonedx
         # Pinned: an unpinned `--locked` install silently jumped 0.5.4 → 0.5.9
         # between v0.40.0 and a v0.41.0 re-run and broke this step. Bump this
@@ -690,7 +697,9 @@ jobs:
         with:
           path: ~/.cargo/bin/rivet
           key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.98.1
       - name: Install rivet (skip if cached)
         run: |
           if [ -x "$HOME/.cargo/bin/rivet" ]; then
@@ -815,7 +824,9 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.98.1
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -946,9 +957,9 @@ jobs:
 
       # Pinned to commit SHAs: this job holds id-token: write and a crates.io
       # publish token, so a moved tag must not be able to swap the code.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
-          toolchain: stable
+          toolchain: 1.98.1
 
       - name: Authenticate to crates.io (OIDC trusted publishing)
         id: auth
