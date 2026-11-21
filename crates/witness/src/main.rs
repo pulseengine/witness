@@ -43,7 +43,8 @@ enum Command {
         /// v0.36 (REQ-059) — instrument a Component in place: rewrite its
         /// inner core and re-emit the *component* (shell + WIT exports
         /// kept callable), instead of unbundling to a bare core. Requires
-        /// a single-core Component input. Lets the instrumented artifact
+        /// a Component with one core module that has code (a code-less
+        /// `wit-component-fixup` beside it is allowed). Lets the instrumented artifact
         /// run through a runtime's component API (kiln / wasmtime).
         #[arg(long = "in-place")]
         in_place: bool,
