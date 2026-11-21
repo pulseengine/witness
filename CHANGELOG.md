@@ -56,9 +56,11 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   when choosing the module to instrument; two modules with code (a preview1
   adapter) still error. witness does not call `_initialize` when running the
   extracted core, so its wasi-libc guard branch shows as one extra branch.
-- **Release toolchain pinned to rustc 1.98.1** in every `release.yml` job, the
-  verdict-suite pin. Floating `stable` (rustc 1.100) failed the v0.46.1 release
-  run 44906303614 in TEST-CROSS-LANG-RUST.
+- **Release toolchain pinned to rustc 1.100.0** in every `release.yml` job (was
+  floating `stable`, which failed the v0.46.1 release run 44906303614 in
+  TEST-CROSS-LANG-RUST). The CI verdict suite stays on 1.98.1: on 1.99+ triangle
+  and state_guard lower to branch-free code and show 0 decisions (REQ-079), so the
+  release's own verdict evidence shows that shape.
 
 ### Changed
 
