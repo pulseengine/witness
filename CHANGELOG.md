@@ -7,6 +7,20 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.46.2] — 2026-11-21
+
+Re-cut of v0.46.1. The v0.46.1 tag exists but has no GitHub Release and no
+assets: its release run (44906303614) failed because `release.yml` installed
+floating `stable` (rustc 1.100.0), whose wasm32-wasip2 components carry a second
+core module that witness's auto-unbundle refuses. v0.46.2 has the same content
+as v0.46.1 below, with the release toolchain pinned.
+
+### Fixed
+
+- **Release toolchain pinned to rustc 1.97.0** in every `release.yml` job, matching
+  the PR CI on this line. witness itself does not yet instrument wasip2 components
+  built with rustc 1.100; that fix lands on main.
+
 ## [0.46.1] — 2026-11-20
 
 Security patch on the v0.46 line: v0.46.0 plus wasmtime 50.0.3, cut from
