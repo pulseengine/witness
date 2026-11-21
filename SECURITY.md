@@ -224,9 +224,9 @@ For every asset on a v0.10.x GitHub Release:
 cosign verify-blob \
   --certificate-identity 'https://github.com/pulseengine/witness/.github/workflows/release.yml@refs/tags/v0.10.0' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  --signature witness-v0.10.0-x86_64-apple-darwin.tar.gz.sig \
-  --certificate witness-v0.10.0-x86_64-apple-darwin.tar.gz.cert \
-  witness-v0.10.0-x86_64-apple-darwin.tar.gz
+  --signature witness-v0.10.0-aarch64-apple-darwin.tar.gz.sig \
+  --certificate witness-v0.10.0-aarch64-apple-darwin.tar.gz.cert \
+  witness-v0.10.0-aarch64-apple-darwin.tar.gz
 ```
 
 Replace `v0.10.0` with the tag you downloaded; replace the
