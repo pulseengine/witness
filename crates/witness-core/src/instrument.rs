@@ -626,21 +626,58 @@ fn extract_sole_core_module_with_range(
     }
 
     let count = cores.len();
-    let mut it = cores.into_iter();
-    match (it.next(), count) {
-        (Some(core), 1) => Ok(core),
-        (None, _) => Err(Error::ComponentUnbundle {
+    if count == 1 {
+        return cores.pop().ok_or_else(|| Error::ComponentUnbundle {
             path: input.to_path_buf(),
             detail: "no embedded core module found".to_string(),
-        }),
-        (Some(_), n) => Err(Error::ComponentUnbundle {
+        });
+    }
+    if count == 0 {
+        return Err(Error::ComponentUnbundle {
+            path: input.to_path_buf(),
+            detail: "no embedded core module found".to_string(),
+        });
+    }
+    // rustc 1.100+ (wit-component 0.257) adds a `wit-component-fixup`
+    // core module beside the main one: it defines no function of its own,
+    // only imports `_initialize` from the main module and runs it as its
+    // start function. A module with no function bodies has no branches to
+    // instrument, so it never competes with the main module. Unbundle
+    // when exactly one module defines code; a preview1→p2 adapter has
+    // code, so that case still errors.
+    let mut with_code: Vec<(Vec<u8>, core::ops::Range<usize>)> = Vec::new();
+    for core in cores {
+        if core_module_defines_code(&core.0) {
+            with_code.push(core);
+        }
+    }
+    let n_code = with_code.len();
+    match (with_code.pop(), n_code) {
+        (Some(core), 1) => Ok(core),
+        _ => Err(Error::ComponentUnbundle {
             path: input.to_path_buf(),
             detail: format!(
-                "{n} embedded core modules (a preview1→p2 adapter is likely present); \
+                "{count} embedded core modules, {n_code} with function bodies \
+                 (a preview1→p2 adapter is likely present); \
                  single-module auto-unbundle does not apply"
             ),
         }),
     }
+}
+
+/// True when the core module `bytes` defines at least one function body
+/// (its code section is non-empty). A parse error counts as "defines
+/// code", so a module witness cannot read is never silently skipped.
+fn core_module_defines_code(bytes: &[u8]) -> bool {
+    use wasmparser::{Parser, Payload};
+    for payload in Parser::new(0).parse_all(bytes) {
+        match payload {
+            Ok(Payload::CodeSectionStart { count, .. }) => return count > 0,
+            Ok(_) => {}
+            Err(_) => return true,
+        }
+    }
+    false
 }
 
 /// v0.36 (DEC-045) — unsigned LEB128 byte length of `v`. Bounded
@@ -3347,6 +3384,61 @@ mod tests {
                     detail.contains("2 embedded core modules"),
                     "detail should name the count: {detail}"
                 );
+            }
+            other => panic!("expected ComponentUnbundle, got {other:?}"),
+        }
+    }
+
+    /// rustc 1.100 — a component whose second core module is a
+    /// code-less `wit-component-fixup` (imports `_initialize`, runs it as
+    /// start) unbundles to the main module, not an error.
+    #[test]
+    fn codeless_fixup_module_is_skipped() {
+        let comp_wat = r#"(component
+            (core module $main
+                (func (export "_initialize"))
+                (func (export "run") (param i32) (result i32)
+                    local.get 0
+                    if (result i32) i32.const 1 else i32.const 0 end))
+            (core instance $m (instantiate $main))
+            (core module $fixup
+                (import "main" "_initialize" (func))
+                (start 0))
+            (core instance (instantiate $fixup (with "main" (instance $m)))))"#;
+        let comp = wat::parse_str(comp_wat).unwrap();
+        let (core, range) = extract_sole_core_module_with_range(&comp, std::path::Path::new("t"))
+            .expect("main + code-less fixup should unbundle");
+        assert_eq!(&comp[range], core.as_slice());
+        assert!(
+            core_module_defines_code(&core),
+            "picked the module with code"
+        );
+        let exports: Vec<String> = wasmparser::Parser::new(0)
+            .parse_all(&core)
+            .filter_map(|p| match p {
+                Ok(wasmparser::Payload::ExportSection(r)) => Some(
+                    r.into_iter()
+                        .map(|e| e.unwrap().name.to_string())
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert!(exports.contains(&"run".to_string()), "exports: {exports:?}");
+    }
+
+    /// Two core modules that both define code (main + adapter) still
+    /// error: the fixup skip must not pick one of two real modules.
+    #[test]
+    fn two_modules_with_code_still_error() {
+        let comp_wat = r#"(component
+            (core module (func (export "a")))
+            (core module (import "x" "y" (func)) (func (export "b"))))"#;
+        let comp = wat::parse_str(comp_wat).unwrap();
+        match extract_sole_core_module_with_range(&comp, std::path::Path::new("t")) {
+            Err(crate::error::Error::ComponentUnbundle { detail, .. }) => {
+                assert!(detail.contains("2 with function bodies"), "{detail}");
             }
             other => panic!("expected ComponentUnbundle, got {other:?}"),
         }

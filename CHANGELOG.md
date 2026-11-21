@@ -7,6 +7,31 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.46.2] — 2026-11-21
+
+Re-cut of v0.46.1. The v0.46.1 tag exists but has no GitHub Release and no
+assets: its release run (44906303614) failed because `release.yml` installed
+floating `stable` (rustc 1.100.0), whose wasm32-wasip2 components carry a second
+core module that witness's auto-unbundle refused. v0.46.2 has the content of
+v0.46.1 below, plus the fix for that, and builds the release on rustc 1.100.0.
+
+### Fixed
+
+- **wasip2 components built with rustc 1.100 instrument again** (backport of #402).
+  Core modules with no function bodies, such as the `wit-component-fixup` module
+  rustc 1.100 adds, are skipped when choosing the module to instrument; two modules
+  with code (a preview1 adapter) still error. witness does not call `_initialize`
+  when running the extracted core, so its wasi-libc guard can show as one extra
+  branch or decision.
+
+### Changed
+
+- **Release toolchain pinned to rustc 1.100.0** in every `release.yml` job (was
+  floating `stable`). Built with rustc 1.99+, the triangle and state_guard verdicts
+  lower to branch-free code, so this release's verdict evidence shows them with 0
+  decisions (1 each when built with rustc 1.97); parser_dispatch proves 7 conditions
+  instead of 9.
+
 ## [0.46.1] — 2026-11-20
 
 Security patch on the v0.46 line: v0.46.0 plus wasmtime 50.0.3, cut from
