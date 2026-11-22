@@ -10,8 +10,8 @@ Cargo.lock.bak
 docs/research/blog-mirror/
 
 # Verdict-suite build outputs — regenerated on every CI run by build-all.sh.
+# Each verdict's Cargo.lock IS committed, and build.sh builds with --locked.
 verdicts/*/target/
-verdicts/*/Cargo.lock
 verdicts/*/*.wasm
 
 # witness-component is a standalone workspace (see parent Cargo.toml).
