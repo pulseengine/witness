@@ -65,6 +65,27 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Std reactor components with a wit-component shim instrument and run**
+  (#405). An ordinary std reactor built by rules_wasm_component carries
+  `$main`, a `wit-component-shim-module` (trampolines through a table) and a
+  code-less fixup; `witness instrument` refused it on rustc 1.97 and 1.100
+  ("2 with function bodies"). The shim is now recognised by structure (no
+  imports, one exported table, every body `local.get 0..n`, `i32.const`,
+  `call_indirect` with its own type) and only beside a code-less module that
+  imports a table; a shim-shaped module with any other operator still counts
+  as real code. The error now names what it found instead of guessing a
+  preview1 adapter.
+- **`run --backend-wasmtime-component` on rustc 1.100 components** (#405).
+  The injected end-of-export trap was also put on `_initialize`, which the
+  rustc 1.100 fixup runs at instantiation, so every such component trapped
+  before any invoke. `_initialize` and `cabi_*` are no longer trapped, and
+  each export is wrapped (call, then trap) instead of having `unreachable`
+  appended, which was dead code after an explicit `return`. The backend now
+  takes `--invoke-with-args` with scalar and string arguments.
+  rules_wasm_component's rustc 1.100 hello component:
+  `hello:interfaces/greeting@0.1.0#hello=world` runs, 50 of 1308 branches
+  covered.
+
 - **wasip2 components built with rustc 1.100 instrument again.** rustc 1.100
   (wit-component 0.257) adds a code-less `wit-component-fixup` core module that
   runs `_initialize`; the single-core auto-unbundle refused the resulting

@@ -188,3 +188,17 @@ plant = "ci-controls/verdict-lock-drift"
 expect = "fail"
 stderr_or_stdout_matches = 'because --locked was passed'
 timeout = 600
+
+# #405: the wit-component shim is recognised by structure. The planted patch
+# makes `core_module_is_shim` accept any module with code, so a second real
+# code module would be skipped as a "shim" and the component unbundled to a
+# guessed module. The lookalike test (a shim-shaped module with one branch,
+# beside main and a fixup) must then fail. Runs in the "MSRV" job.
+[[control]]
+id = "shim-predicate-accepts-any-code"
+check = "MSRV"
+run = 'if [ -f shim-mutant.patch ]; then git apply shim-mutant.patch; fi && cargo test --locked -p witness-mcdc-core --lib -- instrument::tests::shim_lookalike_with_branch_is_real_code --exact'
+plant = "ci-controls/shim-predicate-accepts-any-code"
+expect = "fail"
+stderr_or_stdout_matches = 'shim_lookalike_with_branch_is_real_code \.\.\. FAILED'
+timeout = 1200

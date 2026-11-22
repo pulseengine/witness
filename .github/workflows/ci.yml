@@ -182,6 +182,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@f08ac54821369508305fcb9e0121ec6e30ae9ada # 1.97.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo check --all-targets --locked
+      # #405: a shim predicate that accepts any module with code must fail
+      # the lookalike test (plant control shim-predicate-accepts-any-code).
+      - name: Planted shim-predicate mutant must fail the lookalike test
+        uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
+        with:
+          manifest: ci-controls.toml
+          only: shim-predicate-accepts-any-code
 
   miri:
     name: Miri

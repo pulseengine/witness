@@ -1,0 +1,12 @@
+--- a/crates/witness-core/src/instrument.rs
++++ b/crates/witness-core/src/instrument.rs
+@@ -772,6 +772,9 @@
+ /// a shim", so an unrecognised module keeps counting as real code.
+ #[allow(clippy::wildcard_enum_match_arm)]
+ fn core_module_is_shim(bytes: &[u8]) -> bool {
++    if core_module_defines_code(bytes) {
++        return true;
++    }
+     use wasmparser::{ExternalKind, Operator, Parser, Payload};
+     let mut param_counts: Vec<usize> = Vec::new();
+     let mut func_types: Vec<u32> = Vec::new();
