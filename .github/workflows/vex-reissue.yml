@@ -43,7 +43,11 @@ jobs:
           # `git show <tag>:<path>` — needs full history + tags.
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+
+        with:
+
+          toolchain: 1.100.0
 
       - name: Install cargo-audit
         # Pinned: tools/generate_vex.py reads the `database.last-commit` and

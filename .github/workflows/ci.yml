@@ -53,7 +53,9 @@ jobs:
       RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.100.0
       # Job-local install root, cached by rev: smithy runners share ~/.cargo
       # across jobs and repos, so a rivet there can be any version.
       - name: Cache rivet binary
@@ -93,7 +95,9 @@ jobs:
       RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.100.0
       - name: Install jsonschema (venv)
         run: |
           python3 -m venv "$RUNNER_TEMP/schema-venv"
@@ -110,6 +114,8 @@ jobs:
   # v0.47.0 FEAT-050 (REQ-016): bounded Kani proof of the MC/DC pair-search
   # kernel against a declarative spec (crates/witness-mcdc-checker/src/proofs.rs;
   # bounds and trusted assumptions in crates/witness-mcdc-checker/PROOF-LEDGER.md).
+  # Required on main since 2026-11-22 under its full job name: renaming the job
+  # needs the branch-protection context changed in the same step.
   # Four planted kernel mutants must each make the proof fail.
   kernel-proof:
     name: Kernel proof (Kani) — pair search, rows<=8, conditions<=6
@@ -162,7 +168,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --all-targets --locked
 
@@ -189,8 +197,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly branch; dated toolchain pinned below
         with:
+          toolchain: nightly-2026-11-20
           components: miri
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Run miri on the lib
@@ -200,17 +209,19 @@ jobs:
         # to the witness pure-Rust modules that benefit from UB
         # detection (decisions, error, report, predicate hex/SHA path).
         run: |
-          cargo miri test --locked --lib report::
-          cargo miri test --locked --lib decisions::
-          cargo miri test --locked --lib predicate::tests::sha256_known_vector
-          cargo miri test --locked --lib predicate::tests::rfc3339_format_is_well_formed
+          cargo +nightly-2026-11-20 miri test --locked --lib report::
+          cargo +nightly-2026-11-20 miri test --locked --lib decisions::
+          cargo +nightly-2026-11-20 miri test --locked --lib predicate::tests::sha256_known_vector
+          cargo +nightly-2026-11-20 miri test --locked --lib predicate::tests::rfc3339_format_is_well_formed
 
   deny:
     name: Cargo Deny
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.100.0
       # Smithy workaround: EmbarkStudios/cargo-deny-action launches a
       # rootless container which fails under our hardened runner unit
       # (NoNewPrivileges=true blocks newuidmap). Run cargo-deny directly.
@@ -238,7 +249,9 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Pinned: an unpinned install floats the advisory parser and audit
       # semantics under us (same pin policy as release.yml).
@@ -275,7 +288,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --test properties --locked
         env:
@@ -288,7 +303,9 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: |
           cargo install cargo-mutants --locked
@@ -304,8 +321,9 @@ jobs:
     # (FreeRTOS-Plus-TCP ci.yml: branch-coverage-min 99.8, line-coverage-min 99.9).
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
+          toolchain: 1.100.0
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: |
@@ -357,8 +375,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
+          toolchain: 1.100.0
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build witness binary
@@ -409,8 +428,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
+          toolchain: 1.100.0
           targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build witness-component (wasm32-wasip2)
@@ -562,7 +582,7 @@ jobs:
   # after download; every report.json re-derived from its run.json), then seven
   # planted tamperings of the committed bundle tests/fixtures/recheck/suite,
   # each of which must fail recheck with its own failure class (ci-controls.toml,
-  # recheck-*). Not a required check; making it one is the owner's decision.
+  # recheck-*). Required on main since 2026-11-22 (owner decision, notice 233a14).
   recheck-controls:
     name: Recheck controls
     runs-on: ubuntu-24.04
@@ -575,7 +595,9 @@ jobs:
       WITNESS: ${{ github.workspace }}/target/release/witness
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build witness binary
         run: cargo build --release --locked -p witness-mcdc

@@ -60,9 +60,9 @@ jobs:
 
       # Pinned to commit SHAs: this job holds id-token: write and a crates.io
       # publish token, so a moved tag must not be able to swap the code.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
-          toolchain: stable
+          toolchain: 1.100.0
 
       - name: Authenticate to crates.io (OIDC trusted publishing)
         id: auth
