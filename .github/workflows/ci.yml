@@ -114,6 +114,8 @@ jobs:
   # v0.47.0 FEAT-050 (REQ-016): bounded Kani proof of the MC/DC pair-search
   # kernel against a declarative spec (crates/witness-mcdc-checker/src/proofs.rs;
   # bounds and trusted assumptions in crates/witness-mcdc-checker/PROOF-LEDGER.md).
+  # Required on main since 2026-11-22 under its full job name: renaming the job
+  # needs the branch-protection context changed in the same step.
   # Four planted kernel mutants must each make the proof fail.
   kernel-proof:
     name: Kernel proof (Kani) — pair search, rows<=8, conditions<=6
@@ -580,7 +582,7 @@ jobs:
   # after download; every report.json re-derived from its run.json), then seven
   # planted tamperings of the committed bundle tests/fixtures/recheck/suite,
   # each of which must fail recheck with its own failure class (ci-controls.toml,
-  # recheck-*). Not a required check; making it one is the owner's decision.
+  # recheck-*). Required on main since 2026-11-22 (owner decision, notice 233a14).
   recheck-controls:
     name: Recheck controls
     runs-on: ubuntu-24.04
