@@ -1,0 +1,13 @@
+--- a/crates/witness-mcdc-checker/src/lib.rs
++++ b/crates/witness-mcdc-checker/src/lib.rs
+@@ -206,8 +206,8 @@ pub fn find_independent_effect_pair_in<R: RowView>(
+                     best = Some((r1.row_id(), r2.row_id(), interp));
+                 }
+                 (Some((_, _, current)), s)
+-                    if s == Interpretation::UNIQUE_CAUSE
+-                        && *current != Interpretation::UNIQUE_CAUSE =>
++                    if s == Interpretation::MASKING
++                        && *current != Interpretation::MASKING =>
+                 {
+                     best = Some((r1.row_id(), r2.row_id(), interp));
+                 }

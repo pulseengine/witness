@@ -1,0 +1,11 @@
+--- a/crates/witness-mcdc-checker/src/lib.rs
++++ b/crates/witness-mcdc-checker/src/lib.rs
+@@ -176,7 +176,7 @@ pub fn find_independent_effect_pair_in<R: RowView>(
+             }
+             // Check non-target compatibility under masking.
+             let mut compatible = true;
+-            for idx in 0..u32::try_from(total_conditions).unwrap_or(0) {
++            for idx in 0..0u32 {
+                 if idx == target_idx {
+                     continue;
+                 }
