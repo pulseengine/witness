@@ -3,7 +3,12 @@
 What `src/proofs.rs` proves about `find_independent_effect_pair_in`, and what it
 does not. v0.47.0 FEAT-050, REQ-016. Checked by the "Kernel proof (Kani)" CI job.
 
-## Proved (Kani 0.67.0, bounded)
+## Proved (Kani 0.68.0, CBMC 6.11.0, bounded)
+
+Kani 0.68.0 is the first release whose bundled nightly (rustc 1.100.0-nightly)
+meets the workspace MSRV of 1.97; 0.67.0 bundles 1.93.0-nightly and cargo
+refuses the crate. Local run on 0.68.0: both harnesses SUCCESSFUL, 0 of 319
+checks failed each, r8_c6 in 385 s, r4_c5 in 10 s.
 
 For every truth table of at most **8 rows and 6 conditions** (harness
 `pair_kernel_r8_c6`; `pair_kernel_r4_c5` also runs), with each condition absent
