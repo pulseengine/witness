@@ -204,6 +204,58 @@ fn zero_val(ty: &wasmtime::component::types::Type) -> anyhow::Result<wasmtime::c
     })
 }
 
+/// #405 — parse `val[,val...]` against a component export's parameter
+/// types: bool, the integer and float types, char and string. No spec means
+/// no arguments. The count must match; other types are refused, never
+/// guessed. A string value cannot contain a comma.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn component_args(
+    name: &str,
+    spec: Option<&str>,
+    params: &[wasmtime::component::types::Type],
+) -> anyhow::Result<Vec<wasmtime::component::Val>> {
+    use wasmtime::component::Val;
+    use wasmtime::component::types::Type as T;
+    let raw: Vec<&str> = match spec {
+        None => Vec::new(),
+        Some(s) => s.split(',').collect(),
+    };
+    if raw.len() != params.len() {
+        anyhow::bail!(
+            "export `{name}` takes {} argument(s), got {} (`{name}=v1,v2,...`)",
+            params.len(),
+            raw.len()
+        );
+    }
+    raw.iter()
+        .zip(params)
+        .map(|(v, ty)| {
+            let bad = |e: &dyn std::fmt::Display| {
+                anyhow::anyhow!("export `{name}`: cannot parse `{v}` as {ty:?}: {e}")
+            };
+            Ok(match ty {
+                T::Bool => Val::Bool(v.parse().map_err(|e| bad(&e))?),
+                T::S8 => Val::S8(v.parse().map_err(|e| bad(&e))?),
+                T::U8 => Val::U8(v.parse().map_err(|e| bad(&e))?),
+                T::S16 => Val::S16(v.parse().map_err(|e| bad(&e))?),
+                T::U16 => Val::U16(v.parse().map_err(|e| bad(&e))?),
+                T::S32 => Val::S32(v.parse().map_err(|e| bad(&e))?),
+                T::U32 => Val::U32(v.parse().map_err(|e| bad(&e))?),
+                T::S64 => Val::S64(v.parse().map_err(|e| bad(&e))?),
+                T::U64 => Val::U64(v.parse().map_err(|e| bad(&e))?),
+                T::Float32 => Val::Float32(v.parse().map_err(|e| bad(&e))?),
+                T::Float64 => Val::Float64(v.parse().map_err(|e| bad(&e))?),
+                T::Char => Val::Char(v.parse().map_err(|e| bad(&e))?),
+                T::String => Val::String((*v).to_string()),
+                other => anyhow::bail!(
+                    "export `{name}`: parameter type {other:?} is not supported by \
+                     --backend-wasmtime-component (scalars and strings only)"
+                ),
+            })
+        })
+        .collect()
+}
+
 fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
     let manifest = Manifest::load(&options.manifest)?;
     let comp_bytes = std::fs::read(options.module).map_err(Error::Io)?;
@@ -340,23 +392,27 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
         .instantiate(&mut store, &component)
         .map_err(|e| Error::Runtime(e.into()))?;
 
-    if options.invoke.is_empty() {
+    if options.invoke.is_empty() && options.invoke_with_args.is_empty() {
         return Err(Error::Runtime(anyhow::anyhow!(
-            "--backend wasmtime-component needs at least one --invoke <export> \
-             (v1 is no-arg, counters-only)"
+            "--backend wasmtime-component needs at least one --invoke <export> or \
+             --invoke-with-args <export>=<args> (counters-only)"
         )));
     }
 
     let mut invoked: Vec<String> = Vec::new();
     let mut counter_values: HashMap<u32, u64> = HashMap::new();
-    for raw in &options.invoke {
-        // The component backend is no-arg (v1); drop any `=args` suffix the core
-        // backend uses. Then resolve the export: a bare top-level function, or —
+    for raw in options.invoke.iter().chain(&options.invoke_with_args) {
+        // `name` or `name=val[,val...]`: the values are parsed against the
+        // export's parameter types (#405; scalars and strings only). Then
+        // resolve the export: a bare top-level function, or —
         // the common WIT case — a function *inside an exported interface instance*
         // named `pkg:ns/iface@ver#func` (e.g. `gust:switch/fsm@0.1.0#frame-check`).
         // #194: the old flat `get_func` never descended into the instance, so no
         // WIT-interface export ever resolved and `--stub-imports` was unreachable.
-        let name = raw.split('=').next().unwrap_or(raw);
+        let (name, arg_spec) = match raw.split_once('=') {
+            Some((n, a)) => (n, Some(a)),
+            None => (raw.as_str(), None),
+        };
         let (func, n_res) = 'resolve: {
             if let Some(f) = instance.get_func(&mut store, name) {
                 break 'resolve Some((f, result_counts.get(name).copied().unwrap_or(0)));
@@ -383,8 +439,11 @@ fn run_via_wasmtime_component(options: &RunOptions<'_>) -> Result<()> {
                  inside an exported interface as `pkg:ns/iface@ver#func`"
             ))
         })?;
+        let params: Vec<wasmtime::component::types::Type> =
+            func.ty(&store).params().map(|(_, t)| t).collect();
+        let args = component_args(name, arg_spec, &params).map_err(Error::Runtime)?;
         let mut results = vec![wasmtime::component::Val::Bool(false); n_res];
-        let err = match func.call(&mut store, &[], &mut results) {
+        let err = match func.call(&mut store, &args, &mut results) {
             Ok(()) => {
                 return Err(Error::Runtime(anyhow::anyhow!(
                     "export `{name}` returned without trapping — the coredump backend \
@@ -1722,6 +1781,90 @@ mod tests {
             total >= 1,
             "the taken branch arm must register a hit via the coredump (got {total})"
         );
+    }
+
+    /// #405 — the rustc 1.100 reactor shape: a code-less fixup runs the main
+    /// module's `_initialize` as its start function at instantiation, and the
+    /// lifted export ends in an explicit `return`, takes an argument, and is
+    /// invoked with `--invoke-with-args`. Before #405 the injected trap fired
+    /// inside `_initialize` (instantiation failed), the `unreachable` appended
+    /// after `return` never ran, and the component backend passed no args.
+    #[test]
+    fn component_backend_runs_reactor_with_fixup_return_and_args() {
+        let comp_wat = r#"
+            (component
+              (core module $m
+                (global $init (mut i32) (i32.const 0))
+                (func (export "_initialize")
+                  global.get $init
+                  if unreachable end
+                  i32.const 1
+                  global.set $init)
+                (func (export "run") (param i32) (result i32)
+                  local.get 0
+                  if (result i32) i32.const 10 else i32.const 20 end
+                  return))
+              (core instance $i (instantiate $m))
+              (core module $fixup
+                (import "main" "_initialize" (func))
+                (start 0))
+              (core instance (instantiate $fixup (with "main" (instance $i))))
+              (func (export "run") (param "x" s32) (result s32)
+                (canon lift (core func $i "run")))
+            )
+        "#;
+        let comp = wat::parse_str(comp_wat).expect("valid component wat");
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("c.wasm");
+        let inst = dir.path().join("c-inst.wasm");
+        let out = dir.path().join("run.json");
+        std::fs::write(&src, &comp).unwrap();
+        witness_core::instrument::instrument_file_in_place(&src, &inst)
+            .expect("instrument --in-place");
+
+        let manifest = witness_core::instrument::Manifest::path_for(&inst);
+        let options = RunOptions {
+            module: &inst,
+            manifest,
+            output: &out,
+            invoke: vec![],
+            invoke_with_args: vec!["run=1".to_string()],
+            call_start: false,
+            invoke_all: false,
+            harness: None,
+            component_backend: true,
+            stub_imports: None,
+        };
+        run_module(&options).expect("wasmtime-component backend run");
+        let record = RunRecord::load(&out).unwrap();
+        let total: u64 = record.branches.iter().map(|b| b.hits).sum();
+        assert!(
+            total >= 1,
+            "the taken arm must register a hit (got {total})"
+        );
+    }
+
+    /// #405 — component argument parsing: types, count, refusal.
+    #[test]
+    fn component_args_parse_against_param_types() {
+        use wasmtime::component::Val;
+        use wasmtime::component::types::Type as T;
+        let v = component_args(
+            "f",
+            Some("7,-2,x y,true"),
+            &[T::U32, T::S64, T::String, T::Bool],
+        )
+        .unwrap();
+        assert!(
+            matches!(v.as_slice(), [Val::U32(7), Val::S64(-2), Val::String(s), Val::Bool(true)] if s == "x y")
+        );
+        assert!(component_args("f", None, &[]).unwrap().is_empty());
+        let e = component_args("f", Some("1"), &[T::U32, T::U32]).unwrap_err();
+        assert!(e.to_string().contains("takes 2 argument(s), got 1"), "{e}");
+        let e = component_args("f", Some("nope"), &[T::U32]).unwrap_err();
+        assert!(e.to_string().contains("cannot parse `nope`"), "{e}");
+        let e = component_args("f", None, &[T::U32]).unwrap_err();
+        assert!(e.to_string().contains("takes 1 argument(s), got 0"), "{e}");
     }
 
     // #194 — the real WIT shape: functions live inside an *exported interface

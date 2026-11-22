@@ -48,7 +48,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use walrus::ir::{
     BinaryOp, Binop, BrIf, Const, GlobalGet, GlobalSet, IfElse, Instr, InstrSeqId, InstrSeqType,
-    LoadKind, LocalGet, LocalSet, LocalTee, MemArg, Store, StoreKind, Unreachable, Value,
+    LoadKind, LocalGet, LocalSet, LocalTee, MemArg, Store, StoreKind, Value,
 };
 use walrus::{
     ConstExpr, ExportItem, FunctionBuilder, FunctionId, GlobalId, LocalId, MemoryId, Module,
@@ -676,28 +676,50 @@ fn extract_sole_core_module_with_range(
             detail: "no embedded core module found".to_string(),
         });
     }
-    // rustc 1.100+ (wit-component 0.257) adds a `wit-component-fixup`
-    // core module beside the main one: it defines no function of its own,
-    // only imports `_initialize` from the main module and runs it as its
-    // start function. A module with no function bodies has no branches to
-    // instrument, so it never competes with the main module. Unbundle
-    // when exactly one module defines code; a preview1→p2 adapter has
-    // code, so that case still errors.
-    let mut with_code: Vec<(Vec<u8>, core::ops::Range<usize>)> = Vec::new();
+    // wit-component can put up to two helper modules beside the main one.
+    // (1) A code-less fixup: it defines no function of its own. It fills
+    //     the shim's table, and since rustc 1.100 (wit-component 0.257)
+    //     it also imports `_initialize` from the main module and runs it as
+    //     its start function. No function bodies means no branches, so it
+    //     never competes with the main module.
+    // (2) A shim (`wit-component-shim-module`): trampolines that forward
+    //     each lowered import through a table the fixup fills. It has code,
+    //     but no branch of the user's program. It is recognised by
+    //     structure (`core_module_is_shim`), never by name, and only when a
+    //     code-less module that imports a table (the fixup) sits beside it.
+    // Unbundle when exactly one module with code remains. A preview1→p2
+    // adapter has real code, so that case still errors.
+    let mut real: Vec<(Vec<u8>, core::ops::Range<usize>)> = Vec::new();
+    let mut n_shim = 0usize;
+    let mut n_codeless = 0usize;
+    let mut codeless_imports_table = false;
     for core in cores {
-        if core_module_defines_code(&core.0) {
-            with_code.push(core);
+        if !core_module_defines_code(&core.0) {
+            n_codeless = n_codeless.saturating_add(1);
+            codeless_imports_table |= core_module_imports_table(&core.0);
+        } else if core_module_is_shim(&core.0) {
+            n_shim = n_shim.saturating_add(1);
+        } else {
+            real.push(core);
         }
     }
-    let n_code = with_code.len();
-    match (with_code.pop(), n_code) {
-        (Some(core), 1) => Ok(core),
+    let n_real = real.len();
+    let shims_ok = n_shim == 0 || (n_shim == 1 && codeless_imports_table);
+    match (real.pop(), n_real, shims_ok) {
+        (Some(core), 1, true) => Ok(core),
         _ => Err(Error::ComponentUnbundle {
             path: input.to_path_buf(),
             detail: format!(
-                "{count} embedded core modules, {n_code} with function bodies \
-                 (a preview1→p2 adapter is likely present); \
-                 single-module auto-unbundle does not apply"
+                "{count} embedded core modules: {n_real} with code, {n_shim} \
+                 wit-component shim{}, {n_codeless} without code{}; \
+                 single-module auto-unbundle needs exactly one module with code \
+                 (beside at most one shim whose table a code-less fixup imports)",
+                if n_shim == 1 { "" } else { "s" },
+                if n_shim > 0 && !codeless_imports_table {
+                    ", and no code-less module imports a table"
+                } else {
+                    ""
+                },
             ),
         }),
     }
@@ -716,6 +738,130 @@ fn core_module_defines_code(bytes: &[u8]) -> bool {
         }
     }
     false
+}
+
+/// True when the core module `bytes` imports a table (the fixup imports
+/// the shim's table to fill it). A parse error counts as false.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn core_module_imports_table(bytes: &[u8]) -> bool {
+    use wasmparser::{Parser, Payload, TypeRef};
+    for payload in Parser::new(0).parse_all(bytes) {
+        match payload {
+            Ok(Payload::ImportSection(reader)) => {
+                for import in reader.into_imports() {
+                    match import {
+                        Ok(i) if matches!(i.ty, TypeRef::Table(_)) => return true,
+                        Ok(_) => {}
+                        Err(_) => return false,
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+    false
+}
+
+/// True when the core module `bytes` has the structure of a wit-component
+/// shim: it imports nothing, defines exactly one table and exports it, and
+/// every function body is a trampoline: no locals, then `local.get 0..n`
+/// for each of its n parameters in order, one `i32.const`, and a
+/// `call_indirect` through table 0 with the function's own type. Such a
+/// body has no branch. Any parse error, or any other operator, means "not
+/// a shim", so an unrecognised module keeps counting as real code.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn core_module_is_shim(bytes: &[u8]) -> bool {
+    use wasmparser::{ExternalKind, Operator, Parser, Payload};
+    let mut param_counts: Vec<usize> = Vec::new();
+    let mut func_types: Vec<u32> = Vec::new();
+    let mut tables = 0usize;
+    let mut table0_exported = false;
+    let mut bodies = 0usize;
+    for payload in Parser::new(0).parse_all(bytes) {
+        let Ok(payload) = payload else { return false };
+        match payload {
+            Payload::ImportSection(_) => return false,
+            Payload::TypeSection(reader) => {
+                for ty in reader.into_iter_err_on_gc_types() {
+                    match ty {
+                        Ok(f) => param_counts.push(f.params().len()),
+                        Err(_) => return false,
+                    }
+                }
+            }
+            Payload::FunctionSection(reader) => {
+                for t in reader {
+                    match t {
+                        Ok(t) => func_types.push(t),
+                        Err(_) => return false,
+                    }
+                }
+            }
+            Payload::TableSection(reader) => {
+                tables =
+                    tables.saturating_add(usize::try_from(reader.count()).unwrap_or(usize::MAX));
+            }
+            Payload::ExportSection(reader) => {
+                for e in reader {
+                    match e {
+                        Ok(e) if e.kind == ExternalKind::Table && e.index == 0 => {
+                            table0_exported = true;
+                        }
+                        Ok(_) => {}
+                        Err(_) => return false,
+                    }
+                }
+            }
+            Payload::CodeSectionEntry(body) => {
+                let Some(&type_index) = func_types.get(bodies) else {
+                    return false;
+                };
+                let Some(&n_params) = usize::try_from(type_index)
+                    .ok()
+                    .and_then(|i| param_counts.get(i))
+                else {
+                    return false;
+                };
+                match body.get_locals_reader() {
+                    Ok(locals) if locals.get_count() == 0 => {}
+                    _ => return false,
+                }
+                let Ok(ops) = body.get_operators_reader() else {
+                    return false;
+                };
+                let mut next_local = 0usize;
+                let mut state = 0u8; // 0: local.gets, 1: after i32.const, 2: after call_indirect, 3: end
+                for op in ops {
+                    let Ok(op) = op else { return false };
+                    state = match (state, op) {
+                        (0, Operator::LocalGet { local_index })
+                            if usize::try_from(local_index).ok() == Some(next_local) =>
+                        {
+                            next_local = next_local.saturating_add(1);
+                            0
+                        }
+                        (0, Operator::I32Const { .. }) if next_local == n_params => 1,
+                        (
+                            1,
+                            Operator::CallIndirect {
+                                type_index: t,
+                                table_index: 0,
+                            },
+                        ) if t == type_index => 2,
+                        (2, Operator::End) => 3,
+                        _ => return false,
+                    };
+                }
+                if state != 3 {
+                    return false;
+                }
+                bodies = bodies.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    bodies > 0 && bodies == func_types.len() && tables == 1 && table0_exported
 }
 
 /// v0.36 (DEC-045) — unsigned LEB128 byte length of `v`. Bounded
@@ -798,26 +944,60 @@ fn splice_core_into_component(
 /// yields no trap, hence no readback; this injection is what closes that
 /// gap. Destroys normal returns, so it is only applied on the path that
 /// runs under the coredump backend, never for the embedded/kiln runs.
+///
+/// `_initialize` and the canonical-ABI helpers (`cabi_realloc`,
+/// `cabi_post_*`, any `cabi_*`) are skipped: they are not user exports.
+/// Since rustc 1.100 the code-less fixup runs `_initialize` as its start
+/// function during instantiation, and `cabi_realloc` runs while string
+/// arguments are lowered, so a trap in either fires before any `--invoke`.
+#[allow(clippy::wildcard_enum_match_arm)]
 fn append_export_traps(module: &mut Module) {
-    let targets: Vec<FunctionId> = module
+    // #405 — wrap rather than append. Appending `unreachable` to the entry
+    // block is dead code when the body leaves through an explicit `return`
+    // (rustc emits `return` at the end of wit-bindgen export shims), so the
+    // export returned normally and no coredump was taken. Each targeted
+    // export now points at a new function that forwards its parameters to
+    // the original, then traps: every return path reaches the trap.
+    let targets: Vec<(usize, FunctionId)> = module
         .exports
         .iter()
-        .filter_map(|e| {
-            if let ExportItem::Function(fid) = e.item {
-                (!e.name.starts_with("__witness_")).then_some(fid)
-            } else {
-                None
-            }
+        .enumerate()
+        .filter_map(|(i, e)| match e.item {
+            ExportItem::Function(fid) if !is_abi_plumbing_export(&e.name) => Some((i, fid)),
+            _ => None,
         })
         .collect();
-    for fid in targets {
-        if let walrus::FunctionKind::Local(lf) = &mut module.funcs.get_mut(fid).kind {
-            let entry = lf.entry_block();
-            lf.block_mut(entry)
-                .instrs
-                .push((Instr::Unreachable(Unreachable {}), Default::default()));
+    let mut wrappers: HashMap<usize, FunctionId> = HashMap::new();
+    for (i, fid) in targets {
+        let ty = module.funcs.get(fid).ty();
+        let (params, results) = {
+            let t = module.types.get(ty);
+            (t.params().to_vec(), t.results().to_vec())
+        };
+        let mut builder = FunctionBuilder::new(&mut module.types, &params, &results);
+        let args: Vec<LocalId> = params.iter().map(|p| module.locals.add(*p)).collect();
+        {
+            let mut body = builder.func_body();
+            for a in &args {
+                body.local_get(*a);
+            }
+            body.call(fid);
+            body.unreachable();
+        }
+        wrappers.insert(i, builder.finish(args, &mut module.funcs));
+    }
+    for (i, e) in module.exports.iter_mut().enumerate() {
+        if let Some(w) = wrappers.get(&i) {
+            e.item = ExportItem::Function(*w);
         }
     }
+}
+
+/// Exports that are runtime or ABI plumbing rather than user functions:
+/// witness's own `__witness_*` helpers, the WASI reactor `_initialize`, and
+/// the canonical-ABI `cabi_*` helpers.
+fn is_abi_plumbing_export(name: &str) -> bool {
+    name.starts_with("__witness_") || name == "_initialize" || name.starts_with("cabi_")
 }
 
 /// v0.38 (#110) — given an instrumented **component**, rewrite its inner
@@ -3846,10 +4026,148 @@ mod tests {
         let comp = wat::parse_str(comp_wat).unwrap();
         match extract_sole_core_module_with_range(&comp, std::path::Path::new("t")) {
             Err(crate::error::Error::ComponentUnbundle { detail, .. }) => {
-                assert!(detail.contains("2 with function bodies"), "{detail}");
+                assert!(detail.contains("2 with code"), "{detail}");
             }
             other => panic!("expected ComponentUnbundle, got {other:?}"),
         }
+    }
+
+    /// The shim wit-component emits beside `$main` when lowered imports need
+    /// the main module's memory: trampolines through an exported table.
+    const SHIM_WAT: &str = r#"(core module $shim
+                (type (func (param i32 i32)))
+                (type (func (param i32)))
+                (table 2 2 funcref)
+                (export "0" (func 0))
+                (export "1" (func 1))
+                (export "$imports" (table 0))
+                (func (type 0) (param i32 i32)
+                    local.get 0 local.get 1 i32.const 0 call_indirect (type 0))
+                (func (type 1) (param i32)
+                    local.get 0 i32.const 1 call_indirect (type 1)))"#;
+
+    fn shim_component(shim: &str, with_fixup: bool) -> Vec<u8> {
+        let fixup = if with_fixup {
+            r#"(core module $fixup
+                (type (func (param i32 i32)))
+                (type (func (param i32)))
+                (import "actual" "0" (func (type 0)))
+                (import "actual" "1" (func (type 1)))
+                (import "shim" "$imports" (table 2 2 funcref))
+                (elem (i32.const 0) func 0 1))"#
+        } else {
+            ""
+        };
+        let wat = format!(
+            r#"(component
+            (core module $main
+                (import "env" "f" (func (param i32 i32)))
+                (func (export "run") (param i32) (result i32)
+                    local.get 0
+                    if (result i32) i32.const 1 else i32.const 0 end))
+            {shim}
+            {fixup})"#
+        );
+        wat::parse_str(&wat).unwrap()
+    }
+
+    /// #405 — main + wit-component shim + code-less fixup (the shape of an
+    /// ordinary std reactor built by rules_wasm_component, on rustc 1.97
+    /// and 1.100) unbundles to main.
+    #[test]
+    fn main_shim_and_fixup_unbundle_to_main() {
+        let comp = shim_component(SHIM_WAT, true);
+        let (core, range) = extract_sole_core_module_with_range(&comp, std::path::Path::new("t"))
+            .expect("main + shim + fixup should unbundle");
+        assert_eq!(&comp[range], core.as_slice());
+        assert!(!core_module_is_shim(&core), "picked a shim");
+        assert!(core_module_defines_code(&core));
+    }
+
+    /// #405 — a shim with no code-less module importing its table is not
+    /// the wit-component pattern: refuse rather than guess.
+    #[test]
+    fn shim_without_fixup_errors() {
+        let comp = shim_component(SHIM_WAT, false);
+        match extract_sole_core_module_with_range(&comp, std::path::Path::new("t")) {
+            Err(crate::error::Error::ComponentUnbundle { detail, .. }) => {
+                assert!(detail.contains("1 wit-component shim"), "{detail}");
+                assert!(
+                    detail.contains("no code-less module imports a table"),
+                    "{detail}"
+                );
+            }
+            other => panic!("expected ComponentUnbundle, got {other:?}"),
+        }
+    }
+
+    /// #405 control — a second module that looks like a shim but carries
+    /// one branch is real code: two real modules still error.
+    #[test]
+    fn shim_lookalike_with_branch_is_real_code() {
+        let lookalike = r#"(core module $notshim
+                (type (func (param i32)))
+                (table 1 1 funcref)
+                (export "$imports" (table 0))
+                (func (type 0) (param i32)
+                    local.get 0
+                    if nop end
+                    local.get 0 i32.const 0 call_indirect (type 0)))"#;
+        let comp = shim_component(lookalike, true);
+        match extract_sole_core_module_with_range(&comp, std::path::Path::new("t")) {
+            Err(crate::error::Error::ComponentUnbundle { detail, .. }) => {
+                assert!(
+                    detail.contains("2 with code, 0 wit-component shims"),
+                    "{detail}"
+                );
+            }
+            other => panic!("expected ComponentUnbundle, got {other:?}"),
+        }
+    }
+
+    /// #405 — the shim predicate, both directions.
+    #[test]
+    fn shim_predicate_is_structural() {
+        let module = |m: &str| {
+            let comp = wat::parse_str(format!("(component {m})")).unwrap();
+            let mut out = None;
+            for p in wasmparser::Parser::new(0).parse_all(&comp) {
+                if let Ok(wasmparser::Payload::ModuleSection {
+                    unchecked_range, ..
+                }) = p
+                {
+                    out = Some(
+                        comp[usize::try_from(unchecked_range.start).unwrap()
+                            ..usize::try_from(unchecked_range.end).unwrap()]
+                            .to_vec(),
+                    );
+                }
+            }
+            out.unwrap()
+        };
+        assert!(core_module_is_shim(&module(SHIM_WAT)));
+        // Name is irrelevant: the same body under another name is a shim.
+        assert!(core_module_is_shim(&module(
+            &SHIM_WAT.replace("$shim", "$anything")
+        )));
+        // An import disqualifies.
+        assert!(!core_module_is_shim(&module(&SHIM_WAT.replace(
+            "(table 2 2 funcref)",
+            "(import \"x\" \"y\" (func)) (table 2 2 funcref)"
+        ))));
+        // Table not exported disqualifies.
+        assert!(!core_module_is_shim(&module(
+            &SHIM_WAT.replace("(export \"$imports\" (table 0))", "")
+        )));
+        // Parameters out of order disqualify.
+        assert!(!core_module_is_shim(&module(
+            &SHIM_WAT.replace("local.get 0 local.get 1", "local.get 1 local.get 0")
+        )));
+        // A declared local disqualifies.
+        assert!(!core_module_is_shim(&module(&SHIM_WAT.replace(
+            "(func (type 1) (param i32)",
+            "(func (type 1) (param i32) (local i32)"
+        ))));
     }
 
     /// v0.10.0 (item 2) — `instrument_file` records the

@@ -43,9 +43,10 @@ enum Command {
         /// v0.36 (REQ-059) — instrument a Component in place: rewrite its
         /// inner core and re-emit the *component* (shell + WIT exports
         /// kept callable), instead of unbundling to a bare core. Requires
-        /// a Component with one core module that has code (a code-less
-        /// `wit-component-fixup` beside it is allowed). Lets the instrumented artifact
-        /// run through a runtime's component API (kiln / wasmtime).
+        /// a Component with one core module that has code; a code-less
+        /// fixup and a wit-component shim (trampolines only, recognised by
+        /// structure) beside it are allowed (#405). Lets the instrumented
+        /// artifact run through a runtime's component API (kiln / wasmtime).
         #[arg(long = "in-place")]
         in_place: bool,
     },
@@ -105,7 +106,10 @@ enum Command {
         /// wasmtime's component model, reading counters back via a
         /// coredump (the trap-snapshot backend). Requires an
         /// `--in-place` instrumented component; counters-only (branch
-        /// coverage). The second runtime for `cross-check` vs kiln.
+        /// coverage). `--invoke-with-args 'pkg:ns/iface@ver#func=v1,v2'`
+        /// passes scalar and string arguments, parsed against the export's
+        /// parameter types (#405). The second runtime for `cross-check` vs
+        /// kiln.
         #[arg(long = "backend-wasmtime-component")]
         backend_wasmtime_component: bool,
         /// v0.41 (#180) — synthesise implementations for unsatisfied component
