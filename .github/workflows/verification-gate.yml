@@ -58,8 +58,9 @@ jobs:
       # use `@stable` for tests-only or run their own component
       # install; the verification gate executes both fmt and clippy
       # in test-cases, so the components have to be present.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
         with:
+          toolchain: 1.100.0
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

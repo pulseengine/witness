@@ -64,6 +64,14 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- CI: every `dtolnay/rust-toolchain` step that floated on `stable` now pins
+  `toolchain: 1.100.0` (16 steps in ci.yml, verification-gate.yml,
+  vex-reissue.yml, witness-delta.yml and publish-to-crates-io.yml), matching
+  release.yml. Floating stable already resolved to 1.100.0, so nothing changes
+  today; the next stable can no longer change results without a PR. The
+  Format, Clippy and MSRV jobs stay on 1.97.0, the verdict suite on 1.98.1, and
+  Miri on nightly.
+
 - **MSRV is now 1.97** (wasmtime 0.137 / cranelift floor): `rust-version`, clippy `msrv`, and the CI Clippy/MSRV/test toolchain pin.
 
 ## [0.46.0] — 2026-11-05
