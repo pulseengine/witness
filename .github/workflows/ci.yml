@@ -267,20 +267,20 @@ jobs:
           "$audit" audit --version
           "$audit" audit --version | grep -qE '(^| )0\.22\.2$' \
             || { echo "::error::cargo-audit is $("$audit" audit --version), want 0.22.2"; exit 1; }
-      # witness-viz and witness-component are standalone workspaces with
-      # their own lockfiles that ship in releases; a bare `cargo audit`
-      # only sees the root one. No ignore list exists (no audit.toml;
-      # deny.toml `ignore = []`), so each run is a plain audit and any
-      # vulnerability in any lockfile fails the job.
+      # Every committed Cargo.lock (`git ls-files`): the root, the standalone
+      # witness-viz and witness-component workspaces, and the 13 verdict
+      # crates. A bare `cargo audit` only sees the root one. No ignore list
+      # exists (no audit.toml; deny.toml `ignore = []`), so any vulnerability
+      # in any lockfile fails the job.
       - name: Audit all lockfiles
-        run: |
-          status=0
-          for lock in Cargo.lock crates/witness-viz/Cargo.lock crates/witness-component/Cargo.lock; do
-            echo "::group::cargo audit --file $lock"
-            "$RUNNER_TEMP/cargo-audit/bin/cargo-audit" audit --file "$lock" || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: tools/audit-lockfiles.sh "$RUNNER_TEMP/cargo-audit/bin/cargo-audit"
+      - name: Planted lockfile controls must each fail
+        uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
+        env:
+          CARGO_AUDIT: ${{ runner.temp }}/cargo-audit/bin/cargo-audit
+        with:
+          manifest: ci-controls.toml
+          only: audit-covers-verdict-lockfile
 
   proptest-extended:
     name: Proptest (extended cases)
@@ -328,7 +328,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: |
           cargo install cargo-llvm-cov --locked
-          cargo llvm-cov --lcov --output-path lcov.info --all-targets
+          cargo llvm-cov --locked --lcov --output-path lcov.info --all-targets
 
       # Upload before the gate, and with `always()`, so a failing threshold
       # still publishes the data you need to see WHICH lines regressed.
@@ -529,13 +529,13 @@ jobs:
           python3 tools/check_truth_tables.py --evidence build/verdict-evidence
       # #358: the check must go red when the value-tail probe's condition
       # index is off by one (plant control truth-table-tail-index-shift).
-      - name: Planted off-by-one tail probe must fail the truth-table check
+      - name: Planted off-by-one tail probe and verdict lock drift must each fail
         uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
         env:
           VERDICT_EVIDENCE: ${{ github.workspace }}/build/verdict-evidence
         with:
           manifest: ci-controls.toml
-          only: truth-table-tail-index-shift
+          only: truth-table-tail-index-shift verdict-lock-drift
       - name: Regression gate — verdicts that should produce decisions
         run: |
           set -euo pipefail

@@ -9,6 +9,15 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- Every committed `Cargo.lock` is audited. The 13 verdict crates now commit
+  their `Cargo.lock` (generated with cargo 1.98.1, the verdict-suite
+  toolchain) and `build.sh` builds with `--locked`, as do the witness-delta
+  builds, the compliance action and `cargo llvm-cov`. The Security Audit job
+  runs `tools/audit-lockfiles.sh`, which audits `git ls-files` lockfiles (16
+  today) instead of a list of three. Two planted controls: a verdict lockfile
+  carrying smallvec 1.6.0 (RUSTSEC-2021-0003) must fail the audit, and a
+  verdict manifest that drifts from its lock must fail `build.sh`.
+
 - `url` 2.5.8 -> 2.5.9 and `form_urlencoded` 1.2.2 -> 1.2.3 (Cargo.lock,
   crates/witness-viz/Cargo.lock and crates/witness-component/Cargo.lock only),
   for RUSTSEC-2026-0592: a stack overflow in `Url::origin()` on nested `blob:`

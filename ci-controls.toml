@@ -161,3 +161,30 @@ plant = "ci-controls/kani-mutant-completeness"
 expect = "fail"
 stderr_or_stdout_matches = 'a pair exists but none was returned'
 timeout = 1200
+
+# Lockfile sweep: every committed Cargo.lock is audited, the verdict crates'
+# included. The planted verdicts/leap_year/Cargo.lock carries smallvec 1.6.0
+# (RUSTSEC-2021-0003); tools/audit-lockfiles.sh must find that lockfile and
+# fail on it. Runs in the "Security Audit" job, which sets CARGO_AUDIT.
+[[control]]
+id = "audit-covers-verdict-lockfile"
+check = "Security Audit"
+run = 'tools/audit-lockfiles.sh "${CARGO_AUDIT:?set CARGO_AUDIT to a cargo-audit binary}"'
+plant = "ci-controls/audit-covers-verdict-lockfile"
+expect = "fail"
+stderr_or_stdout_matches = 'RUSTSEC-2021-0003'
+timeout = 600
+
+# Lockfile sweep: verdict build.sh builds with --locked, so a manifest that
+# drifts from its committed Cargo.lock fails the build instead of silently
+# re-resolving. The planted verdicts/leap_year/Cargo.toml adds a dependency
+# the lock does not have. Runs in the "Verdict suite" job, with the target
+# run-suite.sh builds verdicts for (wasm32-unknown-unknown).
+[[control]]
+id = "verdict-lock-drift"
+check = "Verdict suite — end-to-end MC/DC on the canonical 7"
+run = 'TARGET=wasm32-unknown-unknown verdicts/leap_year/build.sh'
+plant = "ci-controls/verdict-lock-drift"
+expect = "fail"
+stderr_or_stdout_matches = 'because --locked was passed'
+timeout = 600

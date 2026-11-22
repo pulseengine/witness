@@ -41,7 +41,7 @@ runs:
     - name: Build witness
       shell: bash
       run: |
-        cargo build --release
+        cargo build --release --locked
         echo "$PWD/target/release" >> "$GITHUB_PATH"
 
     - name: Determine report label

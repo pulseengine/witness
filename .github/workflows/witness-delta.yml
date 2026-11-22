@@ -46,7 +46,7 @@ jobs:
 
       - name: Build witness (head)
         working-directory: head
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Locate manifests if present
         id: fixtures
@@ -117,11 +117,11 @@ jobs:
 
       - name: Build witness (head)
         working-directory: head
-        run: cargo build --release -p witness-mcdc
+        run: cargo build --release --locked -p witness-mcdc
 
       - name: Build witness (base)
         working-directory: base
-        run: cargo build --release -p witness-mcdc 2>/dev/null || echo "base build failed; treating as no-base"
+        run: cargo build --release --locked -p witness-mcdc 2>/dev/null || echo "base build failed; treating as no-base"
 
       - name: Run verdict suite (head)
         run: |
@@ -144,7 +144,7 @@ jobs:
       # `viz-pr-comment` instead of a bespoke script.
       - name: Build witness-viz (head)
         working-directory: head/crates/witness-viz
-        run: cargo build --release --bin witness-viz
+        run: cargo build --release --locked --bin witness-viz
 
       - name: Compute MC/DC delta (witness viz-pr-comment)
         run: |
