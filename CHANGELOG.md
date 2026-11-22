@@ -9,6 +9,13 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- `url` 2.5.8 -> 2.5.9 and `form_urlencoded` 1.2.2 -> 1.2.3 (Cargo.lock,
+  crates/witness-viz/Cargo.lock and crates/witness-component/Cargo.lock only),
+  for RUSTSEC-2026-0592: a stack overflow in `Url::origin()` on nested `blob:`
+  URLs. witness does not call `url` directly; it arrives through `sourcemap`
+  (witness-core) and `wasmtime-wasi`. We did not trace whether either calls
+  `origin()`; the bump clears the advisory.
+
 - `wasmtime` and `wasmtime-wasi` 50.0.2 -> 50.0.3 (Cargo.lock only), for
   RUSTSEC-2026-0587: a WASI filesystem sandbox escape on Windows through a
   drive-prefixed path component. witness's harness builds its WASI context with
