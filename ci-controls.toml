@@ -178,11 +178,12 @@ timeout = 600
 # Lockfile sweep: verdict build.sh builds with --locked, so a manifest that
 # drifts from its committed Cargo.lock fails the build instead of silently
 # re-resolving. The planted verdicts/leap_year/Cargo.toml adds a dependency
-# the lock does not have. Runs in the "Verdict suite" job (wasm32-wasip2).
+# the lock does not have. Runs in the "Verdict suite" job, with the target
+# run-suite.sh builds verdicts for (wasm32-unknown-unknown).
 [[control]]
 id = "verdict-lock-drift"
 check = "Verdict suite — end-to-end MC/DC on the canonical 7"
-run = 'verdicts/leap_year/build.sh'
+run = 'TARGET=wasm32-unknown-unknown verdicts/leap_year/build.sh'
 plant = "ci-controls/verdict-lock-drift"
 expect = "fail"
 stderr_or_stdout_matches = 'because --locked was passed'
