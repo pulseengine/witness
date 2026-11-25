@@ -101,6 +101,13 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Dependabot resumes on the fleet template: one entry per ecosystem with
+  `directories:`, monthly on the 1st at 02:00 UTC, at most 2 open PRs, a
+  7-day cooldown, the wasmtime lockstep group first, then a minor-patch
+  group; majors stay ungrouped. Every `dtolnay/rust-toolchain` step now
+  pins master `df2a88e9`, where `toolchain:` is required, and names its
+  toolchain (1.100.0; 1.97.0 for fmt, clippy and MSRV; 1.98.1 for the
+  verdict suite; nightly-2026-11-20 for Miri). The toolchains are unchanged.
 - CI: every `dtolnay/rust-toolchain` step that floated on `stable` now pins
   `toolchain: 1.100.0` (16 steps in ci.yml, verification-gate.yml,
   vex-reissue.yml, witness-delta.yml and publish-to-crates-io.yml), matching
