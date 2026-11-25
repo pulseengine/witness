@@ -86,7 +86,7 @@ jobs:
             archive: zip
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master; toolchain pinned below
         with:
           toolchain: 1.100.0
           targets: ${{ matrix.target }}
@@ -229,7 +229,7 @@ jobs:
           EPOCH=$(git log -1 --pretty=%ct "${GITHUB_SHA}")
           echo "SOURCE_DATE_EPOCH=${EPOCH}" >> "$GITHUB_ENV"
           echo "::notice::Reproducible-build clock SOURCE_DATE_EPOCH=${EPOCH} (tag commit)"
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master; toolchain pinned below
         with:
           toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -304,7 +304,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master; toolchain pinned below
         with:
           toolchain: 1.100.0
           targets: wasm32-wasip2
@@ -364,7 +364,7 @@ jobs:
       # The verdict suite (TEST-VERDICT-SUITE) builds its fixtures for both
       # wasm targets; the PR gate never runs it, so its prerequisites
       # live only here.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master; toolchain pinned below
         with:
           toolchain: 1.100.0
           components: rustfmt, clippy
@@ -434,7 +434,7 @@ jobs:
       # the SBOM's own digest enters the sums. CycloneDX 1.5 JSON is
       # the format the org-wide release-artifact standardization
       # brief settles on.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master; toolchain pinned below
         with:
           toolchain: 1.100.0
       - name: Install cargo-cyclonedx
@@ -694,7 +694,7 @@ jobs:
         with:
           path: ~/.cargo/bin/rivet
           key: rivet-${{ runner.os }}-${{ env.RIVET_REV }}
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master; toolchain pinned below
         with:
           toolchain: 1.100.0
       - name: Install rivet (skip if cached)
@@ -821,7 +821,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master; toolchain pinned below
         with:
           toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -954,7 +954,7 @@ jobs:
 
       # Pinned to commit SHAs: this job holds id-token: write and a crates.io
       # publish token, so a moved tag must not be able to swap the code.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch; toolchain pinned below
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master; toolchain pinned below
         with:
           toolchain: 1.100.0
 
