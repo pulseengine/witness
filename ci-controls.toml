@@ -202,3 +202,18 @@ plant = "ci-controls/shim-predicate-accepts-any-code"
 expect = "fail"
 stderr_or_stdout_matches = 'shim_lookalike_with_branch_is_real_code \.\.\. FAILED'
 timeout = 1200
+
+# The witness-component is run, not only built: under the wasmtime CLI its
+# report-json and report-text exports must reproduce the committed recheck
+# fixture reports byte for byte. The planted leap_year report.txt carries one
+# edited line, so the component's output no longer matches and the check
+# must fail. Runs in the "Build witness-component" job, with
+# WITNESS_COMPONENT set to the built component's absolute path.
+[[control]]
+id = "witness-component-report-drift"
+check = "Build witness-component (Component Model wasm) — v0.7.0+"
+run = 'tools/run-witness-component.sh "$WITNESS_COMPONENT" tests/fixtures/recheck/suite/leap_year tests/fixtures/recheck/suite/state_machine'
+plant = "ci-controls/witness-component-report-drift"
+expect = "fail"
+stderr_or_stdout_matches = 'FAIL tests/fixtures/recheck/suite/leap_year report-text: output differs'
+timeout = 120
