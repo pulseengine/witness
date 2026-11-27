@@ -1,3 +1,4 @@
+#![cfg(feature = "runtime")]
 //! #352 step 1 — witness must never over-claim.
 //!
 //! For a value-producing short-circuit decision (`fn f(..) -> bool { a || b || c }`)

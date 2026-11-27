@@ -41,6 +41,16 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
   an error (`tools/run-witness-component.sh`). Planted control
   `witness-component-report-drift` (one edited line in a fixture report)
   must fail the check.
+- `witness` builds without wasmtime: the new default `runtime` feature
+  carries the embedded wasmtime (`witness run`, `witness all`). With
+  `--no-default-features`, instrument, report, recheck, merge and the other
+  data-only commands build for wasm32-wasip2 (5.6 MB), and `witness run`
+  refuses with an error that names the missing feature. The Recheck controls
+  job runs this component under the wasmtime CLI (`tools/witness-wasm.sh`)
+  on the verdict-suite evidence and the committed fixture, and the 7 planted
+  recheck tamperings must each fail it, as they do for the native binary.
+  Each documented recheck exit code (0, 1, 2) is asserted through the
+  component, and the component must import wasi `exit-with-code`.
 - **`witness recheck <evidence-dir>`** (FEAT-045, v0.47 bet 1, part A). Re-checks an
   evidence bundle without the build: (a) every file against `INVENTORY.sha256`
   (`sha256sum` format, written by `witness recheck --write-inventory`), re-hashed from
