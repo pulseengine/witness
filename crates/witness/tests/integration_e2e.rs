@@ -1,3 +1,4 @@
+#![cfg(feature = "runtime")]
 //! End-to-end integration tests for witness against a real Rust→Wasm
 //! fixture.
 //!

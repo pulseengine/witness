@@ -668,3 +668,44 @@ jobs:
         with:
           manifest: ci-controls.toml
           only: recheck-deleted-run-json recheck-flipped-module-byte recheck-gap-edited-to-proved recheck-inventory-absent-file recheck-resigned-fresh-key recheck-predicate-differs-from-signed recheck-run-edited-report-rederived
+      # Run what we build: the same recheck as a wasm32-wasip2 component.
+      # witness without the `runtime` feature has no wasmtime inside, so it
+      # builds for wasip2; tools/witness-wasm.sh runs it under the wasmtime
+      # CLI. It must pass on the verdict-suite evidence and the committed
+      # fixture, and the 7 planted tamperings must each still fail it.
+      - name: Add the wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2 --toolchain 1.100.0
+      - name: Build witness for wasm32-wasip2 (no runtime)
+        run: cargo build --release --locked -p witness-mcdc --no-default-features --target wasm32-wasip2
+      - name: Install wasmtime CLI 50.0.3
+        env:
+          WASMTIME_VERSION: v50.0.3
+          WASMTIME_SHA256: c59133a9334e96eaca5e26f0d4c35199bfe43ab34049aa254ef4b47af1361476
+        run: |
+          set -euo pipefail
+          name="wasmtime-${WASMTIME_VERSION}-x86_64-linux"
+          curl -fsSL -o "$RUNNER_TEMP/$name.tar.xz" \
+            "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/$name.tar.xz"
+          echo "${WASMTIME_SHA256}  $RUNNER_TEMP/$name.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$name.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+      - name: Recheck as a wasip2 component (verdict evidence and fixture; must pass)
+        env:
+          WITNESS_WASM: ${{ github.workspace }}/target/wasm32-wasip2/release/witness.wasm
+        run: |
+          set -euo pipefail
+          tools/witness-wasm.sh recheck build/verdict-evidence
+          tools/witness-wasm.sh recheck --strict tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub
+          # Without the runtime, `witness run` must refuse, not pretend.
+          if out=$(tools/witness-wasm.sh run tests/fixtures/recheck/suite/leap_year/instrumented.wasm 2>&1); then
+            echo "witness run succeeded without the runtime feature: $out"; exit 1
+          fi
+          grep -q 'built without the .runtime. feature' <<<"$out"
+      - name: Planted tamperings must each fail the wasip2 recheck
+        uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
+        env:
+          WITNESS: ${{ github.workspace }}/tools/witness-wasm.sh
+          WITNESS_WASM: ${{ github.workspace }}/target/wasm32-wasip2/release/witness.wasm
+        with:
+          manifest: ci-controls.toml
+          only: recheck-deleted-run-json recheck-flipped-module-byte recheck-gap-edited-to-proved recheck-inventory-absent-file recheck-resigned-fresh-key recheck-predicate-differs-from-signed recheck-run-edited-report-rederived
