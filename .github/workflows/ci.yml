@@ -455,6 +455,37 @@ jobs:
           cargo install wasm-tools --quiet || true
           wasm-tools validate crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm
           wasm-tools component wit crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm | head -25
+      # Run what we build: the component's reporter exports, called under
+      # the wasmtime CLI, must reproduce the committed recheck fixture
+      # reports byte for byte (tools/run-witness-component.sh). wasmtime
+      # 50.0.3 matches the embedded wasmtime; the tarball is checked against
+      # the SHA-256 GitHub records for the release asset.
+      - name: Install wasmtime CLI 50.0.3
+        env:
+          WASMTIME_VERSION: v50.0.3
+          WASMTIME_SHA256: c59133a9334e96eaca5e26f0d4c35199bfe43ab34049aa254ef4b47af1361476
+        run: |
+          set -euo pipefail
+          name="wasmtime-${WASMTIME_VERSION}-x86_64-linux"
+          curl -fsSL -o "$RUNNER_TEMP/$name.tar.xz" \
+            "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/$name.tar.xz"
+          echo "${WASMTIME_SHA256}  $RUNNER_TEMP/$name.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$name.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+      - name: Run witness-component on the recheck fixtures
+        run: |
+          set -euo pipefail
+          wasmtime --version
+          tools/run-witness-component.sh \
+            "$GITHUB_WORKSPACE/crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm" \
+            tests/fixtures/recheck/suite/leap_year tests/fixtures/recheck/suite/state_machine
+      - name: Planted component control must fail
+        uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
+        env:
+          WITNESS_COMPONENT: ${{ github.workspace }}/crates/witness-component/target/wasm32-wasip2/release/witness_component.wasm
+        with:
+          manifest: ci-controls.toml
+          only: witness-component-report-drift
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: witness-component-wasm

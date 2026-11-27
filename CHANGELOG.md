@@ -34,6 +34,13 @@ Versioning: [SemVer 2.0](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- CI runs the witness-component, not only builds it. Under the wasmtime
+  CLI (50.0.3, checksum-pinned) its `report-json` and `report-text` exports
+  must reproduce the committed recheck fixture reports for leap_year and
+  state_machine byte for byte, and a malformed run record must come back as
+  an error (`tools/run-witness-component.sh`). Planted control
+  `witness-component-report-drift` (one edited line in a fixture report)
+  must fail the check.
 - **`witness recheck <evidence-dir>`** (FEAT-045, v0.47 bet 1, part A). Re-checks an
   evidence bundle without the build: (a) every file against `INVENTORY.sha256`
   (`sha256sum` format, written by `witness recheck --write-inventory`), re-hashed from

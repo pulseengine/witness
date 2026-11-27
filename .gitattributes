@@ -3,3 +3,4 @@
 # Windows) would change those bytes, so git must never touch them.
 tests/fixtures/recheck/** -text
 ci-controls/recheck-*/** -text
+ci-controls/witness-component-report-drift/** -text
