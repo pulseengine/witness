@@ -701,6 +701,31 @@ jobs:
             echo "witness run succeeded without the runtime feature: $out"; exit 1
           fi
           grep -q 'built without the .runtime. feature' <<<"$out"
+      # Fleet exit-code rule for components: every documented recheck exit
+      # code (0 pass, 1 a check failed, 2 could not run) is asserted through
+      # the shipped component, and the component must import wasi
+      # exit-with-code (Rust >= 1.100, std::process::exit on wasi).
+      - name: Recheck exit codes through the wasip2 component
+        env:
+          WITNESS_WASM: ${{ github.workspace }}/target/wasm32-wasip2/release/witness.wasm
+        run: |
+          set -uo pipefail
+          grep -aq exit-with-code "$WITNESS_WASM" || { echo "witness.wasm does not import exit-with-code"; exit 1; }
+          expect() {
+            local want=$1; shift
+            "$@" >/dev/null 2>&1; local got=$?
+            if [ "$got" -ne "$want" ]; then echo "FAIL exit $got, want $want: $*"; return 1; fi
+            echo "ok   exit $want: $*"
+          }
+          mkdir -p build
+          cp -R tests/fixtures/recheck/suite build/recheck-tampered
+          rm build/recheck-tampered/state_machine/run.json
+          fail=0
+          expect 0 tools/witness-wasm.sh recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/expected-signer.pub || fail=1
+          expect 1 tools/witness-wasm.sh recheck build/recheck-tampered || fail=1
+          expect 2 tools/witness-wasm.sh recheck build/no-such-dir || fail=1
+          expect 2 tools/witness-wasm.sh recheck tests/fixtures/recheck/suite --expect-key tests/fixtures/recheck/suite/leap_year/run.json || fail=1
+          exit "$fail"
       - name: Planted tamperings must each fail the wasip2 recheck
         uses: pulseengine/plant@1cda8c9afe5c00a7d21d82ecb3729a813234c892 # pre-1.0, adds action.yml (plant#3)
         env:
