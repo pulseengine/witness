@@ -411,7 +411,7 @@ witness's contribution is making the layer explicit and machine-readable.
 ### Rivet's `coverage.rs` already supports this
 
 The rivet `coverage.rs` consumer (in
-`/Users/r/git/pulseengine/rivet/rivet-core/src/coverage.rs`) computes
+`rivet/rivet-core/src/coverage.rs`) computes
 *traceability-rule* coverage today — "what fraction of REQ artefacts
 have a satisfies link to a FEAT". Adding a coverage-evidence rollup
 ("what fraction of decisions linked to REQ-X are covered above
@@ -849,17 +849,17 @@ reserved for v0.7 to avoid collisions with v0.6's verdict-suite work).
 
 Primary internal:
 
-- `/Users/r/git/pulseengine/witness/DESIGN.md`
-- `/Users/r/git/pulseengine/witness/AGENTS.md`
-- `/Users/r/git/pulseengine/witness/CHANGELOG.md`
-- `/Users/r/git/pulseengine/witness/artifacts/{requirements,features,design-decisions}.yaml`
-- `/Users/r/git/pulseengine/witness/crates/witness-core/src/{instrument,decisions,run_record,rivet_evidence,lcov}.rs`
-- `/Users/r/git/pulseengine/witness/docs/research/mcdc-bytecode-research.md`
-- `/Users/r/git/pulseengine/witness/docs/research/v05-component-witness.md`
-- `/Users/r/git/pulseengine/witness/docs/research/v05-loom-meld-upstream.md`
-- `/Users/r/git/pulseengine/witness/docs/research/rivet-evidence-consumer.md`
-- `/Users/r/git/pulseengine/witness/docs/research/overdo-alignment.md`
-- `/Users/r/git/pulseengine/rivet/rivet-core/src/coverage.rs`
+- `witness/DESIGN.md`
+- `witness/AGENTS.md`
+- `witness/CHANGELOG.md`
+- `witness/artifacts/{requirements,features,design-decisions}.yaml`
+- `witness/crates/witness-core/src/{instrument,decisions,run_record,rivet_evidence,lcov}.rs`
+- `witness/docs/research/mcdc-bytecode-research.md`
+- `witness/docs/research/v05-component-witness.md`
+- `witness/docs/research/v05-loom-meld-upstream.md`
+- `witness/docs/research/rivet-evidence-consumer.md`
+- `witness/docs/research/overdo-alignment.md`
+- `rivet/rivet-core/src/coverage.rs`
 
 External (web pass):
 

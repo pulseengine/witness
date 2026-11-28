@@ -56,7 +56,7 @@ updates during a run.
 
 ### 2.2 What rivet has already de-risked
 
-`/Users/r/git/pulseengine/rivet/rivet-cli/src/serve/` is a 5,908-line
+`rivet/rivet-cli/src/serve/` is a 5,908-line
 production Axum + HTMX server. It uses:
 
 - `axum 0.8`, `tower-http 0.6` (CORS + fs).
@@ -332,7 +332,7 @@ groupings (v0.6+), and per-counter values.
 The rivet config we copy:
 
 ```ts
-// /Users/r/git/pulseengine/rivet/tests/playwright/playwright.config.ts
+// rivet/tests/playwright/playwright.config.ts
 export default defineConfig({
   testDir: ".",
   testMatch: "*.spec.ts",
@@ -771,5 +771,5 @@ land in `artifacts/v08-*.yaml` files; all start `status: draft`.
 - [`SaritNike/wasm-component-model-runner`](https://github.com/SaritNike/wasm-component-model-runner)
 - [Building a fast website with the MASH stack in Rust (Schwartz)](https://emschwartz.me/building-a-fast-website-with-the-mash-stack-in-rust/)
 - [Trying out HTMX with Rust (Finnie)](https://www.joshfinnie.com/blog/trying-out-htmx-with-rust/)
-- Rivet repository at `/Users/r/git/pulseengine/rivet/` — `rivet-cli/src/serve/` (Axum + HTMX + inline assets pattern), `tests/playwright/playwright.config.ts` (webServer pattern), `tests/playwright/helpers.ts` (waitForHtmx), `tests/playwright/coverage-view.spec.ts` (spec template)
+- Rivet repository at `rivet/` — `rivet-cli/src/serve/` (Axum + HTMX + inline assets pattern), `tests/playwright/playwright.config.ts` (webServer pattern), `tests/playwright/helpers.ts` (waitForHtmx), `tests/playwright/coverage-view.spec.ts` (spec template)
 - Witness internals: `DESIGN.md`, `docs/research/v05-component-witness.md` (Component-Model boundary already proven), `docs/research/v05-lcov-format.md`, `docs/research/mcdc-bytecode-research.md`
