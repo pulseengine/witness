@@ -26,7 +26,7 @@ module except `run.rs`.
 
 ## 2. Compile-target audit
 
-Source paths are all under `/Users/r/git/pulseengine/witness/src/`.
+Source paths are all under `witness/src/`.
 
 | Module | wasip2? | Obstacle / refactor |
 |---|---|---|
@@ -107,7 +107,7 @@ RFC-3339 stamp).
 
 ## 4. Candidate WIT interface
 
-Drop this at `/Users/r/git/pulseengine/witness/wit/witness.wit`. It
+Drop this at `witness/wit/witness.wit`. It
 mirrors the existing `pub` surface (`instrument_module`,
 `reconstruct_decisions`, `Report::from_record`, `build_statement`,
 `build_evidence`, `diff`).
@@ -313,7 +313,7 @@ world witness-core {
 ### Toolchain
 
 Verified locally: `cargo-component`, `wac`, `wit-bindgen` all in
-`/Users/r/.cargo/bin/`. `wasmtime` not verified (sandbox blocked the
+`~/.cargo/bin/`. `wasmtime` not verified (sandbox blocked the
 version query). Fresh-box install:
 
 ```bash

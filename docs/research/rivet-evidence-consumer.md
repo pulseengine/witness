@@ -1,6 +1,6 @@
 # Rivet evidence-consumer brief (for witness v0.3)
 
-Investigation of how `rivet` at `/Users/r/git/pulseengine/rivet` consumes
+Investigation of how `rivet` (pulseengine/rivet) consumes
 external evidence today, conducted 2026-04-25 to inform witness v0.3
 design. Findings verified against the rivet source after the
 sub-agent's initial pass.

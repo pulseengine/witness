@@ -240,8 +240,8 @@ shipping vs. scaffolded vs. not-yet, not an aspirational feature list.
 
 Both adjacent drafts referenced in AGENTS.md **do not currently exist**:
 
-- `/Users/r/git/pulseengine/pulseengine.eu/content/blog/2026-04-24-variant-pruning-rust-mcdc.md` — **not found.**
-- `/Users/r/git/pulseengine/pulseengine.eu/content/blog/2026-04-25-witness-wasm-mcdc.md` — **not found.**
+- `pulseengine.eu/content/blog/2026-04-24-variant-pruning-rust-mcdc.md` — **not found.**
+- `pulseengine.eu/content/blog/2026-04-25-witness-wasm-mcdc.md` — **not found.**
 
 The `content/blog/` directory contains posts dated through 2026-04-23
 (`2026-04-23-spec-driven-development-is-half-the-loop.md`) and the overdo

@@ -303,7 +303,7 @@ Every post linked. Slug at the path under `https://pulseengine.eu/blog/`.
 Index URL: `http://127.0.0.1:1024/blog/` (Hugo dev server) — confirmed
 returning 200 in this run; only the index probe was permitted, so the
 fifteen posts above were sourced from
-`/Users/r/git/pulseengine/pulseengine.eu/content/blog/*.md` per the
+`pulseengine.eu/content/blog/*.md` per the
 brief's fallback clause. The two posts marked with footnotes
 (`mythos-slop-hunt`, `three-patterns-colliding`) are listed at the
 index but not present on disk and could not be fetched; the principles

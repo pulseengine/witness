@@ -1,6 +1,6 @@
 # Sigil predicate-format brief (for witness v0.3)
 
-Investigation of how `sigil` at `/Users/r/git/pulseengine/sigil` handles
+Investigation of how `sigil` (pulseengine/sigil) handles
 in-toto attestation predicates, conducted 2026-04-25, to inform witness
 v0.3's coverage-predicate emission.
 

@@ -433,13 +433,13 @@ they may be sufficient (with the §5 residuals).
   - [Astrée — Wikipedia](https://en.wikipedia.org/wiki/Astr%C3%A9e_(static_analysis))
   - [Experimental Assessment of Astrée on Safety-Critical Avionics Software](https://www.astree.ens.fr/papers/astree_airbus_safecomp2007.pdf)
 - Local repo cross-references:
-  - `/Users/r/git/pulseengine/witness/AGENTS.md` — project framing,
+  - `witness/AGENTS.md` — project framing,
     invariants.
-  - `/Users/r/git/pulseengine/witness/DESIGN.md` — roadmap, v0.4 / v1.0
+  - `witness/DESIGN.md` — roadmap, v0.4 / v1.0
     goals, the Check-It commitment.
-  - `/Users/r/git/pulseengine/witness/docs/research/overdo-alignment.md`
+  - `witness/docs/research/overdo-alignment.md`
     — the parent argument the substitution stance is bracketing.
-  - `/Users/r/git/pulseengine/witness/docs/research/mcdc-bytecode-research.md`
+  - `witness/docs/research/mcdc-bytecode-research.md`
     — JaCoCo precedent, post-preprocessor C precedent, rustc-mcdc
     6-condition cap.
 - TODO sources to chase before external publication:
